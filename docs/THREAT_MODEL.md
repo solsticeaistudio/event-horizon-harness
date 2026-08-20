@@ -27,7 +27,7 @@ Assume the workload can inspect all guest inputs and local files, execute arbitr
 - Recorder mutation requests are client-authenticated and its storage/private key are logically outside the cell. The same-host demo does not enforce this against same-user filesystem or process-memory access; production requires separate administration/storage.
 - In hardware mode, the verifier has an authentic pre-registered AK public key and qualified name, and the configured PCR policy represents the intended image.
 - In Firecracker mode, host kernel/KVM/Firecracker/watchdog integrity is part of the TCB. No VM-isolation claim is made by the process fallback.
-- The certificate consumer independently verifies the certificate signature, recorder chain/receipts, configuration digests, and claim-mode label.
+- The certificate consumer independently provisions a trusted certificate-signer public key or key ID and verifies the certificate signature, recorder chain/receipts, configuration digests, and claim-mode label. A key embedded in the certificate is not a trust anchor.
 
 ## Fail-closed transitions
 

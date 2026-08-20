@@ -10,7 +10,7 @@ The broker consumes only the compiler output. Effective authority is the interse
 
 ## Evidence and evaluation
 
-Canaries detect authority-layer probing without producing effects. Signed denial certificates provide portable evidence for a specific denied attempt. Behavioral rules detect boundary-probing sequences. Decay makes long-lived authority monotonic decreasing until a new authorization and attestation flow. Property, concurrency, chaos, and positive-control tests attack the state transitions. A reviewed literature-feed adapter imports metadata only; it never executes downloaded material. The hardware-failsafe simulator models an independently verified heartbeat and safe-state transition.
+Canaries detect authority-layer probing without producing effects. Signed denial certificates provide portable evidence for a specific denied attempt. Behavioral rules persistently detect boundary-probing sequences within a session. Redemption-time decay is monotonic within each fresh one-use capability identity; the live decay engine does not accumulate counters across a session or lineage. Property, concurrency, chaos, and positive-control tests attack the state transitions. A reviewed literature-feed adapter imports metadata only; it never executes downloaded material. The hardware-failsafe simulator models an independently verified heartbeat and safe-state transition.
 
 ## Boundaries
 

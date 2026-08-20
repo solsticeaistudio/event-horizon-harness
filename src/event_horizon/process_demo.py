@@ -81,8 +81,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         certificate_path = workdir / 'containment-certificate-v0.4.json'
         certificate_path.write_text(json.dumps(certificate, indent=2, sort_keys=True), encoding='utf-8')
+        trusted_key_path = workdir / 'certificate-signer-public.pem'
+        trusted_key_path.write_text(
+            harness.service_info['certificate']['public_key_pem'],
+            encoding='ascii',
+        )
         print('\n[8] Signed evidence-complete Containment Certificate')
         print(f'    certificate: {certificate_path}')
+        print(f'    trusted signer key: {trusted_key_path}')
         print(f'    key_id: {certificate["key_id"]}')
         print(f'    event_count: {certificate["certificate"]["event_count"]}')
         print('\nRoot in the hostile process exposed no reusable authority outside its cell.')

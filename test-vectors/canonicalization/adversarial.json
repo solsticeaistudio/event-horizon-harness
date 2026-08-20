@@ -1,0 +1,140 @@
+{
+  "schema": "event-horizon.canonicalization-vectors.v1",
+  "limits": {
+    "maximum_depth": 8,
+    "maximum_items": 256,
+    "maximum_string_bytes": 16384,
+    "maximum_safe_integer": 9007199254740991
+  },
+  "vectors": [
+    {
+      "name": "valid-nfc-string",
+      "construction": {"kind": "literal", "value": "café"},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "reject-nfd-string",
+      "construction": {"kind": "literal", "value": "café"},
+      "expected": "REJECT"
+    },
+    {
+      "name": "string-exact-byte-limit",
+      "construction": {"kind": "repeat-string", "text": "é", "count": 8192},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "string-one-codepoint-beyond-byte-limit",
+      "construction": {"kind": "repeat-string", "text": "é", "count": 8193},
+      "expected": "REJECT"
+    },
+    {
+      "name": "array-exact-item-limit",
+      "construction": {"kind": "array", "count": 256},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "array-beyond-item-limit",
+      "construction": {"kind": "array", "count": 257},
+      "expected": "REJECT"
+    },
+    {
+      "name": "object-exact-item-limit",
+      "construction": {"kind": "object", "count": 256},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "object-beyond-item-limit",
+      "construction": {"kind": "object", "count": 257},
+      "expected": "REJECT"
+    },
+    {
+      "name": "structure-at-maximum-depth",
+      "construction": {"kind": "nested-array", "levels": 8},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "structure-beyond-maximum-depth",
+      "construction": {"kind": "nested-array", "levels": 9},
+      "expected": "REJECT"
+    },
+    {
+      "name": "integer-zero",
+      "construction": {"kind": "literal", "value": 0},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "floating-zero",
+      "construction": {"kind": "float", "value": "0.0"},
+      "expected": "ACCEPT",
+      "compare_encoding": false
+    },
+    {
+      "name": "reject-negative-zero",
+      "construction": {"kind": "float", "value": "-0.0"},
+      "expected": "REJECT"
+    },
+    {
+      "name": "valid-finite-float",
+      "construction": {"kind": "float", "value": "1.5"},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "reject-positive-infinity",
+      "construction": {"kind": "non-finite", "value": "Infinity"},
+      "expected": "REJECT"
+    },
+    {
+      "name": "reject-negative-infinity",
+      "construction": {"kind": "non-finite", "value": "-Infinity"},
+      "expected": "REJECT"
+    },
+    {
+      "name": "reject-nan",
+      "construction": {"kind": "non-finite", "value": "NaN"},
+      "expected": "REJECT"
+    },
+    {
+      "name": "reject-duplicate-key-canonical-json",
+      "construction": {"kind": "strict-canonical-json", "value": "{\"a\":1,\"a\":2}"},
+      "expected": "REJECT"
+    },
+    {
+      "name": "unusual-unicode",
+      "construction": {"kind": "literal", "value": "🜁 שלום café \u2028"},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "unicode-codepoint-key-order",
+      "construction": {"kind": "literal", "value": {"": 1, "𐀀": 2}},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "numeric-looking-key-order",
+      "construction": {"kind": "literal", "value": {"2": "two", "10": "ten"}},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "nested-unicode-combination",
+      "construction": {
+        "kind": "literal",
+        "value": {"outer": [{"é": [0, 1.5, "Ω"]}, [true, null, "🜁"]]}
+      },
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "maximum-safe-integer",
+      "construction": {"kind": "integer", "value": "9007199254740991"},
+      "expected": "ACCEPT"
+    },
+    {
+      "name": "integer-beyond-safe-range",
+      "construction": {"kind": "integer", "value": "9007199254740992"},
+      "expected": "REJECT"
+    },
+    {
+      "name": "reject-cycle",
+      "construction": {"kind": "cycle"},
+      "expected": "REJECT"
+    }
+  ]
+}

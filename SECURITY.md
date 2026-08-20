@@ -25,6 +25,10 @@ A valid report demonstrates or plausibly identifies a failure of a documented se
 
 Availability failures without authority gain, behavior already listed in `KNOWN_LIMITATIONS.md`, unsupported deployment changes, and generic dependency scanner output without an exploitable path may be closed as non-security issues.
 
+## Certificate trust anchors
+
+Containment-certificate authenticity requires a signer public key or key ID supplied by trusted configuration outside the certificate. The normal library and CLI verification paths fail closed when that trust anchor is absent. Before this repair, the public verifier accepted the certificate's embedded key and therefore established only attacker-selectable self-consistency; that behavior must not be used as evidence of trusted issuance.
+
 ## Authorized testing only
 
 Test only environments, accounts, data, and synthetic ranges you own or are explicitly authorized to use. Real-world targets and public infrastructure are out of scope. Destructive actions, denial of service, credential abuse, persistence on systems outside the synthetic fixture, unauthorized access, social engineering, and attempts to hide activity are prohibited.

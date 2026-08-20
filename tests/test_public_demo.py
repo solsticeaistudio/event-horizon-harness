@@ -21,9 +21,11 @@ class PublicDemoTests(unittest.TestCase):
             self.assertTrue(all(summary["results"].values()))
             self.assertFalse(summary["simulator_is_hardware_attestation"])
             self.assertTrue((Path(artifacts) / "latest-containment-certificate.json").is_file())
+            self.assertTrue((Path(artifacts) / "latest-certificate-signer-public.pem").is_file())
             for _key, label, expected in SUMMARY_LABELS:
                 self.assertIn(f"{label:<34} {expected}", output.getvalue())
             self.assertIn("not hardware-backed attestation", output.getvalue())
+            self.assertIn("--trusted-key .demo/latest-certificate-signer-public.pem", output.getvalue())
 
 
 if __name__ == "__main__":

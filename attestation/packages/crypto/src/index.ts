@@ -10,27 +10,90 @@ import {
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
-function normalize(value: unknown): JsonValue {
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new TypeError('canonical JSON rejects non-finite numbers');
+export const MAX_SAFE_INTEGER = 9_007_199_254_740_991;
+export const MAX_CANONICAL_DEPTH = 8;
+export const MAX_CANONICAL_ITEMS = 256;
+export const MAX_CANONICAL_STRING_BYTES = 16_384;
+
+function compareUnicodeCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left, (character) => character.codePointAt(0)!);
+  const rightPoints = Array.from(right, (character) => character.codePointAt(0)!);
+  const sharedLength = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const leftPoint = leftPoints[index]!;
+    const rightPoint = rightPoints[index]!;
+    if (leftPoint !== rightPoint) return leftPoint - rightPoint;
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
+function normalize(value: unknown, depth = 0, active: Set<object> = new Set()): JsonValue {
+  if (depth > MAX_CANONICAL_DEPTH) throw new TypeError('canonical value exceeds nesting limit');
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value.normalize('NFC') !== value) throw new TypeError('strings must already be Unicode NFC');
+    if (Buffer.byteLength(value, 'utf8') > MAX_CANONICAL_STRING_BYTES) {
+      throw new TypeError('string exceeds canonical byte limit');
+    }
     return value;
   }
-  if (Array.isArray(value)) return value.map(normalize);
-  if (typeof value === 'object') {
-    const output: Record<string, JsonValue> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      const item = (value as Record<string, unknown>)[key];
-      if (item === undefined) throw new TypeError(`canonical JSON rejects undefined at ${key}`);
-      output[key] = normalize(item);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError('canonical JSON rejects non-finite numbers');
+    if (Object.is(value, -0)) throw new TypeError('negative zero is not permitted');
+    if (Number.isInteger(value) && Math.abs(value) > MAX_SAFE_INTEGER) {
+      throw new TypeError('integer exceeds the interoperable exact range');
     }
-    return output;
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > MAX_CANONICAL_ITEMS) throw new TypeError('array exceeds canonical item limit');
+    if (active.has(value)) throw new TypeError('cyclic values are not permitted');
+    active.add(value);
+    try {
+      return value.map((item) => normalize(item, depth + 1, active));
+    } finally {
+      active.delete(value);
+    }
+  }
+  if (typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    const prototype = Object.getPrototypeOf(object);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError('unsupported canonical JSON object');
+    }
+    if (active.has(object)) throw new TypeError('cyclic values are not permitted');
+    const keys = Object.keys(object);
+    if (keys.length > MAX_CANONICAL_ITEMS) throw new TypeError('object exceeds canonical item limit');
+    active.add(object);
+    const output: Record<string, JsonValue> = {};
+    try {
+      for (const key of keys.sort(compareUnicodeCodePoints)) {
+        normalize(key, depth + 1, active);
+        const item = object[key];
+        if (item === undefined) throw new TypeError(`canonical JSON rejects undefined at ${key}`);
+        output[key] = normalize(item, depth + 1, active);
+      }
+      return output;
+    } finally {
+      active.delete(object);
+    }
   }
   throw new TypeError(`unsupported canonical JSON value: ${typeof value}`);
 }
 
+function serialize(value: JsonValue): string {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(serialize).join(',')}]`;
+  return `{${Object.keys(value)
+    .sort(compareUnicodeCodePoints)
+    .map((key) => `${JSON.stringify(key)}:${serialize(value[key]!)}`)
+    .join(',')}}`;
+}
+
 export function canonicalize(value: unknown): string {
-  return JSON.stringify(normalize(value));
+  return serialize(normalize(value));
 }
 
 export function canonicalBytes(value: unknown): Buffer {

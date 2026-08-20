@@ -63,6 +63,12 @@ def run_demo(workdir: Path, artifacts_dir: Path) -> dict[str, Any]:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     harness = ProcessSeparatedHarness(workdir, ttl_seconds=5.0).start()
     try:
+        trusted_certificate_signer = harness.service_info["certificate"]
+        trusted_key_path = artifacts_dir / "latest-certificate-signer-public.pem"
+        trusted_key_path.write_text(
+            trusted_certificate_signer["public_key_pem"],
+            encoding="ascii",
+        )
         root_probe = harness.root_probe()
 
         exact_request, exact_capability, exact_attestation = harness.request_capability(
@@ -133,8 +139,8 @@ def run_demo(workdir: Path, artifacts_dir: Path) -> dict[str, Any]:
         reloaded = json.loads(certificate_path.read_text(encoding="utf-8"))
         certificate_verified = ContainmentCertificateBuilder.verify(
             reloaded,
-            certificate["public_key_pem"],
-            certificate["key_id"],
+            public_key_pem=trusted_certificate_signer["public_key_pem"],
+            expected_key_id=trusted_certificate_signer["key_id"],
         )
 
         results = {
@@ -154,6 +160,7 @@ def run_demo(workdir: Path, artifacts_dir: Path) -> dict[str, Any]:
             "results": results,
             "simulator_is_hardware_attestation": False,
             "certificate": str(certificate_path),
+            "trusted_certificate_key": str(trusted_key_path),
             "certificate_key_id": certificate["key_id"],
             "event_chain_tip": recorder_status["detail"],
             "root_probe": root_probe,
@@ -190,7 +197,12 @@ def main(argv: list[str] | None = None) -> int:
         value = success_value if summary["results"][key] else "FAILED"
         print(f"{label:<34} {value}")
     print(f"\nCertificate: {summary['certificate']}")
-    print("Verify with: python scripts/verify_certificate.py .demo/latest-containment-certificate.json")
+    print(f"Trusted signer key: {summary['trusted_certificate_key']}")
+    print(
+        "Verify with: python scripts/verify_certificate.py "
+        ".demo/latest-containment-certificate.json "
+        "--trusted-key .demo/latest-certificate-signer-public.pem"
+    )
     return 0 if all(summary["results"].values()) else 1
 
 

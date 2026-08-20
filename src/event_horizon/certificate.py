@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
 
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
@@ -17,6 +19,11 @@ from .recorder import ExternalRecorder
 
 
 class ContainmentCertificateBuilder:
+    ENVELOPE_FIELDS = frozenset({
+        "certificate", "signature", "algorithm", "key_id", "public_key_pem",
+    })
+    _SIGNATURE = re.compile(r"^[A-Za-z0-9_-]{86}$")
+
     def __init__(
         self,
         recorder: ExternalRecorder,
@@ -141,13 +148,58 @@ class ContainmentCertificateBuilder:
     @staticmethod
     def verify(
         certificate: dict[str, Any],
+        *,
         public_key_pem: str | None = None,
         expected_key_id: str | None = None,
     ) -> bool:
+        """Verify authenticity against an independently supplied trust anchor.
+
+        At least one of ``public_key_pem`` or ``expected_key_id`` must come from
+        trusted configuration outside the certificate. The embedded public key
+        is metadata and is never sufficient by itself for authoritative success.
+        """
+        if public_key_pem is None and expected_key_id is None:
+            return False
+        return ContainmentCertificateBuilder._verify_with_anchor(
+            certificate,
+            public_key_pem=public_key_pem,
+            expected_key_id=expected_key_id,
+        )
+
+    @staticmethod
+    def verify_self_consistency(certificate: dict[str, Any]) -> bool:
+        """Check artifact self-consistency without establishing signer trust."""
         try:
+            embedded_pem = certificate["public_key_pem"]
+            embedded_key_id = certificate["key_id"]
+        except (KeyError, TypeError):
+            return False
+        return ContainmentCertificateBuilder._verify_with_anchor(
+            certificate,
+            public_key_pem=embedded_pem,
+            expected_key_id=embedded_key_id,
+        )
+
+    @staticmethod
+    def _verify_with_anchor(
+        certificate: dict[str, Any],
+        *,
+        public_key_pem: str | None,
+        expected_key_id: str | None,
+    ) -> bool:
+        try:
+            if not isinstance(certificate, dict) or set(certificate) != ContainmentCertificateBuilder.ENVELOPE_FIELDS:
+                return False
+            if certificate["algorithm"] != "Ed25519":
+                return False
             payload = certificate["certificate"]
-            trusted_pem = public_key_pem or certificate["public_key_pem"]
-            if public_key_pem is not None and certificate.get("public_key_pem") != public_key_pem:
+            if not isinstance(payload, dict):
+                return False
+            embedded_pem = certificate["public_key_pem"]
+            if not isinstance(embedded_pem, str):
+                return False
+            trusted_pem = public_key_pem if public_key_pem is not None else embedded_pem
+            if not isinstance(trusted_pem, str):
                 return False
             public_key = serialization.load_pem_public_key(trusted_pem.encode("ascii"))
             if not isinstance(public_key, Ed25519PublicKey):
@@ -157,15 +209,41 @@ class ContainmentCertificateBuilder:
                 format=serialization.PublicFormat.Raw,
             )
             actual_key_id = f"ed25519:{hashlib.sha256(raw_public).hexdigest()[:32]}"
+            embedded_key = serialization.load_pem_public_key(embedded_pem.encode("ascii"))
+            if not isinstance(embedded_key, Ed25519PublicKey):
+                return False
+            embedded_raw = embedded_key.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw,
+            )
+            embedded_key_id = f"ed25519:{hashlib.sha256(embedded_raw).hexdigest()[:32]}"
+            if embedded_key_id != actual_key_id:
+                return False
             if certificate.get("key_id") != actual_key_id:
                 return False
             if expected_key_id is not None and actual_key_id != expected_key_id:
                 return False
+            if not isinstance(certificate["signature"], str) or ContainmentCertificateBuilder._SIGNATURE.fullmatch(certificate["signature"]) is None:
+                return False
             padding = "=" * (-len(certificate["signature"]) % 4)
-            signature = base64.urlsafe_b64decode(certificate["signature"] + padding)
+            signature = base64.b64decode(
+                certificate["signature"] + padding,
+                altchars=b"-_",
+                validate=True,
+            )
+            if len(signature) != 64:
+                return False
             public_key.verify(signature, canonical_bytes(payload))
             return True
-        except (KeyError, ValueError, InvalidSignature):
+        except (
+            binascii.Error,
+            InvalidSignature,
+            KeyError,
+            TypeError,
+            UnicodeError,
+            UnsupportedAlgorithm,
+            ValueError,
+        ):
             return False
 
     def write(self, path: str | Path, **kwargs: Any) -> dict[str, Any]:

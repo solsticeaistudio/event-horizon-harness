@@ -16,7 +16,7 @@ Event Horizon is a research harness, not a production containment system.
 - Availability is intentionally sacrificed on verifier, signer, recorder, static-policy, guardian, or infrastructure failure.
 - Behavioral detection thresholds and reported rates come from deterministic synthetic fixtures; they are not validated estimates for adaptive real-world adversaries.
 - Canary seeding is test-only and disabled by default. Automatic denial-certificate emission is not yet wired into every canary event path.
-- Authority decay is durable on one SQLite host but is not a distributed monotonic clock, consensus protocol, or atomic transaction with arbitrary external side effects.
+- Live authority decay is redemption-time and keyed by each fresh one-use capability ID. It does not accumulate denial/risk/canary/environment/restart counters across a session or lineage; persistent session behavior is enforced separately by the Behavioral Transition Guardian. Its SQLite state is not a distributed monotonic clock, consensus protocol, or atomic transaction with arbitrary external side effects.
 - No independent hardware fail-safe switch or hardware-in-the-loop test has yet been implemented.
 
 These limitations are security-relevant. Results should not be generalized beyond the tested topology and explicit trust assumptions.

@@ -44,6 +44,8 @@ The synthesizer may propose less authority but cannot mint, sign, or widen a cap
 
 Without a new authorization and attestation event, provider trust and current decay authority cannot increase. Trust upgrades never revive a consumed capability.
 
+In the live harness, each new authorization creates a fresh one-use capability and decay identity. Persistent session behavior is handled by the Behavioral Transition Guardian; `DecayEngine` does not carry counters across those identities.
+
 ## EH-9 — Canaries have no effect path
 
 Canary discovery, mutation, transfer, inspection, and redemption generate trusted security events and deny before effect execution.

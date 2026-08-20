@@ -297,6 +297,50 @@ class ProcessHarnessTests(unittest.TestCase):
             certificate_key,
         )
 
+    def test_live_decay_is_one_transition_per_single_use_capability(self):
+        first_request, first_capability, first_attestation = self.issue(request_id='decay-first')
+        self.assertTrue(
+            self.harness.execute(first_request, first_capability, first_attestation).success
+        )
+        self.assertFalse(
+            self.harness.execute(first_request, first_capability, first_attestation).success
+        )
+        with self.assertRaises(AuthorizationDenied):
+            self.harness.request_capability(payload(
+                request_id='decay-denied',
+                operation='http.request',
+                resource_id='internet',
+                arguments={},
+            ))
+        second_request, second_capability, second_attestation = self.issue(
+            request_id='decay-second'
+        )
+        self.assertTrue(
+            self.harness.execute(second_request, second_capability, second_attestation).success
+        )
+        self.assertNotEqual(
+            first_capability.claims.capability_id,
+            second_capability.claims.capability_id,
+        )
+
+        with closing(sqlite3.connect(self.harness.trusted_dir / 'decay-state.sqlite3')) as database:
+            rows = database.execute(
+                'SELECT capability_id, payload FROM decay_state ORDER BY capability_id'
+            ).fetchall()
+        states = {capability_id: json.loads(bytes(encoded)) for capability_id, encoded in rows}
+        expected_ids = {
+            first_capability.claims.capability_id,
+            second_capability.claims.capability_id,
+        }
+        self.assertEqual(set(states), expected_ids)
+        for state in states.values():
+            self.assertEqual(state['use_count'], 1)
+            self.assertEqual(state['denials'], 0)
+            self.assertEqual(state['risk_score'], 0)
+            self.assertEqual(state['canary_events'], 0)
+            self.assertEqual(state['environment_changes'], 0)
+            self.assertEqual(state['workload_restarts'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

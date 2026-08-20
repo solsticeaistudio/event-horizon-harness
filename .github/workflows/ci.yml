@@ -84,7 +84,7 @@ jobs:
       - name: Verify generated evidence chain
         run: python scripts/verify_evidence_chain.py "$RUNNER_TEMP/event-horizon-integration/external-evidence/events.jsonl"
       - name: Verify generated containment certificate
-        run: python scripts/verify_certificate.py "$RUNNER_TEMP/event-horizon-artifacts/latest-containment-certificate.json"
+        run: python scripts/verify_certificate.py "$RUNNER_TEMP/event-horizon-artifacts/latest-containment-certificate.json" --trusted-key "$RUNNER_TEMP/event-horizon-artifacts/latest-certificate-signer-public.pem"
       - name: Verify selected fixed vectors
         run: python scripts/verify_capability_vectors.py test-vectors/valid-capability.json test-vectors/replayed-capability.json test-vectors/unknown-field.json test-vectors/invalid-signature.json
       - name: Enforce tracked-artifact and secret policy

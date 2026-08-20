@@ -59,7 +59,10 @@ def main() -> None:
 
     valid, tip = recorder.verify()
     certificate_path = workdir / "containment-certificate.json"
-    cert = ContainmentCertificateBuilder(recorder, b"C" * 32).write(
+    certificate_builder = ContainmentCertificateBuilder(recorder, b"C" * 32)
+    trusted_key_path = workdir / "certificate-signer-public.pem"
+    trusted_key_path.write_text(certificate_builder.public_key_pem, encoding="ascii")
+    cert = certificate_builder.write(
         certificate_path,
         run_id="demo-run-v0.3",
         session_id="session-black-hole",
@@ -75,6 +78,7 @@ def main() -> None:
     print(f"    chain valid: {valid}")
     print(f"    chain tip: {tip}")
     print(f"    certificate: {certificate_path}")
+    print(f"    trusted signer key: {trusted_key_path}")
     print(json.dumps(cert, indent=2)[:1600])
     print("\nThe attacker obtained the local secret and root-equivalent visibility. It did not obtain authority.")
 

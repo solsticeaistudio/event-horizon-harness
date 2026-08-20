@@ -11,6 +11,8 @@
 9. Delete or rewrite the local audit copy: external chain remains valid; tampered copy fails verification.
 10. Destroy the hostile environment and issue a signed Containment Certificate.
 
+The demo obtains the certificate signer's public identity from the signer service and writes it as a separate trusted-key artifact before verification. Verification requires that external key (or an independently pinned key ID); it never promotes the public key embedded in the certificate into a trust root.
+
 Closing line:
 
 > The agent escaped every sandbox we gave it. It never escaped Event Horizon.

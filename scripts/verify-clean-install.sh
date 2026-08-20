@@ -24,5 +24,5 @@ npm run build
 npm test
 npm run demo
 python scripts/verify_capability_vectors.py
-python scripts/verify_certificate.py examples/reference-run/containment-certificate.json
+python scripts/verify_certificate.py examples/reference-run/containment-certificate.json --trusted-key examples/reference-run/certificate-signer-public.pem
 python scripts/check_repository_policy.py

@@ -12,16 +12,16 @@ The tested claim is narrower than general containment: compromise inside the hos
 
 ## What this repository demonstrates
 
-- Strict canonical requests cross explicit process boundaries with bounded schemas and duplicate-key rejection.
+- Strict canonical requests cross explicit process boundaries with bounded schemas and duplicate-key rejection. Shared adversarial vectors enforce the same NFC, byte, item, depth, numeric, and Unicode key-order domain in Python and TypeScript.
 - Executor Attestation issues a fresh, context-bound nonce and dispatches verification by signed-bundle method. The default public demo uses a simulator and labels it development-only.
 - An Ed25519 capability binds the exact request, arguments, session, executor, device, measurement, attestation, verifier policy, static policy, expiry, output limit, and one-use identifier.
 - The signer and executor independently reconstruct request and argument digests. SQLite-backed replay state makes nonce and capability consumption durable and atomic across cooperating processes on one host. A signed cross-language interface defines the same transitions for a separately deployed replay authority.
 - Capability issuance/consumption, evidence append, and certificate construction require fresh Ed25519 client authorization. Service signing seeds are restricted file-backed fixtures, not inline JSON values.
 - Four required guardians form a unanimity veto. Missing, malformed, stale, inconsistent, crashed, or timed-out decisions deny execution.
-- An independent logical evidence recorder hash-chains events and signs receipts. A detached Ed25519 containment certificate covers the recorded evidence domains and verified teardown.
+- An independent logical evidence recorder hash-chains events and signs receipts. A detached Ed25519 containment certificate covers the recorded evidence domains and verified teardown; authenticity requires an independently provisioned signer key or pinned key ID.
 - Fixed adversarial vectors and compromise-injection tests exercise parser disagreement, substitution, replay, guardian failure, evidence tampering, and transfer attempts.
 - A deterministic task-policy synthesizer and trusted compiler size authority from task semantics while keeping the adaptive proposal non-authoritative.
-- Canary capabilities, behavioral boundary-probing detection, monotonic trust decay, signed denial certificates, bounded adaptive-adversary interfaces, and a hardware-failsafe simulator provide additional subtract-only controls and evidence.
+- Canary capabilities, session-scoped behavioral boundary-probing detection, per-capability redemption-time monotonic decay, signed denial certificates, bounded adaptive-adversary interfaces, and a hardware-failsafe simulator provide additional subtract-only controls and evidence.
 
 ## What it does not demonstrate
 
@@ -101,6 +101,18 @@ python -m pip install -e .
 
 The demo generates development keys at runtime. It commits no private key and explicitly states that simulator verification is not hardware-backed attestation.
 
+The demo writes the certificate signer public key separately, from the signer service's trusted `info` path, before it verifies the certificate. The certificate's embedded key is descriptive metadata and is never used as its own trust anchor:
+
+```text
+trusted certificate-signer service identity
+        |
+        v
+.demo/latest-certificate-signer-public.pem
+        |
+        v
+verify .demo/latest-containment-certificate.json
+```
+
 ## Reference result
 
 The current scripted demo produces this normalized result:
@@ -127,12 +139,15 @@ npm run build
 npm test
 python scripts/verify_remote_replay_interop.py
 python scripts/verify_capability_vectors.py
-python scripts/verify_certificate.py .demo/latest-containment-certificate.json
+python scripts/verify_canonicalization_vectors.py
+python scripts/verify_certificate.py .demo/latest-containment-certificate.json --trusted-key .demo/latest-certificate-signer-public.pem
 python scripts/check_repository_policy.py
 python scripts/generate_security_report.py
 ```
 
 The exact current test counts are recorded in [STATUS.md](STATUS.md). The real-TPM integration test is opt-in on a configured Linux host. For an isolated clone, run `scripts/verify-clean-install.sh` or `scripts/verify-clean-install.ps1`.
+
+Containment-certificate verification fails closed without `--trusted-key` or an independently pinned `--trusted-key-id`. `ContainmentCertificateBuilder.verify_self_consistency()` exists only for diagnostics and does not establish trusted authenticity.
 
 The [implementation-level design defense](docs/DESIGN_DEFENSE.md) maps the central security questions to the current code and trust assumptions.
 

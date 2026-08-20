@@ -6,6 +6,7 @@ All notable public-artifact changes are recorded here. The project follows seman
 
 ### Added
 
+- Shared adversarial Python/TypeScript canonicalization vectors covering Unicode normalization and ordering, size/item/depth bounds, negative zero, finite/non-finite numbers, duplicate keys, and nested combinations.
 - A signed cross-language replay state-machine protocol with authorized operation/partition policies, pinned service epochs, monotonic hash-chain checkpoints, explicit failover adoption, and fail-closed HTTP clients.
 - A single-writer Python reference service plus Python capability/protected-request adapters and an awaitable TypeScript Executor Attestation nonce adapter.
 - Conformance coverage for concurrency, collisions, request and response forgery, response swapping, rollback, stale primaries, unsafe promotion, outages, and real Python-service/Node-client interoperability.
@@ -14,6 +15,9 @@ All notable public-artifact changes are recorded here. The project follows seman
 
 ### Changed
 
+- Containment-certificate verification now requires an independently supplied trusted signer public key or pinned key ID. The previous public verifier trusted the key embedded in the artifact and established only self-consistency, not trusted authenticity.
+- Clarified that live `DecayEngine` state is per fresh one-use capability; persistent session-scoped behavioral history is enforced separately by the Behavioral Transition Guardian.
+- Aligned TypeScript canonicalization with Python for NFC, UTF-8 byte, collection item, nesting, safe-integer, negative-zero, cycle, and Unicode code-point key-order checks.
 - Made Executor Attestation nonce persistence, nonce authority operations, and verification awaitable so remote atomic transitions do not require blocking network I/O.
 - Made TypeScript `adoptEpoch()` asynchronous and serialized it with signed remote operations.
 - Required an explicit digest for every restored nonzero checkpoint and the epoch-specific genesis digest at checkpoint zero in both protocol clients.

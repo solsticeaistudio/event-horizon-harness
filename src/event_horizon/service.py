@@ -632,8 +632,8 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
         return {
             'valid': ContainmentCertificateBuilder.verify(
                 body['certificate'],
-                builder.public_key_pem,
-                builder.key_id,
+                public_key_pem=builder.public_key_pem,
+                expected_key_id=builder.key_id,
             )
         }
 

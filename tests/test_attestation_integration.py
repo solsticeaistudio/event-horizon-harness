@@ -63,16 +63,25 @@ class ExecutorAttestationIntegrationTests(unittest.TestCase):
                 "purpose": "certificate test",
             })
             executor.execute(request, capability, attestation)
-            certificate = ContainmentCertificateBuilder(recorder, b"C" * 32).build(
+            certificate_builder = ContainmentCertificateBuilder(recorder, b"C" * 32)
+            certificate = certificate_builder.build(
                 run_id="cert-run",
                 session_id="cert-session",
                 assertions={"contained": True},
             )
             self.assertEqual(certificate["algorithm"], "Ed25519")
             self.assertTrue(certificate["certificate"]["attestation_bundle_digests"])
-            self.assertTrue(ContainmentCertificateBuilder.verify(certificate))
+            self.assertTrue(ContainmentCertificateBuilder.verify(
+                certificate,
+                public_key_pem=certificate_builder.public_key_pem,
+                expected_key_id=certificate_builder.key_id,
+            ))
             certificate["certificate"]["completed_actions"] = 999
-            self.assertFalse(ContainmentCertificateBuilder.verify(certificate))
+            self.assertFalse(ContainmentCertificateBuilder.verify(
+                certificate,
+                public_key_pem=certificate_builder.public_key_pem,
+                expected_key_id=certificate_builder.key_id,
+            ))
 
 
 if __name__ == "__main__":
