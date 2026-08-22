@@ -135,6 +135,7 @@ class DerivedFacts:
     values: dict[str, bool]
     evidence_classes: dict[str, str]
     proof_closed: dict[str, bool]
+    closure_dimensions: dict[str, dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,7 @@ class BundleReportV2:
     derived_assurance_facts: dict[str, bool] = field(default_factory=dict)
     fact_evidence_classes: dict[str, str] = field(default_factory=dict)
     proof_closure: dict[str, bool] = field(default_factory=dict)
+    closure_dimensions: dict[str, dict[str, Any]] = field(default_factory=dict)
     derived_profile: str = "DEVELOPMENT"
     certificate_claim_match: bool = True
     claim_mismatches: list[str] = field(default_factory=list)
@@ -463,35 +465,73 @@ def derive_bundle_facts_v2(
         "keys_independently_administered": EVIDENCE_ROOT_AUTHORIZED_DECLARATION,
     }
 
+    # ---- typed proof-closure dimensions (v0.9.1) ---------------------------
+    # assertion_authenticity: an authorized authority signed the declaration.
+    # runtime_enforcement: bundled OBSERVED deployment evidence supports it.
+    # historical_observation: witnessed/ordered inclusion exists.
+    # external_corroboration: a second principal corroborates.
+    attestation = bundle["deployment_attestation"]
+    attestation_observed = (
+        isinstance(attestation, Mapping)
+        and bool(attestation.get("credential_isolation_verified"))
+        and bool(attestation.get("network_isolation_verified"))
+        and isinstance(attestation.get("observer"), str)
+    )
+    credential_status = (
+        "verified" if (
+            isinstance(attestation, Mapping)
+            and attestation.get("credential_isolation_verified")
+            and isinstance(attestation.get("observer"), str)
+        ) else ("violated" if isinstance(attestation, Mapping) else "unknown")
+    )
+    network_status = (
+        "verified" if (
+            isinstance(attestation, Mapping)
+            and attestation.get("network_isolation_verified")
+            and isinstance(attestation.get("observer"), str)
+        ) else ("violated" if isinstance(attestation, Mapping) else "unknown")
+    )
+    deployment_attestation_valid: bool | None = (
+        None if attestation is None else attestation_observed
+    )
+    if attestation is not None and not attestation_observed:
+        conflicts.append(
+            "deployment attestation present but runtime observations are "
+            "incomplete or anonymous; enforcement stays unclosed"
+        )
+
+    def _closure(name: str) -> dict[str, Any]:
+        dims = {
+            "assertion_authenticity": name in DECLARATION_FACTS and policy_ok is True,
+            "runtime_enforcement": False,
+            "historical_observation": name in PORTABLE_FACTS,
+            "external_corroboration": name in {
+                "effect_mediated", "effects_reconciled",
+                "provider_receipts_authenticated", "history_witnessed",
+            },
+        }
+        if name == "effect_mediation_enforced":
+            dims["runtime_enforcement"] = attestation_observed
+        if name in {"witness_administratively_independent",
+                    "witness_storage_independent"}:
+            dims["historical_observation"] = True
+        return dims
+
     proof_closed = {
         name: (name in PORTABLE_FACTS)
         or (name in DECLARATION_FACTS and policy_ok is True)
         for name in derived
     }
+    closure_dimensions = {name: _closure(name) for name in sorted(derived)}
 
-    attestation = bundle["deployment_attestation"]
-    deployment_attestation_valid: bool | None = (
-        None if attestation is None else bool(attestation)
-    )
-    credential_status = (
-        "verified" if deployment_attestation_valid else "unknown"
-    ) if attestation is None or isinstance(attestation, bool) else (
-        "verified" if attestation.get("credential_isolation_verified") else "violated"
-    )
-    network_status = (
-        "verified" if deployment_attestation_valid else "unknown"
-    ) if attestation is None or isinstance(attestation, bool) else (
-        "verified" if attestation.get("network_isolation_verified") else "violated"
-    )
-    if attestation is not None and not isinstance(attestation, bool):
-        policy_values["effect_mediation_enforced"] = (
-            policy_values["effect_mediation_enforced"]
-            and bool(attestation.get("network_isolation_verified"))
-            and bool(attestation.get("credential_isolation_verified"))
-        )
-        derived["effect_mediation_enforced"] = policy_values[
-            "effect_mediation_enforced"
-        ]
+    # GAP 1 invariant: enforcement is a RUNTIME property. A root-authorized
+    # declaration alone never closes it — observed attestation evidence must
+    # corroborate, otherwise the portable value stays false (unknown).
+    if not attestation_observed:
+        policy_values["effect_mediation_enforced"] = False
+    derived["effect_mediation_enforced"] = policy_values[
+        "effect_mediation_enforced"
+    ]
 
     from .assurance import PROFILES, FACT_NAMES
 
@@ -516,6 +556,7 @@ def derive_bundle_facts_v2(
         values=derived_final,
         evidence_classes=evidence_classes,
         proof_closed=proof_closed,
+        closure_dimensions=closure_dimensions,
     )
     meta = {
         "conflicts": conflicts,
@@ -628,6 +669,9 @@ def verify_bundle_v2(
         derived_assurance_facts=dict(derived.values),
         fact_evidence_classes=dict(derived.evidence_classes),
         proof_closure=dict(derived.proof_closed),
+        closure_dimensions={
+            k: dict(v) for k, v in (derived.closure_dimensions or {}).items()
+        },
         derived_profile=_derive_profile_from(derived.values),
         certificate_claim_match=not mismatches,
         claim_mismatches=mismatches,

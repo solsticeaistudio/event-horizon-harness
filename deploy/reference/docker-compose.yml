@@ -1,0 +1,47 @@
+# Event Horizon v0.9.1 reference topology (RC).
+# Canonical CI deployment target: executor is pinned to control-plane only
+# and holds no provider credential; the gateway alone bridges to the
+# provider plane. Process-separated harness remains the executable default
+# in environments without Docker.
+version: "3.9"
+services:
+  coordinator:
+    build: ../..
+    command: coordinator
+  verifier:
+    build: ../..
+    command: verifier
+  guardians:
+    build: ../..
+    command: guardians
+  signer:
+    build: ../..
+    command: signer
+  executor:
+    build: ../..
+    command: executor
+    networks: [control-plane]
+  effect-gateway:
+    build: ../..
+    command: gateway
+    networks: [control-plane, provider-plane]
+    secrets: [provider-token]
+  reference-provider:
+    build: ../..
+    command: provider
+    networks: [provider-plane]
+  recorder:
+    build: ../..
+    command: recorder
+  witness:
+    build: ../..
+    command: witness
+  certificate:
+    build: ../..
+    command: certificate
+networks:
+  control-plane: {}
+  provider-plane: {}
+secrets:
+  provider-token:
+    file: ./secrets/provider-token

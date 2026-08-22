@@ -959,6 +959,21 @@ def _witness_specs(config_path: Path) -> dict[str, MessageSpec]:
     }
 
 
+# Declarative protected-ingress registry (v0.9.1): every protected RPC in the
+# deployment MUST appear here with its receiving role and exact purpose. The
+# CI test `test_ingress_matrix_is_complete` fails if any MessageSpec carries
+# an authorizer without a registered purpose, preventing new services from
+# silently escaping manifest enforcement.
+INGRESS_MATRIX = [
+    {"role": "signer", "type": "issue", "purpose": "capability-signer.issue"},
+    {"role": "signer", "type": "consume", "purpose": "capability-signer.consume"},
+    {"role": "recorder", "type": "append", "purpose": "evidence-recorder.append"},
+    {"role": "recorder", "type": "checkpoint", "purpose": "evidence-recorder.checkpoint"},
+    {"role": "certificate", "type": "build", "purpose": "certificate-signer.build"},
+    {"role": "witness", "type": "publish", "purpose": "checkpoint-witness.publish"},
+]
+
+
 ROLE_BUILDERS = {
     'parser': _parser_specs,
     'verifier': _verifier_specs,
