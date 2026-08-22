@@ -36,7 +36,9 @@ class CertificateTrustAnchorTests(unittest.TestCase):
         self.legitimate = ContainmentCertificateBuilder(self.recorder, b"L" * 32)
         self.attacker_private = Ed25519PrivateKey.from_private_bytes(b"A" * 32)
         self.attacker = ContainmentCertificateBuilder(self.recorder, self.attacker_private)
-        self.certificate = self.legitimate.build(run_id="legitimate-run")
+        self.certificate = self.legitimate.build(
+            run_id="legitimate-run", deployment_id="dep-test", trust_root_manifest_digest=None
+        )
 
     def _write(self, name: str, value: dict[str, object]) -> Path:
         path = self.root / name
@@ -70,7 +72,9 @@ class CertificateTrustAnchorTests(unittest.TestCase):
         # over the same recorded evidence. The artifact is internally
         # consistent but is not signed by the trusted anchor, so authoritative
         # verification must reject it.
-        forged = self.attacker.build(run_id="legitimate-run")
+        forged = self.attacker.build(
+            run_id="legitimate-run", deployment_id="dep-test", trust_root_manifest_digest=None
+        )
         self.assertTrue(ContainmentCertificateBuilder.verify_self_consistency(forged))
         self.assertFalse(ContainmentCertificateBuilder.verify(
             forged,
@@ -129,7 +133,9 @@ class CertificateTrustAnchorTests(unittest.TestCase):
         self.assertNotIn("VERIFIED", result.stdout)
 
     def test_official_cli_rejects_forged_attacker_certificate(self) -> None:
-        forged = self.attacker.build(run_id="legitimate-run")
+        forged = self.attacker.build(
+            run_id="legitimate-run", deployment_id="dep-test", trust_root_manifest_digest=None
+        )
         certificate_path = self._write("forged.json", forged)
         key_path = self.root / "trusted-signer.pem"
         key_path.write_text(self.legitimate.public_key_pem, encoding="ascii")
@@ -140,7 +146,9 @@ class CertificateTrustAnchorTests(unittest.TestCase):
 
     def test_unknown_run_namespace_fails_closed(self) -> None:
         with self.assertRaises(ValueError):
-            self.legitimate.build(run_id="no-such-run")
+            self.legitimate.build(
+                run_id="no-such-run", deployment_id="dep-test", trust_root_manifest_digest=None
+            )
 
     def test_caller_cannot_supply_truth_assertions(self) -> None:
         with self.assertRaises(TypeError):

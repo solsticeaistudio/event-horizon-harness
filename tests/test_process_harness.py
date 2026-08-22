@@ -42,7 +42,7 @@ class ProcessHarnessTests(unittest.TestCase):
 
     def test_all_trust_domains_have_unique_processes_and_executor_has_no_private_key(self):
         pids = {info['pid'] for info in self.harness.service_info.values()}
-        self.assertEqual(len(pids), 7)
+        self.assertEqual(len(pids), len(self.harness.ROLES))
         probe = self.harness.root_probe()
         self.assertEqual(probe['ambient_authority_environment_hits'], [])
         self.assertEqual(probe['requested_environment_hits'], [])
@@ -277,9 +277,16 @@ class ProcessHarnessTests(unittest.TestCase):
         self.assertTrue(teardown['verified'])
         certificate = self.harness.build_certificate()
         payload_value = certificate['certificate']
-        self.assertEqual(payload_value['schema'], 'event-horizon.containment-certificate.v0.5')
+        self.assertEqual(payload_value['schema'], 'event-horizon.containment-certificate.v0.6')
         self.assertEqual(payload_value['status'], 'complete')
         self.assertEqual(payload_value['run_id'], self.harness.run_id)
+        # v0.6 bindings: deployment identity and trust-root manifest version.
+        self.assertEqual(payload_value['deployment_id'], self.harness.deployment_id)
+        self.assertEqual(payload_value['trust_root_manifest_digest'], self.harness.manifest_digest)
+        self.assertIn(payload_value['assurance_level'], {
+            'local', 'authenticated', 'witnessed', 'mediated-effects', 'independent-trust',
+        })
+        self.assertIn('authenticated', payload_value['assurance_guarantees'])
         # The certificate's session identity is derived from run evidence and
         # must match the executed request's session exactly.
         self.assertEqual(payload_value['session_id'], request.session_id)
@@ -290,9 +297,17 @@ class ProcessHarnessTests(unittest.TestCase):
                 'guardian_quorum_without_veto', 'capability_issued',
                 'single_execution_per_capability', 'no_indeterminate_outcomes',
                 'teardown_attested', 'no_evidence_of_unauthorized_egress',
+                'effect_mediation_consistent',
             },
         )
-        self.assertEqual(set(payload_value['claims'].values()), {'satisfied'})
+        # Effect-mediation is unevaluated in this topology (no gateway
+        # statements); every evidence-derived claim must be satisfied.
+        evidence_claims = {
+            key: value for key, value in payload_value['claims'].items()
+            if key != 'effect_mediation_consistent'
+        }
+        self.assertEqual(set(evidence_claims.values()), {'satisfied'})
+        self.assertEqual(payload_value['claims']['effect_mediation_consistent'], 'unknown')
         self.assertIn('recorder_checkpoint', payload_value)
         self.assertIsNotNone(payload_value['recorder_checkpoint'])
         self.assertGreaterEqual(payload_value['consumed_event_count'], 1)

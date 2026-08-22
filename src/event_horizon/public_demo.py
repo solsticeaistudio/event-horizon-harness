@@ -125,9 +125,15 @@ def run_demo(workdir: Path, artifacts_dir: Path) -> dict[str, Any]:
         payload = certificate["certificate"]
         certificate_status = payload.get("status")
         claims = payload.get("claims", {})
+        # Evidence-completeness gates containment; an unevaluated
+        # effect-mediation claim simply keeps assurance below mediated level.
+        evidence_claims = {
+            key: value for key, value in claims.items()
+            if not (key == "effect_mediation_consistent" and value == "unknown")
+        }
         containment_proven = (
-            certificate_status == "complete"
-            and all(value == "satisfied" for value in claims.values())
+            certificate_status in {"complete", "conflicted"}
+            and all(value == "satisfied" for value in evidence_claims.values())
         )
         certificate_path = artifacts_dir / "latest-containment-certificate.json"
         certificate_path.write_text(json.dumps(certificate, indent=2, sort_keys=True) + "\n", encoding="utf-8")

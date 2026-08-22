@@ -8,6 +8,7 @@ import secrets
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -176,11 +177,12 @@ def _provision_or_load_seed(path: Path) -> bytes:
 
 
 class ProcessSeparatedHarness:
-    ROLES = ('parser', 'verifier', 'guardians', 'signer', 'executor', 'recorder', 'certificate')
+    ROLES = ('parser', 'verifier', 'guardians', 'signer', 'executor', 'recorder', 'certificate', 'witness')
     PROTECTED_TYPES = {
         'signer': frozenset({'issue', 'consume'}),
         'recorder': frozenset({'append', 'checkpoint'}),
         'certificate': frozenset({'build'}),
+        'witness': frozenset({'publish'}),
     }
 
     def __init__(
@@ -206,6 +208,7 @@ class ProcessSeparatedHarness:
             self.trusted_dir / 'guardian-statement.signing.seed'
         )
         self.watchdog_key_path = self.workdir / 'watchdog' / 'teardown-attestation.seed'
+        self.witness_key_path = self.workdir / 'witness' / 'checkpoint-witness.seed'
         self.executor_receipt_key_path = (
             self.workdir / 'executor-state' / 'execution-receipts.seed'
         )
@@ -215,6 +218,12 @@ class ProcessSeparatedHarness:
         self.execution_state_database = (
             self.trusted_dir / 'capability-execution-state.sqlite3'
         )
+        self.deployment_root_key_path = (
+            self.trusted_dir / 'deployment-root.signing.seed'
+        )
+        self.deployment_id = f"dep-{secrets.token_hex(8)}"
+        self.manifest_digest: str | None = None
+        self.manifest_envelope: dict[str, Any] | None = None
         self.recorder_path = self.workdir / 'external-evidence' / 'events.jsonl'
         self.ttl_seconds = ttl_seconds
         self.inject_permissive_guardian = inject_permissive_guardian
@@ -311,6 +320,7 @@ class ProcessSeparatedHarness:
         verifier_statement_seed = _provision_or_load_seed(self.verifier_statement_key_path)
         guardian_statement_seed = _provision_or_load_seed(self.guardian_statement_key_path)
         watchdog_seed = _provision_or_load_seed(self.watchdog_key_path)
+        witness_seed = _provision_or_load_seed(self.witness_key_path)
         executor_receipt_seed = _provision_or_load_seed(self.executor_receipt_key_path)
         verifier_statement_signer = StatementSigner(verifier_statement_seed, subject='verifier')
         guardian_statement_signer = StatementSigner(guardian_statement_seed, subject='guardians')
@@ -324,6 +334,63 @@ class ProcessSeparatedHarness:
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         ).decode('ascii')
+        capability_seed = load_private_seed(self.capability_key_path)
+        capability_public_pem = Ed25519PrivateKey.from_private_bytes(capability_seed).public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode('ascii')
+        certificate_seed = load_private_seed(self.certificate_key_path)
+        certificate_public_pem = Ed25519PrivateKey.from_private_bytes(certificate_seed).public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode('ascii')
+
+        # ---- Trust Root Manifest -------------------------------------------
+        # One signed manifest authorizes every actor role for this deployment.
+        from .trust_manifest import TrustRootAuthority, ManifestChain, make_actor
+
+        deployment_root_seed = _provision_or_load_seed(self.deployment_root_key_path)
+        authority = TrustRootAuthority(
+            deployment_root_seed,
+            deployment_id=self.deployment_id,
+            environment='synthetic',
+        )
+        witness_public_pem = Ed25519PrivateKey.from_private_bytes(witness_seed).public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode('ascii')
+        actors = [
+            make_actor(role='certificate-signer', public_key_pem=certificate_public_pem),
+            make_actor(role='capability-signer', public_key_pem=capability_public_pem),
+            make_actor(role='verifier', public_key_pem=verifier_statement_signer.public_key_pem),
+            make_actor(role='guardian', public_key_pem=guardian_statement_signer.public_key_pem),
+            make_actor(role='executor', public_key_pem=executor_receipt_signer.public_key_pem),
+            make_actor(role='watchdog', public_key_pem=self._watchdog_signer.public_key_pem),
+            make_actor(role='recorder', public_key_pem=recorder_public_pem),
+            make_actor(
+                role='witness',
+                public_key_pem=witness_public_pem,
+                purposes={'witness-checkpoint'},
+            ),
+        ]
+        self.manifest_envelope = authority.issue_manifest(
+            actors,
+            manifest_version=1,
+            sequence=1,
+            issued_at_ms=time.time_ns() // 1_000_000,
+            previous_manifest_digest=None,
+        )
+        chain = ManifestChain(
+            authority.public_key_pem,
+            deployment_id=self.deployment_id,
+            environment='synthetic',
+        )
+        verified = chain.append(self.manifest_envelope)
+        self.manifest_digest = verified.manifest_digest
+        (self.trusted_dir / 'trust-manifest.json').write_text(
+            json.dumps(self.manifest_envelope, indent=2, sort_keys=True),
+            encoding='utf-8',
+        )
 
         def statement_public_key(signer: StatementSigner) -> dict[str, str]:
             return {
@@ -337,6 +404,10 @@ class ProcessSeparatedHarness:
             'certificate': ProtectedRequestSigner(
                 secrets.token_bytes(32),
                 'certificate-signer',
+            ),
+            'witness': ProtectedRequestSigner(
+                secrets.token_bytes(32),
+                'checkpoint-witness',
             ),
         }
 
@@ -395,6 +466,8 @@ class ProcessSeparatedHarness:
                     'signing_key_path': str(self.recorder_key_path),
                     'max_event_bytes': 16_384,
                     'checkpoint_anchor_path': str(self.recorder_checkpoint_anchor_path),
+                    'checkpoint_deployment_id': self.deployment_id,
+                    'checkpoint_manifest_digest': self.manifest_digest,
                     **protected_config('recorder', self.evidence_replay_path),
                 },
             )
@@ -430,12 +503,30 @@ class ProcessSeparatedHarness:
                     'signing_key_path': str(self.certificate_key_path),
                     'checkpoint_anchor_path': str(self.recorder_checkpoint_anchor_path),
                     'recorder_public_key_pem': recorder_public_pem,
+                    'deployment_id': self.deployment_id,
+                    'trust_root_manifest_digest': self.manifest_digest,
+                    'witness_public_key_pem': witness_public_pem,
+                    'require_witness': True,
+                    'approval_policy': None,
+                    'trust_root_public_key_pem': authority.public_key_pem,
+                    'manifest_envelope': self.manifest_envelope,
                     'executor_statement_public_key': executor_receipt_signer.public_key_pem,
                     'verifier_statement_public_key': verifier_statement_signer.public_key_pem,
                     'guardian_statement_public_key': guardian_statement_signer.public_key_pem,
                     'watchdog_statement_public_key': self._watchdog_signer.public_key_pem,
                     'execution_state_database': str(self.execution_state_database),
                     **protected_config('certificate', self.evidence_replay_path),
+                },
+            )
+            self._start_role(
+                'witness',
+                {
+                    'journal_path': str(self.workdir / 'witness' / 'acknowledgments.jsonl'),
+                    'signing_key_path': str(self.witness_key_path),
+                    'deployment_id': self.deployment_id,
+                    'recorder_public_key_pem': recorder_public_pem,
+                    'witness_id': f"witness-{self.deployment_id}"[:128],
+                    **protected_config('witness', self.evidence_replay_path),
                 },
             )
             for role in self.ROLES:
@@ -490,6 +581,22 @@ class ProcessSeparatedHarness:
         if not isinstance(envelope, dict) or 'checkpoint' not in envelope:
             raise ServiceUnavailable('recorder omitted signed checkpoint')
         return envelope
+
+    def publish_witness_checkpoint(self) -> dict[str, Any]:
+        """Have the independent witness acknowledge the current checkpoint."""
+        envelope = self.issue_checkpoint()
+        response = self.call(
+            'witness',
+            'publish',
+            {
+                'checkpoint_envelope': envelope,
+                'manifest_digest': self.manifest_digest,
+            },
+        )
+        acknowledgment = response.get('acknowledgment')
+        if not isinstance(acknowledgment, dict):
+            raise ServiceUnavailable('witness omitted acknowledgment')
+        return {'checkpoint': envelope, 'acknowledgment': acknowledgment}
 
     def request_capability(
         self,
@@ -728,17 +835,20 @@ class ProcessSeparatedHarness:
         return dict(self.teardown_evidence)
 
     def build_certificate(self, *, run_id: str | None = None) -> dict[str, Any]:
-        """Build a certificate derived entirely from the run's evidence.
+        """Build a witnessed certificate derived entirely from run evidence.
 
-        The certificate signer accepts only the run selector: every claim,
-        including teardown and egress conclusions, is resolved from the signed
-        recorder history and independently authenticated source statements.
+        The recorder checkpoints its chain, the independent witness service
+        acknowledges the checkpoint, and the certificate signer binds both.
+        The caller supplies only the run selector.
         """
-        self.issue_checkpoint()
+        witnessed = self.publish_witness_checkpoint()
         response = self.call(
             'certificate',
             'build',
-            {'run_id': run_id or self.run_id},
+            {
+                'run_id': run_id or self.run_id,
+                'witness_acknowledgment': witnessed['acknowledgment'],
+            },
         )
         certificate = response['certificate']
         verified = self.call('certificate', 'verify', {'certificate': certificate})['valid']

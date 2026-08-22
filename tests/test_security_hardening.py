@@ -63,7 +63,9 @@ class CrossRunConfusionTests(unittest.TestCase):
                 "run_id": "run-B", "session_id": "session-B", "request_id": "b1",
             })
             builder = ContainmentCertificateBuilder(recorder, b"C" * 32)
-            certificate = builder.build(run_id="run-A")
+            certificate = builder.build(
+                run_id="run-A", deployment_id="dep-test", trust_root_manifest_digest=None
+            )
             payload = certificate["certificate"]
             self.assertEqual(payload["consumed_event_count"], 1)
             self.assertEqual(payload["session_id"], "session-A")
@@ -79,7 +81,9 @@ class CrossRunConfusionTests(unittest.TestCase):
             })
             builder = ContainmentCertificateBuilder(recorder, b"C" * 32)
             with self.assertRaises(CertificateBuildError):
-                builder.build(run_id="run-X")
+                builder.build(
+                    run_id="run-X", deployment_id="dep-test", trust_root_manifest_digest=None
+                )
 
     def test_certificate_cannot_reference_two_session_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -88,11 +92,16 @@ class CrossRunConfusionTests(unittest.TestCase):
                 "run_id": "run-Y", "session_id": "only-session", "request_id": "r",
             })
             builder = ContainmentCertificateBuilder(recorder, b"C" * 32)
-            certificate = builder.build(run_id="run-Y")
+            certificate = builder.build(run_id="run-Y", deployment_id="dep-test", trust_root_manifest_digest=None)
             self.assertEqual(certificate["certificate"]["session_id"], "only-session")
             # A caller naming a different session cannot force a mismatch to sign.
             with self.assertRaises(CertificateBuildError):
-                builder.build(run_id="run-Y", expected_session_id="other-session")
+                builder.build(
+                    run_id="run-Y",
+                    deployment_id="dep-test",
+                    trust_root_manifest_digest=None,
+                    expected_session_id="other-session",
+                )
 
     def test_fabricated_completion_without_executor_receipt_is_incomplete(self) -> None:
         """A coordinator writing a fake execution.completed event cannot make
@@ -362,9 +371,9 @@ class RecorderRollbackTests(unittest.TestCase):
             anchor = FileCheckpointAnchor(anchor_path)
             recorder.append("one", {}, source_id="s", source_sequence=1)
             recorder.append("two", {}, source_id="s", source_sequence=2)
-            recorder.issue_checkpoint(anchor)
+            recorder.issue_checkpoint(anchor, deployment_id="dep-test", manifest_digest="a" * 64)
             recorder.append("three", {}, source_id="s", source_sequence=3)
-            recorder.issue_checkpoint(anchor)
+            recorder.issue_checkpoint(anchor, deployment_id="dep-test", manifest_digest="a" * 64)
 
             # Attacker replaces the whole history with an internally valid
             # shorter prefix (classic rollback). The anchored checkpoint must
@@ -385,7 +394,9 @@ class RecorderRollbackTests(unittest.TestCase):
             recorder = ExternalRecorder(root / "events.jsonl", b"R" * 32)
             recorder.append("one", {}, source_id="s", source_sequence=1)
             anchor = FileCheckpointAnchor(root / "checkpoints.jsonl")
-            envelope = recorder.issue_checkpoint(anchor)
+            envelope = recorder.issue_checkpoint(
+                anchor, deployment_id="dep-test", manifest_digest="a" * 64
+            )
             tampered = dict(envelope)
             checkpoint = dict(tampered["checkpoint"])
             checkpoint["chain_tip"] = "f" * 64

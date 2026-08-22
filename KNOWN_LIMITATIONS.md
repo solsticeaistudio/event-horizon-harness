@@ -2,6 +2,17 @@
 
 Event Horizon is a research harness, not a production containment system.
 
+## v0.6 additions
+
+- The Effect Gateway mediation path exists at the executor/library level (durable intent, immutable idempotency, signed receipts/reconciliations) but is not yet plumbed through the process-separated RPC topology as its own service role; deployments that do not enable governed effects keep `effect_mediation_consistent = unknown` and never receive mediated-effects assurance.
+- Provider idempotency is modeled by deterministic simulators and an in-process local adapter contract; real provider integrations with signed reconciliation answers are not implemented.
+- The external checkpoint witness runs as its own service role with its own key, but in development it executes on the same host under the same account; independent administration remains a deployment property. The witness journal is append-only by convention, not tamper-resistant storage.
+- The Trust Root Manifest authorizes roles/purposes and supports rotation/revocation with historical verification, but end-to-end enforcement currently lives in the statement-verifier layer; not every service role yet refuses statements from manifest-unauthorized keys at its RPC boundary. Manifest rotation itself is operator-driven tooling, not an automated quorum transition.
+- Quorum approval hooks (k-of-n distinct manifest-authorized approvers) are implemented for certificate issuance policy but disabled by default in development deployments.
+- Key providers are role-bound abstractions over local restricted files today; KMS/HSM/TPM backends remain future work.
+
+## Standing limitations
+
 - The execution cell is not yet a production Firecracker deployment. The process-separated path is the reproducible default; Linux/KVM integration remains a development target with host kernel, KVM, Firecracker, image, and watchdog assumptions.
 - TPM quote generation and independent verification remain incomplete for a production deployment. Synthetic fixtures and `swtpm` exercise code paths but do not establish physical hardware provenance, endorsement, fleet enrollment, or production measurement policy.
 - The Executor Attestation simulator does not constitute hardware attestation and can produce only development trust.

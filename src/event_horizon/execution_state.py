@@ -458,6 +458,182 @@ class CapabilityExecutionTracker:
         resolution: str,
         evidence_digest: str,
         declared_pure: bool = False,
+        positive_provider_proof: bool = False,
+    ) -> ExecutionState:
+        """Resolve uncertainty using positive evidence only.
+
+        For executions past the effect boundary on potentially effectful
+        operations, ``confirmed_not_committed`` is illegal from local failure
+        signals alone. Two forms of positive proof unlock it:
+
+        * ``declared_pure`` — the handler is architecturally incapable of
+          external effects by construction;
+        * ``positive_provider_proof`` — a provider-side record positively
+          establishes that no execution occurred for this identity (for
+          example an Effect Gateway reconciliation answer).
+
+        Neither form reinterprets history; both are recorded in the
+        transition details.
+        """
+        if resolution not in RECONCILIATION_RESOLUTIONS:
+            raise ExecutionStateError("reconciliation resolution is invalid")
+        if not isinstance(evidence_digest, str) or _DIGEST.fullmatch(evidence_digest) is None:
+            raise ExecutionStateError("reconciliation evidence digest is invalid")
+        found = self.store.current_state(self.namespace, capability_id)
+        if found is None:
+            raise ExecutionStateError(f"unknown execution for capability {capability_id}")
+        current = found[0]
+        if resolution == "confirmed_not_committed":
+            if current in TERMINAL_STATES or current is ExecutionState.RECONCILED:
+                raise ExecutionStateError(
+                    f"resolution confirmed_not_committed is illegal from {current.value}"
+                )
+            provably_inert = declared_pure or positive_provider_proof
+            if not provably_inert and current in EFFECT_RISK_STATES:
+                raise ExecutionStateError(
+                    "an execution past the effect boundary can never be "
+                    "confirmed not committed without provider-side proof"
+                )
+            allowed = {
+                ExecutionState.CONSUMED,
+                ExecutionState.INTENT_RECORDED,
+                ExecutionState.EFFECT_UNKNOWN,
+            }
+            if provably_inert:
+                allowed |= {
+                    ExecutionState.DISPATCHED,
+                    ExecutionState.EFFECT_CONFIRMED,
+                }
+            if current not in allowed:
+                raise ExecutionStateError(
+                    f"resolution confirmed_not_committed is illegal from {current.value}"
+                )
+        elif resolution == "committed" and (
+            current not in EFFECT_RISK_STATES and not (declared_pure or positive_provider_proof)
+        ):
+            raise ExecutionStateError(
+                f"resolution committed requires effect risk, found {current.value}"
+            )
+        return self.transition(
+            capability_id,
+            ExecutionState.RECONCILED,
+            details={
+                "resolution": resolution,
+                "evidence_digest": evidence_digest,
+                "declared_pure": bool(declared_pure),
+                "positive_provider_proof": bool(positive_provider_proof),
+            },
+        )
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+
+    def _connect(self) -> sqlite3.Connection:
+        database = sqlite3.connect(
+            self.path,
+            timeout=self.busy_timeout_ms / 1_000,
+            isolation_level=None,
+            check_same_thread=False,
+        )
+        try:
+            database.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
+            database.execute("PRAGMA synchronous = FULL")
+            database.execute("PRAGMA foreign_keys = ON")
+            database.execute("PRAGMA trusted_schema = OFF")
+        except sqlite3.Error:
+            database.close()
+            raise
+        return database
+
+    @staticmethod
+    def _rollback(database: sqlite3.Connection) -> None:
+        try:
+            database.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+
+    def _assert_open(self) -> None:
+        if self._closed:
+            raise ExecutionStateError("execution-state database is closed")
+
+
+class CapabilityExecutionTracker:
+    """Validated lifecycle for one-use capability executions.
+
+    Every transition is checked against the explicit legal-edge table before it
+    is durably recorded. Illegal transitions are rejected and surfaced to the
+    caller; they never silently mutate stored state.
+    """
+
+    def __init__(
+        self,
+        store: ExecutionStateStore,
+        *,
+        namespace: str = "default",
+    ) -> None:
+        if not hasattr(store, "record_transition"):
+            raise TypeError("execution state store is required")
+        if _SCOPE.fullmatch(namespace) is None:
+            raise ValueError("execution tracker namespace is invalid")
+        self.store = store
+        self.namespace = namespace
+
+    def begin(self, capability_id: str, *, details: Mapping[str, Any] | None = None) -> ExecutionState:
+        _validate_capability_id(capability_id)
+        existing = self.store.current_state(self.namespace, capability_id)
+        if existing is not None:
+            raise ExecutionStateError(
+                f"capability {capability_id} already entered the execution lifecycle"
+            )
+        self.store.record_transition(
+            self.namespace,
+            capability_id,
+            None,
+            ExecutionState.ISSUED,
+            _validate_details(details),
+        )
+        return ExecutionState.ISSUED
+
+    def load(self, capability_id: str) -> ExecutionState | None:
+        _validate_capability_id(capability_id)
+        found = self.store.current_state(self.namespace, capability_id)
+        return found[0] if found else None
+
+    def transition(
+        self,
+        capability_id: str,
+        target: ExecutionState,
+        *,
+        details: Mapping[str, Any] | None = None,
+    ) -> ExecutionState:
+        if not isinstance(target, ExecutionState):
+            raise ExecutionStateError("transition target must be an ExecutionState")
+        found = self.store.current_state(self.namespace, capability_id)
+        if found is None:
+            raise ExecutionStateError(f"unknown execution for capability {capability_id}")
+        current, _sequence = found
+        if not is_legal_transition(current, target):
+            raise ExecutionStateError(
+                f"illegal lifecycle transition {current.value} -> {target.value} "
+                f"for capability {capability_id}"
+            )
+        self.store.record_transition(
+            self.namespace,
+            capability_id,
+            current,
+            target,
+            _validate_details(details),
+        )
+        return target
+
+    def reconcile(
+        self,
+        capability_id: str,
+        *,
+        resolution: str,
+        evidence_digest: str,
+        declared_pure: bool = False,
     ) -> ExecutionState:
         """Resolve uncertainty using positive evidence only.
 

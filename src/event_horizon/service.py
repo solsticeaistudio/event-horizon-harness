@@ -636,6 +636,7 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
         'recorder',
         {
             'path', 'signing_key_path', 'max_event_bytes', 'checkpoint_anchor_path',
+            'checkpoint_deployment_id', 'checkpoint_manifest_digest',
             *PROTECTED_CONFIG_FIELDS,
         },
     )
@@ -647,6 +648,8 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
         max_event_bytes=int(config['max_event_bytes']),
     )
     checkpoint_anchor = FileCheckpointAnchor(config['checkpoint_anchor_path'])
+    checkpoint_deployment_id = str(config['checkpoint_deployment_id'])
+    checkpoint_manifest_digest = str(config['checkpoint_manifest_digest'])
 
     def append(body: dict[str, Any]) -> Mapping[str, Any]:
         payload = body['payload']
@@ -665,7 +668,11 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
 
     def issue_checkpoint(_body: dict[str, Any]) -> Mapping[str, Any]:
         try:
-            envelope = recorder.issue_checkpoint(checkpoint_anchor)
+            envelope = recorder.issue_checkpoint(
+                checkpoint_anchor,
+                deployment_id=checkpoint_deployment_id,
+                manifest_digest=checkpoint_manifest_digest,
+            )
         except RecorderIntegrityError as exc:
             raise ProtocolError('checkpoint_denied', str(exc)) from exc
         return {'checkpoint': envelope}
@@ -716,6 +723,9 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
             'recorder_public_key_pem', 'executor_statement_public_key',
             'verifier_statement_public_key', 'guardian_statement_public_key',
             'watchdog_statement_public_key', 'execution_state_database',
+            'deployment_id', 'trust_root_manifest_digest', 'witness_public_key_pem',
+            'require_witness', 'approval_policy', 'trust_root_public_key_pem',
+            'manifest_envelope',
             *PROTECTED_CONFIG_FIELDS,
         },
     )
@@ -733,6 +743,9 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
         TYPE_TEARDOWN_ATTESTATION: config['watchdog_statement_public_key'],
         'executor-receipts': config['executor_statement_public_key'],
     })
+    witness_verifier = StatementVerifier({
+        'witness': config['witness_public_key_pem'],
+    }) if config.get('witness_public_key_pem') else None
     tracker_store = SqliteExecutionStateStore(config['execution_state_database'])
     builder = ContainmentCertificateBuilder(
         recorder_view,
@@ -741,11 +754,44 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
         tracker_store=tracker_store,
         execution_tracker_namespace='certification',
     )
+    deployment_id = str(config['deployment_id'])
+    trust_root_manifest_digest = (
+        str(config['trust_root_manifest_digest'])
+        if config['trust_root_manifest_digest']
+        else None
+    )
+    require_witness = config.get('require_witness') is True
+    from .witness import WITNESS_ACK_FIELDS, WitnessPolicy, verify_witness_acknowledgment_signature
+
+    # Optional quorum policy: when configured, issuance requires k independent
+    # manifest-authorized approvals bound to this exact issuance request.
+    approval_policy_config = config.get('approval_policy')
+    approval_chain = None
+    approval_policy = None
+    if approval_policy_config:
+        from .quorum import ApprovalPolicy
+        from .trust_manifest import ManifestChain
+
+        approval_policy = ApprovalPolicy(
+            action=str(approval_policy_config['action']),
+            required_role=str(approval_policy_config.get('required_role', 'approver')),
+            required_approvals=int(approval_policy_config['required_approvals']),
+        )
+        approval_chain = ManifestChain(
+            str(config['trust_root_public_key_pem']),
+            deployment_id=deployment_id,
+            environment='synthetic',
+        )
+        approval_chain.append(config['manifest_envelope'])
 
     def build(body: dict[str, Any]) -> Mapping[str, Any]:
-        # The certificate signer accepts an execution selector, never truth
-        # assertions: every security claim is derived from verified evidence.
-        unexpected = set(body) - {'run_id'}
+        # The certificate signer accepts an execution selector and deployment
+        # binding, never truth assertions. A witness acknowledgment is
+        # accepted only as a signed statement, verified against the pinned
+        # witness key below.
+        unexpected = set(body) - {
+            'run_id', 'witness_acknowledgment', 'approval_envelopes',
+        }
         if unexpected:
             raise ProtocolError(
                 'invalid_certificate',
@@ -754,8 +800,66 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
         run_id = body['run_id']
         if not isinstance(run_id, str) or not run_id or len(run_id.encode("utf-8")) > 256:
             raise ProtocolError('invalid_certificate', 'run_id is invalid')
+        witness_acknowledgment = None
+        if body.get('witness_acknowledgment') is not None:
+            acknowledgment = body['witness_acknowledgment']
+            unsigned = {
+                key: value for key, value in acknowledgment.items()
+                if key in WITNESS_ACK_FIELDS
+            }
+            if not verify_witness_acknowledgment_signature(
+                acknowledgment, config['witness_public_key_pem']
+            ) or len(unsigned) != len(WITNESS_ACK_FIELDS):
+                raise ProtocolError(
+                    'invalid_witness',
+                    'witness acknowledgment signature is invalid or malformed',
+                )
+            witness_acknowledgment = {
+                # Retain signature and key_id: verification reconstructs the
+                # signed payload from WITNESS_ACK_FIELDS but reads the
+                # signature bytes and signer identity from this envelope.
+                'ack': {
+                    key: value for key, value in acknowledgment.items()
+                    if key in WITNESS_ACK_FIELDS or key in {'signature', 'key_id'}
+                },
+                'witness_public_key_pem': config['witness_public_key_pem'],
+            }
+        approval_outcome = None
+        if approval_policy is not None:
+            from .quorum import evaluate_approvals
+
+            subject_digest = digest({
+                'action': approval_policy.action,
+                'deployment_id': deployment_id,
+                'run_id': run_id,
+                'trust_root_manifest_digest': trust_root_manifest_digest,
+            })
+            envelopes = body.get('approval_envelopes') or []
+            if not isinstance(envelopes, list):
+                raise ProtocolError('invalid_approval', 'approval_envelopes must be a list')
+            approval_outcome = evaluate_approvals(
+                envelopes,
+                policy=approval_policy,
+                expected_subject_digest=subject_digest,
+                chain=approval_chain,
+                statement_verifier=statement_verifier,
+            )
+            if not approval_outcome.satisfied:
+                raise ProtocolError(
+                    'approval_quorum_unmet',
+                    f'issuance requires {approval_policy.required_approvals} independent '
+                    f'approvals: {approval_outcome.detail}',
+                )
         try:
-            certificate = builder.build(run_id=run_id, checkpoint_anchor=checkpoint_anchor)
+            certificate = builder.build(
+                run_id=run_id,
+                deployment_id=deployment_id,
+                trust_root_manifest_digest=trust_root_manifest_digest,
+                checkpoint_anchor=checkpoint_anchor,
+                witness_acknowledgment=witness_acknowledgment,
+                witness_policy=WitnessPolicy(require_witness=require_witness),
+                approval_outcome=approval_outcome,
+            )
         except (TypeError, ValueError, CertificateBuildError) as exc:
             raise ProtocolError('invalid_certificate', str(exc)) from exc
         return {'certificate': certificate}
@@ -782,11 +886,67 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
             },
         ),
         'build': MessageSpec(
-            frozenset({'run_id'}),
+            frozenset({'run_id', 'witness_acknowledgment'}),
             build,
             request_authorizer.authorize,
         ),
         'verify': MessageSpec(frozenset({'certificate'}), verify),
+    }
+
+
+def _witness_specs(config_path: Path) -> dict[str, MessageSpec]:
+    config = _load_config(
+        config_path,
+        'witness',
+        {
+            'journal_path', 'signing_key_path', 'deployment_id',
+            'recorder_public_key_pem', 'witness_id',
+            *PROTECTED_CONFIG_FIELDS,
+        },
+    )
+    from .witness import LocalCheckpointWitness, WitnessError
+
+    signing_seed = load_private_seed(config['signing_key_path'])
+    request_authorizer = _protected_authorizer(config, 'checkpoint-witness')
+    witness = LocalCheckpointWitness(
+        Path(config['journal_path']),
+        witness_id=str(config['witness_id']),
+        signing_key=signing_seed,
+        deployment_id=str(config['deployment_id']),
+    )
+    recorder_public_key_pem = str(config['recorder_public_key_pem'])
+
+    def publish(body: dict[str, Any]) -> Mapping[str, Any]:
+        envelope = body.get('checkpoint_envelope')
+        manifest_digest = body.get('manifest_digest')
+        if not isinstance(envelope, dict) or not isinstance(manifest_digest, str):
+            raise ProtocolError('invalid_checkpoint', 'checkpoint publication fields are invalid')
+        try:
+            acknowledgment = witness.publish_checkpoint(
+                envelope,
+                recorder_public_key_pem=recorder_public_key_pem,
+                manifest_digest=manifest_digest,
+            )
+        except WitnessError as exc:
+            raise ProtocolError('checkpoint_rejected', str(exc)) from exc
+        return {'acknowledgment': acknowledgment}
+
+    def status() -> dict[str, Any]:
+        return {
+            **_info('witness'),
+            'key_id': witness.key_id,
+            'public_key_pem': witness.public_key_pem,
+            'deployment_id': str(config['deployment_id']),
+            'acknowledged_recordings': len(witness.all_acknowledgments()),
+        }
+
+    return {
+        'info': MessageSpec(frozenset(), lambda _body: status()),
+        'publish': MessageSpec(
+            frozenset({'checkpoint_envelope', 'manifest_digest'}),
+            publish,
+            request_authorizer.authorize,
+        ),
     }
 
 
@@ -798,6 +958,7 @@ ROLE_BUILDERS = {
     'executor': _executor_specs,
     'recorder': _recorder_specs,
     'certificate': _certificate_specs,
+    'witness': _witness_specs,
 }
 
 

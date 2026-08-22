@@ -26,11 +26,28 @@ from .statements import (
 )
 
 
-CERTIFICATE_SCHEMA = "event-horizon.containment-certificate.v0.5"
+CERTIFICATE_SCHEMA = "event-horizon.containment-certificate.v0.6"
+LEGACY_CERTIFICATE_SCHEMAS = frozenset({
+    "event-horizon.containment-certificate.v0.4",
+    "event-horizon.containment-certificate.v0.5",
+})
+
+# Machine-readable assurance lattice, ordered weakest to strongest. A
+# certificate states exactly which guarantees were actually satisfied;
+# absence of a witness or governed effect mediation is always visible.
+ASSURANCE_LEVELS = (
+    "local",                # signature over locally recorded evidence only
+    "authenticated",        # all consumed evidence independently signed & verified
+    "witnessed",            # + external witness acknowledges recorder history
+    "mediated-effects",     # + every governed effect reconciled through the gateway
+    "independent-trust",    # + every signer manifest-authorized for its role
+)
+_ASSURANCE_ORDER = {name: index for index, name in enumerate(ASSURANCE_LEVELS)}
 
 CLAIM_SATISFIED = "satisfied"
 CLAIM_VIOLATED = "violated"
 CLAIM_UNKNOWN = "unknown"
+CLAIM_CONFLICTED = "conflicted"
 
 # Required evidence classes for proof-of-completeness: a "complete" certificate
 # must contain at least one event of every class, every consumed event must be
@@ -61,11 +78,13 @@ class CertificateBuildError(ValueError):
     pass
 
 
-def _claim(value: bool | None) -> str:
+def _claim(value: bool | None | str) -> str:
     if value is True:
         return CLAIM_SATISFIED
     if value is False:
         return CLAIM_VIOLATED
+    if value == CLAIM_CONFLICTED:
+        return CLAIM_CONFLICTED
     return CLAIM_UNKNOWN
 
 
@@ -152,11 +171,30 @@ class ContainmentCertificateBuilder:
         self,
         *,
         run_id: str,
+        deployment_id: str,
+        trust_root_manifest_digest: str | None = None,
         expected_session_id: str | None = None,
         checkpoint_anchor: Any = None,
+        witness_acknowledgment: Any = None,
+        witness_policy: Any = None,
+        effect_reconciliation_statements: list[Mapping[str, Any]] | None = None,
+        approval_outcome: Any = None,
     ) -> dict[str, Any]:
+        """Build a v0.6 certificate for one execution namespace.
+
+        The caller supplies only selectors and *independently signed* context
+        objects (witness acknowledgment, gateway reconciliation statements).
+        Every security claim is derived from verified evidence.
+        """
         if not isinstance(run_id, str) or not run_id or len(run_id.encode("utf-8")) > 256:
             raise CertificateBuildError("run_id must be a non-empty bounded string")
+        if not isinstance(deployment_id, str) or not deployment_id:
+            raise CertificateBuildError("deployment_id is required")
+        if (
+            not isinstance(trust_root_manifest_digest, str)
+            and trust_root_manifest_digest is not None
+        ):
+            raise CertificateBuildError("trust_root_manifest_digest must be a digest or None")
         snapshot = self.recorder.verified_snapshot()
 
         checkpoint_envelope = None
@@ -315,7 +353,16 @@ class ContainmentCertificateBuilder:
         if denied_executions and not completed:
             blocking.append("all executions were denied; no successful contained execution exists")
 
-        unresolved_claims = sorted(name for name, value in claims.items() if value != CLAIM_SATISFIED)
+        # Evidence completeness and effect-mediation completeness are distinct
+        # claims. An unevaluated effect-mediation claim (no gateway statements
+        # supplied) does not block evidence completeness; a violated or
+        # conflicted one always does.
+        blocking_claims = {
+            name: value for name, value in claims.items()
+            if value != CLAIM_SATISFIED
+            and not (name == "effect_mediation_consistent" and value == CLAIM_UNKNOWN)
+        }
+        unresolved_claims = sorted(blocking_claims)
         if unresolved_claims:
             blocking.append(f"claims not fully satisfied: {unresolved_claims!r}")
 
@@ -325,15 +372,69 @@ class ContainmentCertificateBuilder:
             except ExecutionStateError as exc:
                 blocking.append(str(exc))
 
+        # ---- effect reconciliation (independent of executor output) ----------
+        effects_summary = self._derive_effect_summary(
+            effect_reconciliation_statements or [], completed, indeterminate, blocking
+        )
+        claims["effect_mediation_consistent"] = effects_summary["consistency_claim"]
+
+        # ---- witness verdict -------------------------------------------------
+        from .witness import WitnessPolicy as _WitnessPolicy, compare_recorder_with_witness
+
+        policy = witness_policy or _WitnessPolicy()
+        witness_verdict = compare_recorder_with_witness(
+            snapshot_event_count=snapshot.event_count,
+            snapshot_chain_tip=snapshot.chain_tip,
+            acknowledgment=witness_acknowledgment,
+            deployment_id=deployment_id,
+            manifest_digest=trust_root_manifest_digest or "",
+            policy=policy,
+        )
+        if policy.require_witness and not witness_verdict.ok:
+            blocking.append(f"witness continuity failure: {witness_verdict.status}")
+
         status = "complete" if not blocking else "incomplete"
+        if effects_summary.get("has_conflict"):
+            # First-class conflicted outcome: authenticated sources disagree
+            # and Event Horizon preserves that rather than choosing one.
+            status = "conflicted"
 
         evidence_root = _merkle_root([event["event_hash"] for event in events])
 
+        # ---- assurance -------------------------------------------------------
+        guarantees = {"local"}
+        if attestations or decisions or teardown_events:
+            statements_ok = (
+                verifier_ok is not False
+                and guardian_ok is not False
+                and teardown_claim_value is not False
+                and self.statement_verifier is not None
+                and bool(attestations or decisions)
+            )
+            if statements_ok and not any("invalid" in reason for reason in blocking):
+                guarantees.add("authenticated")
+            if witness_verdict.ok and witness_acknowledgment is not None:
+                guarantees.add("witnessed")
+            if effects_summary["mediated_complete"]:
+                guarantees.add("mediated-effects")
+            if "authenticated" in guarantees and self._manifest_authorized():
+                guarantees.add("independent-trust")
+        assurance_level = "local"
+        for level in ASSURANCE_LEVELS:
+            if level == "local" or level in guarantees:
+                assurance_level = level
+            else:
+                break
+
         payload = {
             "schema": CERTIFICATE_SCHEMA,
+            "deployment_id": deployment_id,
+            "trust_root_manifest_digest": trust_root_manifest_digest,
+            "assurance_level": assurance_level,
+            "assurance_guarantees": sorted(guarantees),
             "run_id": run_id,
             "session_id": derived_session_id,
-            "created_at": time.time_ns() // 1_000_000,
+            "created_at_ms": time.time_ns() // 1_000_000,
             "status": status,
             "claims": dict(sorted(claims.items())),
             "blocking_reasons": sorted(blocking),
@@ -343,6 +444,20 @@ class ContainmentCertificateBuilder:
             "event_chain_tip": snapshot.chain_tip,
             "total_event_count": snapshot.event_count,
             "recorder_checkpoint": checkpoint_envelope,
+            "witness": {
+                "verdict": witness_verdict.status,
+                "detail": witness_verdict.detail,
+            },
+            "approvals": (
+                {
+                    "satisfied": approval_outcome.satisfied,
+                    "required": approval_outcome.required,
+                    "approved_by": sorted(approval_outcome.approved_by),
+                }
+                if approval_outcome is not None
+                else None
+            ),
+            "effects": effects_summary["summary"],
             "completed_actions": len(completed),
             "denied_transitions": sum(1 for event in events if event["event_type"] in {
                 "request.denied", "execution.denied", "request.rejected",
@@ -435,6 +550,135 @@ class ContainmentCertificateBuilder:
         }
 
     # ------------------------------------------------------- statement checks
+
+    def _derive_effect_summary(
+        self,
+        reconciliation_statements: list[Mapping[str, Any]],
+        completed: list[dict[str, Any]],
+        indeterminate: list[dict[str, Any]],
+        blocking: list[str],
+    ) -> dict[str, Any]:
+        """Derive effect-mediation claims from gateway-signed statements.
+
+        Executor output alone never establishes final effect state once the
+        Effect Gateway is in use. Reconciliation statements are verified
+        against the pinned gateway key; conflicts between an executor-signed
+        completion and a gateway-signed reconciliation are surfaced as
+        ``conflicted`` rather than resolved by arrival order.
+        """
+        from .statements import TYPE_EFFECT_RECONCILIATION
+
+        summary = {
+            "reconciled_count": 0,
+            "committed": 0,
+            "confirmed_not_committed": 0,
+            "indeterminate": 0,
+            "conflicted_executions": [],
+            "unverified_statements": 0,
+        }
+        if not reconciliation_statements:
+            return {
+                "summary": summary,
+                "consistency_claim": CLAIM_UNKNOWN,
+                "mediated_complete": False,
+            }
+        resolutions: dict[str, str] = {}
+        unverified = 0
+        for index, envelope in enumerate(reconciliation_statements):
+            try:
+                statement = self.statement_verifier.verify(
+                    envelope, expected_type=TYPE_EFFECT_RECONCILIATION
+                )
+            except (StatementError, TypeError, ValueError):
+                unverified += 1
+                blocking.append(
+                    f"effect reconciliation [{index}] carries an invalid gateway signature"
+                )
+                continue
+            payload = statement.payload
+            execution_key = str(payload.get("idempotency_key") or payload.get("execution_id"))
+            resolutions[execution_key] = str(payload.get("resolution"))
+        summary["unverified_statements"] = unverified
+        for resolution in resolutions.values():
+            if resolution == "committed":
+                summary["committed"] += 1
+            elif resolution == "confirmed_not_committed":
+                summary["confirmed_not_committed"] += 1
+            else:
+                summary["indeterminate"] += 1
+        summary["reconciled_count"] = len(resolutions)
+
+        # Conflict detection: executor claims success while the gateway
+        # positively proved non-execution for a bound request. Bindings are
+        # matched on request digest, gateway idempotency key, or execution ID.
+        def _event_keys(payload: Mapping[str, Any]) -> set[str]:
+            binding = payload.get("effect_gateway")
+            candidates = {str(payload.get("request_digest") or "")}
+            if isinstance(binding, Mapping):
+                candidates.add(str(binding.get("idempotency_key") or ""))
+                candidates.add(str(binding.get("execution_id") or ""))
+            return {key for key in candidates if key}
+
+        conflicted = []
+        for event in completed:
+            resolution = next(
+                (resolutions[key] for key in _event_keys(event["payload"]) if key in resolutions),
+                None,
+            )
+            if resolution == "confirmed_not_committed":
+                conflicted.append(str(event["payload"].get("request_digest")))
+        summary["conflicted_executions"] = sorted(conflicted)
+        if conflicted:
+            blocking.append(
+                f"executor output conflicts with gateway reconciliation for {sorted(conflicted)!r}"
+            )
+
+        unresolved_gateway = sum(1 for r in resolutions.values() if r == "indeterminate")
+
+        # Effect-mediation completeness: every governed execution recorded by
+        # this run must have a verified reconciliation statement.
+        governed_keys: list[str] = []
+        for event in (*completed, *indeterminate):
+            binding = event["payload"].get("effect_gateway")
+            if isinstance(binding, Mapping) and binding.get("idempotency_key"):
+                governed_keys.append(str(binding["idempotency_key"]))
+        missing_reconciliations = sorted(
+            key for key in governed_keys if key not in resolutions
+        )
+        if missing_reconciliations:
+            blocking.append(
+                "governed executions lack gateway reconciliation statements: "
+                f"{missing_reconciliations!r}"
+            )
+
+        mediated_complete = (
+            bool(resolutions)
+            and unresolved_gateway == 0
+            and not unverified
+            and not missing_reconciliations
+        )
+        if conflicted:
+            consistency_claim = CLAIM_CONFLICTED
+        elif unverified:
+            consistency_claim = CLAIM_UNKNOWN
+        elif unresolved_gateway or indeterminate:
+            consistency_claim = CLAIM_VIOLATED
+        elif resolutions:
+            consistency_claim = CLAIM_SATISFIED
+        else:
+            consistency_claim = CLAIM_UNKNOWN
+        return {
+            "summary": summary,
+            "consistency_claim": consistency_claim,
+            "mediated_complete": mediated_complete and consistency_claim == CLAIM_SATISFIED,
+            "has_conflict": bool(conflicted),
+        }
+
+    def _manifest_authorized(self) -> bool:
+        """True when the verifier enforces manifest role authorization."""
+        from .trust_manifest import AuthorizedStatementVerifier
+
+        return isinstance(getattr(self, "statement_verifier", None), AuthorizedStatementVerifier)
 
     @staticmethod
     def _statement_key_id(events: list[dict[str, Any]]) -> str | None:

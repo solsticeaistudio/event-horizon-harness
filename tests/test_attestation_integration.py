@@ -67,7 +67,9 @@ class ExecutorAttestationIntegrationTests(unittest.TestCase):
             result = executor.execute(request, capability, attestation)
             self.assertTrue(result.success)
             certificate_builder = ContainmentCertificateBuilder(recorder, b"C" * 32)
-            certificate = certificate_builder.build(run_id="cert-run")
+            certificate = certificate_builder.build(
+                run_id="cert-run", deployment_id="dep-test", trust_root_manifest_digest=None
+            )
             self.assertEqual(certificate["algorithm"], "Ed25519")
             payload = certificate["certificate"]
             # This minimal in-process topology has no verifier statements or

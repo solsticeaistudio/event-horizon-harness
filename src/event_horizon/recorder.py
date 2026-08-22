@@ -20,9 +20,20 @@ from .canonical import canonical_bytes
 from .canonical import digest
 
 
-RECORDER_CHECKPOINT_SCHEMA = "event-horizon.recorder-checkpoint.v1"
+RECORDER_CHECKPOINT_SCHEMA = "event-horizon.recorder-checkpoint.v2"
+LEGACY_RECORDER_CHECKPOINT_SCHEMA = "event-horizon.recorder-checkpoint.v1"
 GENESIS_CHAIN_TIP = "0" * 64
 _CHECKPOINT_FIELDS = {
+    "schema",
+    "deployment_id",
+    "manifest_digest",
+    "recorder_id",
+    "sequence",
+    "chain_tip",
+    "previous_checkpoint_digest",
+    "issued_at_ms",
+}
+_LEGACY_CHECKPOINT_FIELDS = {
     "schema",
     "recorder_key_id",
     "sequence",
@@ -37,8 +48,8 @@ class RecorderIntegrityError(RuntimeError):
     pass
 
 
-def _checkpoint_digest(previous_digest: str, checkpoint_payload: Mapping[str, Any]) -> str:
-    return digest({"schema": RECORDER_CHECKPOINT_SCHEMA, "previous_checkpoint_digest": previous_digest, "checkpoint": dict(checkpoint_payload)})
+def _checkpoint_digest(checkpoint_payload: Mapping[str, Any]) -> str:
+    return digest(dict(checkpoint_payload))
 
 
 @dataclass(frozen=True)
@@ -342,41 +353,62 @@ class ExternalRecorder:
                 source_sequences=dict(source_sequences),
             )
 
-    def issue_checkpoint(self, anchor: CheckpointAnchor) -> dict[str, Any]:
+    def issue_checkpoint(
+        self,
+        anchor: CheckpointAnchor,
+        *,
+        deployment_id: str,
+        manifest_digest: str,
+    ) -> dict[str, Any]:
         """Sign the current chain state and persist it via an external anchor.
 
-        The checkpoint is signed by the recorder key and stored outside the
-        recorder file so that complete-history replacement or rollback of the
-        events file becomes detectable against independently retained state.
+        v0.6 checkpoints bind the deployment identity and the applicable
+        trust-root manifest digest so witnessed history is deployment-scoped
+        and trust-root-versioned. Legacy v1 checkpoints remain verifiable for
+        historical purposes but are never treated as witnessed evidence.
         """
         if self._checkpoint_key is not self._public_key:
             raise RecorderIntegrityError(
                 "this recorder view does not hold the signing key and cannot issue checkpoints"
             )
+        if not isinstance(deployment_id, str) or not deployment_id:
+            raise RecorderIntegrityError("checkpoint deployment ID is invalid")
+        if (
+            not isinstance(manifest_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", manifest_digest) is None
+        ):
+            raise RecorderIntegrityError("checkpoint manifest digest is invalid")
         snapshot = self.verified_snapshot()
         previous = anchor.load_latest()
         previous_digest = GENESIS_CHAIN_TIP
         if previous is not None:
             envelope = self._require_checkpoint_envelope(previous)
             payload = envelope["checkpoint"]
+            if payload["schema"] != RECORDER_CHECKPOINT_SCHEMA:
+                raise RecorderIntegrityError(
+                    "cannot chain a v0.6 checkpoint onto a legacy checkpoint"
+                )
             if (
-                payload["recorder_key_id"] != self.key_id
+                payload["recorder_id"] != self.key_id
                 or payload["sequence"] > snapshot.event_count
                 or (payload["sequence"] == snapshot.event_count and payload["chain_tip"] != snapshot.chain_tip)
+                or payload["deployment_id"] != deployment_id
+                or payload["manifest_digest"] != manifest_digest
             ):
                 raise RecorderIntegrityError(
-                    "anchored checkpoint contradicts the current recorder history"
+                    "anchored checkpoint contradicts the current recorder history "
+                    "or was issued under a different deployment/manifest"
                 )
-            previous_digest = _checkpoint_digest(
-                payload["previous_checkpoint_digest"], payload
-            )
+            previous_digest = _checkpoint_digest(payload)
         checkpoint_payload = {
             "schema": RECORDER_CHECKPOINT_SCHEMA,
-            "recorder_key_id": self.key_id,
+            "deployment_id": deployment_id,
+            "manifest_digest": manifest_digest,
+            "recorder_id": self.key_id,
             "sequence": snapshot.event_count,
             "chain_tip": snapshot.chain_tip,
             "previous_checkpoint_digest": previous_digest,
-            "issued_at": time.time_ns() // 1_000_000,
+            "issued_at_ms": time.time_ns() // 1_000_000,
         }
         signature = base64.urlsafe_b64encode(
             self._private_key.sign(canonical_bytes(checkpoint_payload))
@@ -410,20 +442,42 @@ class ExternalRecorder:
             return False, "recorder history rolled back behind the anchored checkpoint"
         return False, "recorder history diverged from the anchored checkpoint"
 
-    def _require_checkpoint_envelope(self, envelope: Any) -> Mapping[str, Any]:
+    def _require_checkpoint_envelope(
+        self,
+        envelope: Any,
+        *,
+        allow_legacy: bool = False,
+    ) -> Mapping[str, Any]:
         if not isinstance(envelope, dict) or set(envelope) != _CHECKPOINT_ENVELOPE_FIELDS:
             raise RecorderIntegrityError("checkpoint envelope fields are invalid")
         if envelope["algorithm"] != "Ed25519":
             raise RecorderIntegrityError("checkpoint algorithm is unsupported")
         payload = envelope["checkpoint"]
+        schema = payload.get("schema") if isinstance(payload, dict) else None
+        if schema == LEGACY_RECORDER_CHECKPOINT_SCHEMA:
+            if not allow_legacy:
+                raise RecorderIntegrityError(
+                    "legacy v1 checkpoints are not valid witnessed evidence"
+                )
+            return self._verify_legacy_checkpoint_envelope(envelope)
         if not isinstance(payload, dict) or set(payload) != _CHECKPOINT_FIELDS:
             raise RecorderIntegrityError("checkpoint payload fields are invalid")
-        if payload["schema"] != RECORDER_CHECKPOINT_SCHEMA:
-            raise RecorderIntegrityError("checkpoint schema is unsupported")
-        if not isinstance(payload["chain_tip"], str) or re.fullmatch(r"[0-9a-f]{64}", payload["chain_tip"]) is None:
+        if schema != RECORDER_CHECKPOINT_SCHEMA:
+            raise RecorderIntegrityError(f"unsupported checkpoint schema: {schema!r}")
+        if (
+            not isinstance(payload["chain_tip"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", payload["chain_tip"]) is None
+        ):
             raise RecorderIntegrityError("checkpoint chain tip is malformed")
         if type(payload["sequence"]) is not int or payload["sequence"] < 0:
             raise RecorderIntegrityError("checkpoint sequence is invalid")
+        if not isinstance(payload["deployment_id"], str) or not payload["deployment_id"]:
+            raise RecorderIntegrityError("checkpoint deployment ID is invalid")
+        if (
+            not isinstance(payload["manifest_digest"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", payload["manifest_digest"]) is None
+        ):
+            raise RecorderIntegrityError("checkpoint manifest digest is malformed")
         raw_checkpoint = self._checkpoint_key.public_bytes(
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
@@ -431,11 +485,11 @@ class ExternalRecorder:
         expected_checkpoint_key_id = f"ed25519:{hashlib.sha256(raw_checkpoint).hexdigest()[:32]}"
         if (
             envelope["key_id"] != expected_checkpoint_key_id
-            or payload["recorder_key_id"] != expected_checkpoint_key_id
+            or payload["recorder_id"] != expected_checkpoint_key_id
         ):
             raise RecorderIntegrityError("checkpoint was not issued by the pinned recorder key")
-        issued_at = payload["issued_at"]
-        if type(issued_at) is not int or issued_at < 0:
+        issued_at_ms = payload["issued_at_ms"]
+        if type(issued_at_ms) is not int or issued_at_ms < 0:
             raise RecorderIntegrityError("checkpoint issuance time is invalid")
         signature = envelope["signature"]
         if not isinstance(signature, str):
@@ -447,6 +501,28 @@ class ExternalRecorder:
             self._checkpoint_key.verify(decoded, canonical_bytes(payload))
         except (InvalidSignature, ValueError, TypeError) as exc:
             raise RecorderIntegrityError("checkpoint signature is invalid") from exc
+        return envelope
+
+    def _verify_legacy_checkpoint_envelope(self, envelope: Mapping[str, Any]) -> Mapping[str, Any]:
+        payload = envelope["checkpoint"]
+        raw_checkpoint = self._checkpoint_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        expected = f"ed25519:{hashlib.sha256(raw_checkpoint).hexdigest()[:32]}"
+        if envelope["key_id"] != expected or payload["recorder_key_id"] != expected:
+            raise RecorderIntegrityError("legacy checkpoint key identity mismatch")
+        if type(payload["issued_at"]) is not int or payload["issued_at"] < 0:
+            raise RecorderIntegrityError("legacy checkpoint issuance time is invalid")
+        try:
+            decoded = base64.urlsafe_b64decode(
+                envelope["signature"] + "=" * (-len(envelope["signature"]) % 4)
+            )
+            if len(decoded) != 64:
+                raise RecorderIntegrityError("legacy checkpoint signature length is invalid")
+            self._checkpoint_key.verify(decoded, canonical_bytes(payload))
+        except (InvalidSignature, ValueError, TypeError) as exc:
+            raise RecorderIntegrityError("legacy checkpoint signature is invalid") from exc
         return envelope
 
     @staticmethod
@@ -470,7 +546,7 @@ class ExternalRecorder:
                 format=serialization.PublicFormat.Raw,
             )
             expected_key_id = f"ed25519:{hashlib.sha256(raw).hexdigest()[:32]}"
-            if envelope["key_id"] != payload["recorder_key_id"] or envelope["key_id"] != expected_key_id:
+            if envelope["key_id"] != payload["recorder_id"] or envelope["key_id"] != expected_key_id:
                 return False
             signature = base64.urlsafe_b64decode(envelope["signature"] + "=" * (-len(envelope["signature"]) % 4))
             if len(signature) != 64:
