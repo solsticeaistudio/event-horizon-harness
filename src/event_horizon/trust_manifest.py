@@ -32,6 +32,23 @@ from .canonical import canonical_bytes, digest
 
 MANIFEST_SCHEMA = "event-horizon.trust-manifest.v1"
 MANIFEST_ALGORITHM = "Ed25519"
+AUTHORITY_GRANT_SCHEMA = "event-horizon.authority-grant.v1"
+
+# Fields of a root-issued intermediate authority grant.
+GRANT_FIELDS = {
+    "schema",
+    "algorithm",
+    "grant_id",
+    "deployment_id",
+    "environment",
+    "intermediate_key_id",
+    "intermediate_public_key_pem",
+    "allowed_roles",
+    "may_replace_witness",
+    "max_manifest_sequence",
+    "issued_at_ms",
+    "signature",
+}
 MAX_MANIFEST_ACTORS = 64
 _MAX_TEXT = 256
 
@@ -371,6 +388,123 @@ class TrustRootAuthority:
         return {**payload, "signature": signature}
 
 
+class IntermediateAuthority:
+    """Delegated manifest signer constrained by a root-issued grant."""
+
+    def __init__(
+        self,
+        signing_key: bytes | Ed25519PrivateKey,
+        *,
+        deployment_id: str,
+        environment: str,
+        grant: Mapping[str, Any],
+    ) -> None:
+        self._private_key = _load_private(signing_key)
+        public_key = self._private_key.public_key()
+        self.key_id = _key_id_for(public_key)
+        self.public_key_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("ascii")
+        if not isinstance(grant, Mapping) or grant.get("intermediate_key_id") != self.key_id:
+            raise TrustManifestError(
+                "intermediate authority does not match its delegation grant"
+            )
+        self.grant = grant
+        self.deployment_id = _require_scope(deployment_id, "deployment ID")
+        self.environment = _require_scope(environment, "environment")
+
+    def issue_manifest(
+        self,
+        actors: list[dict[str, Any]],
+        *,
+        manifest_version: int,
+        sequence: int,
+        issued_at_ms: int,
+        previous_manifest_digest: str | None,
+        policy_roots: list[str] | None = None,
+        revocations: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        # Reuse the root issuer's payload construction by temporarily signing
+        # with the intermediate key: build unsigned payload here directly.
+        from dataclasses import dataclass as _dc  # noqa: F401
+
+        expected_previous = (
+            genesis_manifest_digest(self.deployment_id, self.environment)
+            if manifest_version == 1
+            else previous_manifest_digest
+        )
+        if not isinstance(expected_previous, str):
+            raise TrustManifestError("previous manifest digest is required")
+        validated = []
+        seen: set[str] = set()
+        for entry in actors:
+            e = _validate_actor_entry(dict(entry))
+            if e["key_id"] in seen:
+                raise TrustManifestError("duplicate actor key")
+            seen.add(e["key_id"])
+            validated.append(e)
+        payload = {
+            "schema": MANIFEST_SCHEMA,
+            "algorithm": MANIFEST_ALGORITHM,
+            "deployment_id": self.deployment_id,
+            "environment": self.environment,
+            "manifest_version": manifest_version,
+            "sequence": sequence,
+            "issued_at_ms": issued_at_ms,
+            "previous_manifest_digest": expected_previous,
+            "actors": validated,
+            "policy_roots": sorted(policy_roots or []),
+            "allowed_algorithms": sorted(ALLOWED_ALGORITHMS),
+            "revocations": sorted(
+                revocations or [],
+                key=lambda item: (item["effective_sequence"], item["key_id"]),
+            ),
+            "root_key_id": self.key_id,
+        }
+        signature = base64.urlsafe_b64encode(
+            self._private_key.sign(canonical_bytes(payload))
+        ).rstrip(b"=").decode("ascii")
+        return {**payload, "signature": signature}
+
+
+def issue_authority_grant(
+    root_authority: "TrustRootAuthority",
+    intermediate_public_key_pem: str,
+    *,
+    grant_id: str,
+    allowed_roles: list[str],
+    may_replace_witness: bool,
+    max_manifest_sequence: int,
+    issued_at_ms: int,
+) -> dict[str, Any]:
+    """Offline root operation: delegate constrained authority to an intermediate."""
+    for role in allowed_roles:
+        if role not in ROLES or role == "deployment-root":
+            raise TrustManifestError(
+                f"role {role!r} cannot be delegated by an authority grant"
+            )
+    key_id = public_key_id(intermediate_public_key_pem)
+    payload = {
+        "schema": AUTHORITY_GRANT_SCHEMA,
+        "algorithm": MANIFEST_ALGORITHM,
+        "grant_id": grant_id,
+        "deployment_id": root_authority.deployment_id,
+        "environment": root_authority.environment,
+        "intermediate_key_id": key_id,
+        "intermediate_public_key_pem": intermediate_public_key_pem,
+        "allowed_roles": sorted(allowed_roles),
+        "may_replace_witness": bool(may_replace_witness),
+        "max_manifest_sequence": max_manifest_sequence,
+        "issued_at_ms": issued_at_ms,
+    }
+    private_key = root_authority._private_key
+    signature = base64.urlsafe_b64encode(
+        private_key.sign(canonical_bytes(payload))
+    ).rstrip(b"=").decode("ascii")
+    return {**payload, "signature": signature}
+
+
 class ManifestChain:
     """Verifies and stores the tamper-evident manifest chain for a deployment."""
 
@@ -380,6 +514,7 @@ class ManifestChain:
         *,
         deployment_id: str,
         environment: str,
+        authority_grant: Mapping[str, Any] | None = None,
     ) -> None:
         try:
             loaded = serialization.load_pem_public_key(
@@ -394,6 +529,96 @@ class ManifestChain:
         self.deployment_id = _require_scope(deployment_id, "deployment ID")
         self.environment = _require_scope(environment, "environment")
         self._chain: list[VerifiedManifest] = []
+        # v0.8 root blast-radius reduction: when an authority grant is
+        # supplied, manifests may be signed by the delegated intermediate key
+        # only, and only within the grant's explicit constraints. The offline
+        # root private key is never needed at runtime.
+        self.authority_grant: Mapping[str, Any] | None = None
+        self.signing_authority_key: Ed25519PublicKey = loaded
+        if authority_grant is not None:
+            self._accept_grant(authority_grant)
+
+    def _accept_grant(self, grant: Mapping[str, Any]) -> None:
+        if not isinstance(grant, dict) or set(grant) != GRANT_FIELDS:
+            raise TrustManifestError("authority grant fields are invalid")
+        if grant["schema"] != AUTHORITY_GRANT_SCHEMA:
+            raise TrustManifestError("unsupported authority grant schema")
+        unsigned = {k: v for k, v in grant.items() if k != "signature"}
+        if (
+            grant["deployment_id"] != self.deployment_id
+            or grant["environment"] != self.environment
+        ):
+            raise TrustManifestError("authority grant binds a different deployment")
+        try:
+            intermediate = serialization.load_pem_public_key(
+                grant["intermediate_public_key_pem"].encode("ascii")
+            )
+        except (ValueError, TypeError, UnicodeError, AttributeError) as exc:
+            raise TrustManifestError("intermediate key PEM is malformed") from exc
+        if not isinstance(intermediate, Ed25519PublicKey):
+            raise TrustManifestError("intermediate key must be Ed25519")
+        if grant["intermediate_key_id"] != _key_id_for(intermediate):
+            raise TrustManifestError("grant intermediate key identity mismatch")
+        decoded = base64.urlsafe_b64decode(grant["signature"] + "=" * (-len(grant["signature"]) % 4))
+        try:
+            self._root_key.verify(decoded, canonical_bytes(unsigned))
+        except (InvalidSignature, ValueError, TypeError) as exc:
+            raise TrustManifestError("authority grant signature is invalid") from exc
+        allowed = grant["allowed_roles"]
+        if (
+            not isinstance(allowed, list)
+            or not allowed
+            or any(role not in ROLES for role in allowed)
+        ):
+            raise TrustManifestError("grant allowed roles are invalid")
+        if type(grant["max_manifest_sequence"]) is not int or grant["max_manifest_sequence"] < 1:
+            raise TrustManifestError("grant max manifest sequence is invalid")
+        if type(grant["may_replace_witness"]) is not bool:
+            raise TrustManifestError("grant witness-replacement flag is invalid")
+        self.authority_grant = grant
+        self.signing_authority_key = intermediate
+
+    def _enforce_grant(self, envelope: Mapping[str, Any], previous: VerifiedManifest | None) -> None:
+        grant = self.authority_grant
+        if grant is None:
+            return
+        if envelope["root_key_id"] != _key_id_for(self.signing_authority_key):
+            raise KeyNotAuthorizedError(
+                "manifest was not signed by the delegated intermediate authority",
+                reason_code="wrong-intermediate-key",
+            )
+        new_roles = {entry["role"] for entry in envelope["actors"]}
+        disallowed = sorted(new_roles - set(grant["allowed_roles"]))
+        if disallowed:
+            # Authority widening attempt: the intermediate exceeds its grant.
+            raise KeyNotAuthorizedError(
+                f"intermediate granted roles {sorted(grant['allowed_roles'])} "
+                f"but manifest authorizes {disallowed!r}",
+                reason_code="role-outside-grant",
+            )
+        if envelope["sequence"] > grant["max_manifest_sequence"]:
+            raise KeyNotAuthorizedError(
+                "manifest sequence exceeds the intermediate's delegated maximum",
+                reason_code="sequence-outside-grant",
+            )
+        if previous is not None:
+            old_witnesses = {
+                entry["key_id"] for entry in previous.envelope["actors"]
+                if entry["role"] == "witness"
+            }
+            new_witnesses = {
+                entry["key_id"] for entry in envelope["actors"]
+                if entry["role"] == "witness"
+            }
+            if new_witnesses and old_witnesses and new_witnesses != old_witnesses:
+                if not grant["may_replace_witness"]:
+                    raise KeyNotAuthorizedError(
+                        "intermediate attempted witness replacement without authority",
+                        reason_code="witness-replacement-forbidden",
+                    )
+
+    def issue_delegated_grant_stub(self):  # pragma: no cover - documentation seam
+        raise NotImplementedError
 
     @property
     def current(self) -> VerifiedManifest | None:
@@ -412,10 +637,25 @@ class ManifestChain:
             )
         if envelope["algorithm"] not in ALLOWED_ALGORITHMS:
             raise TrustManifestError("manifest algorithm is not allowed")
-        if envelope["root_key_id"] != self.root_key_id:
+        # Delegated authority (v0.8): when a grant is pinned, the intermediate
+        # key signs manifests and grant constraints are enforced; otherwise
+        # the offline deployment root signs directly.
+        signing_key = self.signing_authority_key
+        expected_key_id = (
+            _key_id_for(self.signing_authority_key)
+            if self.authority_grant is not None
+            else self.root_key_id
+        )
+        if envelope["root_key_id"] != expected_key_id:
+            code = (
+                "wrong-intermediate-key"
+                if self.authority_grant is not None
+                else "wrong-root-key"
+            )
             raise KeyNotAuthorizedError(
-                "manifest was not signed by the pinned deployment root",
-                reason_code="wrong-root-key",
+                "manifest was not signed by the pinned "
+                + ("intermediate authority" if self.authority_grant is not None else "deployment root"),
+                reason_code=code,
             )
         if envelope["deployment_id"] != self.deployment_id:
             raise TrustManifestError("manifest belongs to a different deployment")
@@ -441,7 +681,7 @@ class ManifestChain:
             decoded = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
             if len(decoded) != 64:
                 raise TrustManifestError("manifest signature length is invalid")
-            self._root_key.verify(decoded, canonical_bytes(unsigned))
+            signing_key.verify(decoded, canonical_bytes(unsigned))
         except (InvalidSignature, ValueError, TypeError) as exc:
             raise TrustManifestError("manifest signature is invalid") from exc
         manifest = VerifiedManifest(
@@ -452,6 +692,7 @@ class ManifestChain:
             sequence=envelope["sequence"],
             manifest_digest=digest(unsigned),
         )
+        self._enforce_grant(envelope, self._chain[-1] if self._chain else None)
         self._check_chaining(manifest)
         return manifest
 

@@ -136,7 +136,10 @@ def write_frame(stream: BinaryIO, message: Mapping[str, Any]) -> None:
 class MessageSpec:
     body_fields: frozenset[str]
     handler: Callable[[dict[str, Any]], Mapping[str, Any]]
-    authorizer: Callable[[Mapping[str, Any], Mapping[str, Any]], None] | None = None
+    authorizer: Callable[..., None] | None = None
+    # Purpose binding for manifest-scoped RPC authorization (v0.8): a signed
+    # authorization is only valid for this exact purpose at this service.
+    authorized_purpose: str = ""
 
 
 def request_envelope(
@@ -200,7 +203,11 @@ def validate_request(
         if not isinstance(authorization, dict):
             raise ProtocolError('authorization_invalid', 'authorization must be an object')
         unsigned = {key: message[key] for key in ('type', 'request_id', 'deadline_ms', 'body')}
-        spec.authorizer(unsigned, authorization)
+        spec.authorizer(
+            unsigned,
+            authorization,
+            expected_purpose=spec.authorized_purpose or None,
+        )
     return message_type, request_id, body, spec
 
 

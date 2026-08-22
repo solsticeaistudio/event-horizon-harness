@@ -540,11 +540,13 @@ def _signer_specs(config_path: Path) -> dict[str, MessageSpec]:
             frozenset({'request', 'guardian_result', 'attestation'}),
             issue,
             request_authorizer.authorize,
+            authorized_purpose='capability-signer.issue',
         ),
         'consume': MessageSpec(
             frozenset({'request', 'capability', 'attestation'}),
             consume,
             request_authorizer.authorize,
+            authorized_purpose='capability-signer.consume',
         ),
     }
 
@@ -704,11 +706,13 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
             frozenset({'event_type', 'payload', 'source_id', 'source_sequence'}),
             append,
             request_authorizer.authorize,
+            authorized_purpose='evidence-recorder.append',
         ),
         'checkpoint': MessageSpec(
             frozenset(),
             issue_checkpoint,
             request_authorizer.authorize,
+            authorized_purpose='evidence-recorder.checkpoint',
         ),
         'verify': MessageSpec(frozenset(), lambda _body: status()),
     }
@@ -892,6 +896,7 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
             frozenset({'run_id', 'witness_acknowledgment'}),
             build,
             request_authorizer.authorize,
+            authorized_purpose='certificate-signer.build',
         ),
         'verify': MessageSpec(frozenset({'certificate'}), verify),
     }
@@ -949,6 +954,7 @@ def _witness_specs(config_path: Path) -> dict[str, MessageSpec]:
             frozenset({'checkpoint_envelope', 'manifest_digest'}),
             publish,
             request_authorizer.authorize,
+            authorized_purpose='checkpoint-witness.publish',
         ),
     }
 

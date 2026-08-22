@@ -45,12 +45,14 @@ class ProcessClient:
         *,
         request_signer: ProtectedRequestSigner | None = None,
         protected_types: frozenset[str] = frozenset(),
+        protected_purposes: Mapping[str, str] | None = None,
     ):
         self.role = role
         self.config_path = config_path
         self.repository_root = repository_root
         self.request_signer = request_signer
         self.protected_types = protected_types
+        self.protected_purposes = protected_purposes or {}
         self._lock = threading.RLock()
         self._responses: queue.Queue[dict[str, Any] | BaseException] = queue.Queue()
         safe_names = {'PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP'}
@@ -126,7 +128,10 @@ class ProcessClient:
                         raise ServiceUnavailable(
                             f'{self.role} protected request signer is unavailable'
                         )
-                    envelope['authorization'] = self.request_signer.authorize(envelope)
+                    purpose = self.protected_purposes.get(message_type, '')
+                    envelope['authorization'] = self.request_signer.authorize(
+                        envelope, purpose=purpose
+                    )
                 write_frame(
                     self.process.stdin,
                     envelope,
@@ -178,11 +183,29 @@ def _provision_or_load_seed(path: Path) -> bytes:
 
 class ProcessSeparatedHarness:
     ROLES = ('parser', 'verifier', 'guardians', 'signer', 'executor', 'recorder', 'certificate', 'witness')
+    # v0.8: every protected RPC is bound to an exact purpose. The coordinator
+    # signs that purpose into each authorization; the receiving service
+    # independently rejects any other purpose (cross-role substitution fails
+    # closed even with a valid signature).
+    PROTECTED_PURPOSES = {
+        'signer': {
+            'issue': 'capability-signer.issue',
+            'consume': 'capability-signer.consume',
+        },
+        'recorder': {
+            'append': 'evidence-recorder.append',
+            'checkpoint': 'evidence-recorder.checkpoint',
+        },
+        'certificate': {
+            'build': 'certificate-signer.build',
+        },
+        'witness': {
+            'publish': 'checkpoint-witness.publish',
+        },
+    }
     PROTECTED_TYPES = {
-        'signer': frozenset({'issue', 'consume'}),
-        'recorder': frozenset({'append', 'checkpoint'}),
-        'certificate': frozenset({'build'}),
-        'witness': frozenset({'publish'}),
+        role: frozenset(purposes)
+        for role, purposes in PROTECTED_PURPOSES.items()
     }
 
     def __init__(
@@ -273,7 +296,8 @@ class ProcessSeparatedHarness:
             config_path,
             self.repository_root,
             request_signer=self.protected_request_signers.get(role),
-            protected_types=self.PROTECTED_TYPES.get(role, frozenset()),
+            protected_types=frozenset(self.PROTECTED_PURPOSES.get(role, {})),
+            protected_purposes=self.PROTECTED_PURPOSES.get(role, {}),
         )
         self.clients[role] = client
         self.config_paths[role] = config_path

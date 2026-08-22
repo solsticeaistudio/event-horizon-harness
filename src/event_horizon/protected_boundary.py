@@ -21,7 +21,7 @@ from .canonical import canonical_bytes, digest
 from .protocol import ProtocolError
 
 
-AUTHORIZATION_SCHEMA = "event-horizon.protected-request.v1"
+AUTHORIZATION_SCHEMA = "event-horizon.protected-request.v2"
 MAX_AUTHORIZATION_LIFETIME_MS = 30_000
 MAX_AUTHORIZATION_CLOCK_SKEW_MS = 2_000
 
@@ -384,7 +384,12 @@ class ProtectedRequestSigner:
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         ).decode("ascii")
 
-    def authorize(self, request: Mapping[str, Any]) -> dict[str, Any]:
+    def authorize(
+        self,
+        request: Mapping[str, Any],
+        *,
+        purpose: str = "",
+    ) -> dict[str, Any]:
         if set(request) != {"type", "request_id", "deadline_ms", "body"}:
             raise ValueError("protected request envelope fields are invalid")
         issued_at = _now_ms(self._now)
@@ -397,6 +402,7 @@ class ProtectedRequestSigner:
             "algorithm": "Ed25519",
             "audience": self.audience,
             "key_id": self.key_id,
+            "purpose": purpose,
             "nonce": base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii"),
             "issued_at": issued_at,
             "expires_at": expires_at,
@@ -440,9 +446,11 @@ class ProtectedRequestVerifier:
         self,
         request: Mapping[str, Any],
         authorization: Mapping[str, Any],
+        *,
+        expected_purpose: str | None = None,
     ) -> None:
         fields = {
-            "schema", "algorithm", "audience", "key_id", "nonce",
+            "schema", "algorithm", "audience", "key_id", "nonce", "purpose",
             "issued_at", "expires_at", "request_digest", "signature",
         }
         if not isinstance(authorization, Mapping) or set(authorization) != fields:
@@ -454,12 +462,23 @@ class ProtectedRequestVerifier:
             or signed["audience"] != self.audience
             or signed["key_id"] != self.key_id
             or not _is_canonical_nonce(signed["nonce"])
+            or not isinstance(signed["purpose"], str)
+            or len(signed["purpose"]) > 128
             or not isinstance(signed["request_digest"], str)
             or _DIGEST.fullmatch(signed["request_digest"]) is None
             or not isinstance(authorization["signature"], str)
             or _SIGNATURE.fullmatch(authorization["signature"]) is None
         ):
             raise ProtocolError("authorization_denied", "authorization identity is invalid")
+        # Purpose binding: a signature valid for one RPC purpose must never be
+        # accepted for another, even when the key and envelope are otherwise
+        # legitimate (cross-service role substitution fails closed).
+        if expected_purpose is not None and signed["purpose"] != expected_purpose:
+            raise ProtocolError(
+                "authorization_purpose",
+                f"authorization purpose {signed['purpose']!r} does not match "
+                f"required purpose {expected_purpose!r}",
+            )
         issued_at = signed["issued_at"]
         expires_at = signed["expires_at"]
         if type(issued_at) is not int or type(expires_at) is not int:
