@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from event_horizon.broker import CapabilityBroker, CapabilityError, CapabilityVerifier
 from event_horizon.canonical import CanonicalizationError, digest, strict_json_loads
 from event_horizon.guardians import GuardianQuorum
+from event_horizon.replay_state import InMemoryCapabilityConsumptionStore
 from event_horizon.models import ActionRequest, GuardianDecision, IssuedCapability, ValidationError
 from scripts.verify_capability_vectors import verify_vector
 from scripts.capability_fixture_support import authority_context, issue_options, verify_options
@@ -37,7 +38,11 @@ def request_payload(**overrides):
 
 class CapabilityAdversarialTests(unittest.TestCase):
     def setUp(self):
-        self.broker = CapabilityBroker(b"capability-adversarial-fixture-key", ttl_seconds=60)
+        self.broker = CapabilityBroker(
+            b"capability-adversarial-fixture-key",
+            ttl_seconds=60,
+            consumption_store=InMemoryCapabilityConsumptionStore(),
+        )
         self.request = ActionRequest.from_dict(request_payload())
         self.authority = authority_context(self.request, FIXED_NOW)
         self.context = verify_options(self.authority)
@@ -49,7 +54,9 @@ class CapabilityAdversarialTests(unittest.TestCase):
         )
 
     def verifier(self) -> CapabilityVerifier:
-        return CapabilityVerifier(self.broker.public_key_pem, self.broker.key_id)
+        return CapabilityVerifier(
+            self.broker.public_key_pem, self.broker.key_id, InMemoryCapabilityConsumptionStore()
+        )
 
     def verify(self, capability=None, request=None, *, verifier=None, now=FIXED_NOW, **context):
         return (verifier or self.verifier()).verify_and_consume(
@@ -83,7 +90,9 @@ class CapabilityAdversarialTests(unittest.TestCase):
             IssuedCapability.from_dict(claims)
         with self.assertRaisesRegex(ValidationError, "floating-point"):
             ActionRequest.from_dict(request_payload(arguments={"length": 1.0}))
-        with self.assertRaisesRegex(ValidationError, "negative zero"):
+        with self.assertRaisesRegex(ValidationError, "floating-point"):
+            # Negative zero is a float form; the integer-only numeric domain
+            # rejects every floating-point representation.
             ActionRequest.from_dict(request_payload(arguments={"length": -0.0}))
         with self.assertRaisesRegex(ValidationError, "interoperable"):
             ActionRequest.from_dict(request_payload(arguments={"length": 2**60}))
@@ -119,7 +128,7 @@ class CapabilityAdversarialTests(unittest.TestCase):
     def test_public_key_substitution_is_rejected_at_verifier_configuration(self):
         other = Ed25519PrivateKey.generate().public_key()
         with self.assertRaisesRegex(ValueError, "does not match"):
-            CapabilityVerifier(other, self.broker.key_id)
+            CapabilityVerifier(other, self.broker.key_id, InMemoryCapabilityConsumptionStore())
 
     def test_request_argument_executor_measurement_session_and_policy_mutation_fail(self):
         mutations = [

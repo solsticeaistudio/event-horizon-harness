@@ -15,6 +15,7 @@ from event_horizon.canonical import (
     strict_json_loads,
 )
 from event_horizon.models import ActionRequest, CapabilityClaims, IssuedCapability, ValidationError
+from event_horizon.replay_state import InMemoryCapabilityConsumptionStore
 from scripts.capability_fixture_support import authority_context, issue_options, verify_options
 
 
@@ -109,7 +110,11 @@ class CanonicalProtocolProperties(unittest.TestCase):
 
 class SignedCapabilityFieldProperties(unittest.TestCase):
     def setUp(self) -> None:
-        self.broker = CapabilityBroker(b"property-capability-key-no-authority", ttl_seconds=60)
+        self.broker = CapabilityBroker(
+            b"property-capability-key-no-authority",
+            ttl_seconds=60,
+            consumption_store=InMemoryCapabilityConsumptionStore(),
+        )
         self.request = ActionRequest.from_dict(request_payload())
         self.authority = authority_context(self.request, FIXED_NOW)
         self.context = verify_options(self.authority)
@@ -152,7 +157,9 @@ class SignedCapabilityFieldProperties(unittest.TestCase):
             mutated = IssuedCapability.from_dict(envelope)
         except ValidationError:
             return
-        verifier = CapabilityVerifier(self.broker.public_key_pem, self.broker.key_id)
+        verifier = CapabilityVerifier(
+            self.broker.public_key_pem, self.broker.key_id, InMemoryCapabilityConsumptionStore()
+        )
         with self.assertRaises(CapabilityError):
             verifier.verify_and_consume(
                 mutated, self.request, **self.context, now=FIXED_NOW

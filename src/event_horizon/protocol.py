@@ -38,6 +38,10 @@ def _reject_constant(value: str) -> None:
     raise ProtocolError('invalid_number', f'non-finite number: {value}')
 
 
+def _reject_float(_value: str) -> None:
+    raise ProtocolError('invalid_number', 'floating-point numbers are not permitted')
+
+
 def validate_value(value: Any, *, depth: int = 0) -> None:
     if depth > MAX_NESTING:
         raise ProtocolError('nesting_limit', 'message nesting limit exceeded')
@@ -48,9 +52,7 @@ def validate_value(value: Any, *, depth: int = 0) -> None:
             raise ProtocolError('number_limit', 'integer exceeds interoperable range')
         return
     if isinstance(value, float):
-        if not math.isfinite(value) or (value == 0 and math.copysign(1.0, value) < 0):
-            raise ProtocolError('invalid_number', 'non-finite numbers and negative zero are rejected')
-        return
+        raise ProtocolError('invalid_number', 'floating-point numbers are not permitted')
     if isinstance(value, str):
         if unicodedata.normalize('NFC', value) != value:
             raise ProtocolError('unicode_normalization', 'strings must already be Unicode NFC')
@@ -111,6 +113,7 @@ def read_frame(stream: BinaryIO, *, max_bytes: int = MAX_FRAME_BYTES) -> dict[st
             text,
             object_pairs_hook=_object_without_duplicates,
             parse_constant=_reject_constant,
+            parse_float=_reject_float,
         )
     except UnicodeDecodeError as exc:
         raise ProtocolError('invalid_utf8', 'frame is not valid UTF-8') from exc

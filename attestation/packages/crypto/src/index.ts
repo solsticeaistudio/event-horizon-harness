@@ -38,9 +38,13 @@ function normalize(value: unknown, depth = 0, active: Set<object> = new Set()): 
     return value;
   }
   if (typeof value === 'number') {
+    // Protocol numbers are integer-only, mirroring the Python canonicalizer:
+    // floating-point forms (including 1.0, exponent forms, and negative zero)
+    // can serialize differently across languages and are therefore rejected.
     if (!Number.isFinite(value)) throw new TypeError('canonical JSON rejects non-finite numbers');
+    if (!Number.isInteger(value)) throw new TypeError('floating-point values are not permitted');
     if (Object.is(value, -0)) throw new TypeError('negative zero is not permitted');
-    if (Number.isInteger(value) && Math.abs(value) > MAX_SAFE_INTEGER) {
+    if (Math.abs(value) > MAX_SAFE_INTEGER) {
       throw new TypeError('integer exceeds the interoperable exact range');
     }
     return value;
@@ -145,9 +149,12 @@ export function importPrivateKeyPem(pem: string): KeyObject {
 }
 
 export function keyIdFromPublicKey(key: KeyObject | string): string {
+  // Unified Event Horizon key-ID scheme: ed25519:<sha256(rawPublicKey)[:32]>.
+  // The Ed25519 SubjectPublicKeyInfo DER ends with the 32-byte raw key.
   const publicKey = typeof key === 'string' ? createPublicKey(key) : key;
   const der = publicKey.export({ format: 'der', type: 'spki' });
-  return `ed25519:${sha256(der).slice(0, 32)}`;
+  const raw = der.subarray(der.length - 32);
+  return `ed25519:${sha256(raw).slice(0, 32)}`;
 }
 
 export function signDetached(payload: Uint8Array, privateKey: KeyObject | string): string {

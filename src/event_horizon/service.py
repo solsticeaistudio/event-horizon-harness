@@ -21,6 +21,7 @@ from .component_ids import (
 )
 from .executor import SacrificialExecutor
 from .guardians import LineageBudgetGuardian, PolicyGuardian
+from .execution_state import SqliteExecutionStateStore
 from .models import ActionRequest, GuardianDecision, IssuedCapability, ValidationError
 from .policy import OperationRule, StaticPolicy
 from .protocol import MessageSpec, ProtocolError, StrictRpcServer
@@ -29,8 +30,18 @@ from .protected_boundary import (
     SqliteAuthorizationReplayStore,
     load_private_seed,
 )
-from .recorder import ExternalRecorder
+from .recorder import ExternalRecorder, FileCheckpointAnchor, RecorderIntegrityError
+from .certificate import CertificateBuildError
 from .replay_state import SqliteCapabilityConsumptionStore
+from .statements import (
+    TYPE_EXECUTION_RECEIPT,
+    TYPE_GUARDIAN_DECISION,
+    TYPE_TEARDOWN_ATTESTATION,
+    TYPE_VERIFIER_ATTESTATION,
+    StatementError,
+    StatementSigner,
+    StatementVerifier,
+)
 from .task_policy import (
     AuthorityReduction,
     ProviderTrustState,
@@ -164,7 +175,10 @@ def _verifier_specs(config_path: Path) -> dict[str, MessageSpec]:
     config = _load_config(
         config_path,
         'verifier',
-        {'attestation_root', 'device_seeds', 'replay_database', 'replay_namespace'},
+        {
+            'attestation_root', 'device_seeds', 'replay_database', 'replay_namespace',
+            'statement_signing_key_path',
+        },
     )
     if not isinstance(config['device_seeds'], dict):
         raise RuntimeError('verifier device enrollment is invalid')
@@ -173,6 +187,10 @@ def _verifier_specs(config_path: Path) -> dict[str, MessageSpec]:
         device_seeds=config['device_seeds'],
         replay_database=Path(config['replay_database']),
         replay_namespace=config['replay_namespace'],
+    )
+    statement_signer = StatementSigner(
+        load_private_seed(config['statement_signing_key_path']),
+        subject='verifier',
     )
 
     def verify_executor(body: dict[str, Any]) -> Mapping[str, Any]:
@@ -185,7 +203,21 @@ def _verifier_specs(config_path: Path) -> dict[str, MessageSpec]:
             result = dict(provider.verify_executor(executor_id, session_id, purpose))
         except Exception as exc:
             raise ProtocolError('attestation_unavailable', str(exc)) from exc
-        return {'attestation': _attestation(result)}
+        attestation = _attestation(result)
+        # The verifier independently authenticates its own conclusion so the
+        # certificate signer never needs to trust a coordinator's copy.
+        statement = statement_signer.sign(TYPE_VERIFIER_ATTESTATION, {
+            'device_id': attestation['deviceId'],
+            'method': attestation['method'],
+            'trust_level': attestation['trustLevel'],
+            'key_id': attestation['keyId'],
+            'result_digest': attestation['resultDigest'],
+            'bundle_digest': attestation['bundleDigest'],
+            'verifier_policy_digest': attestation['verifierPolicyDigest'],
+            'session_id': session_id,
+            'purpose': purpose,
+        }).to_dict()
+        return {'attestation': attestation, 'statement': statement}
 
     return {
         'info': MessageSpec(frozenset(), lambda _body: _info('verifier')),
@@ -203,6 +235,7 @@ def _guardian_specs(config_path: Path) -> dict[str, MessageSpec]:
         {
             'policy', 'max_requests_per_session', 'max_denials_per_session',
             'inject_permissive_guardian', 'behavioral_state_database',
+            'statement_signing_key_path',
         },
     )
     policy = _policy(config['policy'])
@@ -215,6 +248,10 @@ def _guardian_specs(config_path: Path) -> dict[str, MessageSpec]:
         SqliteBehavioralStateStore(config['behavioral_state_database'])
     )
     inject_permissive = config['inject_permissive_guardian'] is True
+    statement_signer = StatementSigner(
+        load_private_seed(config['statement_signing_key_path']),
+        subject='guardians',
+    )
 
     def evaluate(body: dict[str, Any]) -> Mapping[str, Any]:
         request = _action(body['request'])
@@ -266,11 +303,28 @@ def _guardian_specs(config_path: Path) -> dict[str, MessageSpec]:
         )
         if not allowed:
             budget.record_denial(request.session_id)
+        signed_decisions = []
+        for decision in decisions:
+            item = asdict(decision)
+            # Every guardian conclusion is independently authenticated so the
+            # quorum aggregator cannot fabricate participation.
+            item['statement'] = statement_signer.sign(
+                TYPE_GUARDIAN_DECISION,
+                {
+                    'guardian': decision.guardian,
+                    'allowed': decision.allowed,
+                    'request_digest': request.request_digest,
+                    'session_id': request.session_id,
+                    'policy_digest': policy.policy_digest,
+                    'evidence_digest': digest(dict(decision.evidence)),
+                },
+            ).to_dict()
+            signed_decisions.append(item)
         result = {
             'allowed': allowed,
             'request_digest': request.request_digest,
             'policy_digest': policy.policy_digest,
-            'decisions': [asdict(decision) for decision in decisions],
+            'decisions': signed_decisions,
         }
         result['quorum_digest'] = digest(result)
         return result
@@ -284,7 +338,11 @@ def _guardian_specs(config_path: Path) -> dict[str, MessageSpec]:
     }
 
 
-def _guardian_result(value: Any, request: ActionRequest) -> dict[str, Any]:
+def _guardian_result(
+    value: Any,
+    request: ActionRequest,
+    statement_verifier: StatementVerifier | None,
+) -> dict[str, Any]:
     result = _exact(
         value,
         {'allowed', 'request_digest', 'policy_digest', 'decisions', 'quorum_digest'},
@@ -305,9 +363,28 @@ def _guardian_result(value: Any, request: ActionRequest) -> dict[str, Any]:
     for decision in decisions:
         _exact(
             decision,
-            {'guardian', 'allowed', 'reason', 'evidence', 'request_digest'},
+            {'guardian', 'allowed', 'reason', 'evidence', 'request_digest', 'statement'},
             'guardian decision',
         )
+        if statement_verifier is not None:
+            try:
+                statement_verifier.verify(decision['statement'], expected_type=TYPE_GUARDIAN_DECISION)
+            except (StatementError, TypeError, ValueError) as exc:
+                raise ProtocolError(
+                    'guardian_statement',
+                    f"guardian {decision['guardian']} decision signature is invalid: {exc}",
+                ) from exc
+            payload = decision['statement']['payload']
+            if (
+                payload.get('guardian') != decision['guardian']
+                or payload.get('allowed') != decision['allowed']
+                or payload.get('request_digest') != request.request_digest
+                or payload.get('session_id') != request.session_id
+            ):
+                raise ProtocolError(
+                    'guardian_statement',
+                    f"guardian {decision['guardian']} statement does not match its decision",
+                )
         if not isinstance(decision['allowed'], bool) or not isinstance(decision['evidence'], dict):
             raise ProtocolError('guardian_decision', 'guardian decision types are invalid')
         if decision['request_digest'] != request.request_digest:
@@ -337,6 +414,7 @@ def _signer_specs(config_path: Path) -> dict[str, MessageSpec]:
         {
             'ttl_seconds', 'signing_key_path', 'replay_database',
             'replay_namespace', 'consumption_domain', 'decay_database', 'policy',
+            'guardian_statement_public_key',
             *PROTECTED_CONFIG_FIELDS,
         },
     )
@@ -361,11 +439,14 @@ def _signer_specs(config_path: Path) -> dict[str, MessageSpec]:
         consumption_store=consumption_store,
         decay_engine=DecayEngine(SqliteDecayStateStore(config['decay_database'])),
     )
+    guardian_statement_verifier = StatementVerifier({
+        'guardian-statements': config['guardian_statement_public_key'],
+    })
 
     def issue(body: dict[str, Any]) -> Mapping[str, Any]:
         request = _action(body['request'])
         attestation = _attestation(body['attestation'])
-        guardians = _guardian_result(body['guardian_result'], request)
+        guardians = _guardian_result(body['guardian_result'], request, guardian_statement_verifier)
         if guardians['allowed'] is not True:
             raise ProtocolError('authorization_denied', 'guardian quorum vetoed the request')
         if attestation['deviceId'] != request.executor_id:
@@ -476,6 +557,7 @@ def _executor_specs(config_path: Path) -> dict[str, MessageSpec]:
             'executor_id', 'device_id', 'measurement', 'verifier_policy_digest',
             'policy_digest', 'signer_public_key', 'signer_key_id', 'objects',
             'replay_database', 'replay_namespace', 'consumption_domain', 'decay_database',
+            'receipt_signing_key_path',
         },
     )
     if not isinstance(config['objects'], dict):
@@ -491,6 +573,10 @@ def _executor_specs(config_path: Path) -> dict[str, MessageSpec]:
         consumption_store,
         DecayEngine(SqliteDecayStateStore(config['decay_database'])),
     )
+    receipt_signer = StatementSigner(
+        load_private_seed(config['receipt_signing_key_path']),
+        subject=f"executor:{config['executor_id']}"[:256],
+    )
     executor = SacrificialExecutor(
         executor_id=config['executor_id'],
         device_id=config['device_id'],
@@ -500,6 +586,7 @@ def _executor_specs(config_path: Path) -> dict[str, MessageSpec]:
         broker=verifier,
         recorder=_NullRecorder(),
         objects=config['objects'],
+        statement_signer=receipt_signer,
     )
 
     def execute(body: dict[str, Any]) -> Mapping[str, Any]:
@@ -547,7 +634,10 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
     config = _load_config(
         config_path,
         'recorder',
-        {'path', 'signing_key_path', 'max_event_bytes', *PROTECTED_CONFIG_FIELDS},
+        {
+            'path', 'signing_key_path', 'max_event_bytes', 'checkpoint_anchor_path',
+            *PROTECTED_CONFIG_FIELDS,
+        },
     )
     signing_seed = load_private_seed(config['signing_key_path'])
     request_authorizer = _protected_authorizer(config, 'evidence-recorder')
@@ -556,6 +646,7 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
         signing_seed,
         max_event_bytes=int(config['max_event_bytes']),
     )
+    checkpoint_anchor = FileCheckpointAnchor(config['checkpoint_anchor_path'])
 
     def append(body: dict[str, Any]) -> Mapping[str, Any]:
         payload = body['payload']
@@ -572,14 +663,24 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
             raise ProtocolError('recording_denied', str(exc)) from exc
         return {'record': record}
 
+    def issue_checkpoint(_body: dict[str, Any]) -> Mapping[str, Any]:
+        try:
+            envelope = recorder.issue_checkpoint(checkpoint_anchor)
+        except RecorderIntegrityError as exc:
+            raise ProtocolError('checkpoint_denied', str(exc)) from exc
+        return {'checkpoint': envelope}
+
     def status() -> dict[str, Any]:
         valid, detail = recorder.verify()
+        anchored_ok, anchored_detail = recorder.verify_against_anchor(checkpoint_anchor)
         return {
             'valid': valid,
             'detail': detail,
             'count': recorder.count(),
             'key_id': recorder.key_id,
             'public_key_pem': recorder.public_key_pem,
+            'anchored_continuity': anchored_ok,
+            'anchor_detail': anchored_detail,
         }
 
     return {
@@ -597,6 +698,11 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
             append,
             request_authorizer.authorize,
         ),
+        'checkpoint': MessageSpec(
+            frozenset(),
+            issue_checkpoint,
+            request_authorizer.authorize,
+        ),
         'verify': MessageSpec(frozenset(), lambda _body: status()),
     }
 
@@ -605,26 +711,52 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
     config = _load_config(
         config_path,
         'certificate',
-        {'recorder_path', 'signing_key_path', *PROTECTED_CONFIG_FIELDS},
+        {
+            'recorder_path', 'signing_key_path', 'checkpoint_anchor_path',
+            'recorder_public_key_pem', 'executor_statement_public_key',
+            'verifier_statement_public_key', 'guardian_statement_public_key',
+            'watchdog_statement_public_key', 'execution_state_database',
+            *PROTECTED_CONFIG_FIELDS,
+        },
     )
     signing_seed = load_private_seed(config['signing_key_path'])
     request_authorizer = _protected_authorizer(config, 'certificate-signer')
-    recorder_view = ExternalRecorder(config['recorder_path'], b'R' * 32)
-    builder = ContainmentCertificateBuilder(recorder_view, signing_seed)
+    recorder_view = ExternalRecorder(
+        config['recorder_path'],
+        b'R' * 32,
+        checkpoint_verification_key_pem=config['recorder_public_key_pem'],
+    )
+    checkpoint_anchor = FileCheckpointAnchor(config['checkpoint_anchor_path'])
+    statement_verifier = StatementVerifier({
+        TYPE_VERIFIER_ATTESTATION: config['verifier_statement_public_key'],
+        TYPE_GUARDIAN_DECISION: config['guardian_statement_public_key'],
+        TYPE_TEARDOWN_ATTESTATION: config['watchdog_statement_public_key'],
+        'executor-receipts': config['executor_statement_public_key'],
+    })
+    tracker_store = SqliteExecutionStateStore(config['execution_state_database'])
+    builder = ContainmentCertificateBuilder(
+        recorder_view,
+        signing_seed,
+        statement_verifier=statement_verifier,
+        tracker_store=tracker_store,
+        execution_tracker_namespace='certification',
+    )
 
     def build(body: dict[str, Any]) -> Mapping[str, Any]:
-        if not isinstance(body['assertions'], dict) or not isinstance(body['evidence'], dict):
-            raise ProtocolError('invalid_certificate', 'certificate assertions and evidence must be objects')
-        if any(not isinstance(value, bool) for value in body['assertions'].values()):
-            raise ProtocolError('invalid_certificate', 'certificate assertions must be booleans')
-        try:
-            certificate = builder.build(
-                run_id=body['run_id'],
-                session_id=body['session_id'],
-                assertions=body['assertions'],
-                evidence=body['evidence'],
+        # The certificate signer accepts an execution selector, never truth
+        # assertions: every security claim is derived from verified evidence.
+        unexpected = set(body) - {'run_id'}
+        if unexpected:
+            raise ProtocolError(
+                'invalid_certificate',
+                f'caller-supplied fields are not accepted as evidence: {sorted(unexpected)!r}',
             )
-        except (TypeError, ValueError) as exc:
+        run_id = body['run_id']
+        if not isinstance(run_id, str) or not run_id or len(run_id.encode("utf-8")) > 256:
+            raise ProtocolError('invalid_certificate', 'run_id is invalid')
+        try:
+            certificate = builder.build(run_id=run_id, checkpoint_anchor=checkpoint_anchor)
+        except (TypeError, ValueError, CertificateBuildError) as exc:
             raise ProtocolError('invalid_certificate', str(exc)) from exc
         return {'certificate': certificate}
 
@@ -646,10 +778,11 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
                 'public_key_pem': builder.public_key_pem,
                 'key_storage': 'restricted-file-development',
                 'request_authentication': 'Ed25519',
+                'statement_trust_anchors': sorted(statement_verifier.trusted_key_ids),
             },
         ),
         'build': MessageSpec(
-            frozenset({'run_id', 'session_id', 'assertions', 'evidence'}),
+            frozenset({'run_id'}),
             build,
             request_authorizer.authorize,
         ),

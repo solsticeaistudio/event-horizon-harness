@@ -44,7 +44,13 @@ def _validate_transition(
 
 
 class InMemoryCapabilityConsumptionStore:
-    """Atomic only among threads that share this exact object."""
+    """Volatile, thread-safe consumption state for tests and simulations only.
+
+    This store is never a valid production default: all state is lost when the
+    process dies, which silently converts one-use capabilities into reusable
+    ones after a restart. Production call sites must inject
+    :class:`SqliteCapabilityConsumptionStore` (or a remote replay store).
+    """
 
     def __init__(self) -> None:
         self._consumed: dict[str, tuple[str, int]] = {}
@@ -66,6 +72,10 @@ class InMemoryCapabilityConsumptionStore:
                 return False
             self._consumed[capability_id] = (claims_digest, expires_at)
             return True
+
+
+# Explicit alias so test call sites read as development-only at the use site.
+DevelopmentInMemoryConsumptionStore = InMemoryCapabilityConsumptionStore
 
 
 class SqliteCapabilityConsumptionStore:

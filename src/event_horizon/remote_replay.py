@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import http.server
+import json
 import math
+import os
 import re
 import secrets
 import sqlite3
@@ -25,9 +27,9 @@ from .protected_boundary import AuthorizationReplayError
 from .replay_state import CapabilityConsumptionError
 
 
-REQUEST_SCHEMA = "event-horizon.replay-request.v1"
-RESPONSE_SCHEMA = "event-horizon.replay-response.v1"
-GENESIS_SCHEMA = "event-horizon.replay-genesis.v1"
+REQUEST_SCHEMA = "event-horizon.replay-request.v2"
+RESPONSE_SCHEMA = "event-horizon.replay-response.v2"
+GENESIS_SCHEMA = "event-horizon.replay-genesis.v2"
 MAX_REQUEST_LIFETIME_MS = 30_000
 MAX_CLOCK_SKEW_MS = 2_000
 MAX_HTTP_BODY_BYTES = 65_536
@@ -116,9 +118,17 @@ def _decode_b64url(value: str) -> bytes:
 
 
 def replay_key_id(public_key: Ed25519PublicKey) -> str:
+    """Key identity for the remote replay protocol.
+
+    Unified scheme: every Event Horizon ``ed25519:`` key ID is derived from the
+    32-byte RAW public key (``ed25519:<sha256(raw)[:32]>``). Earlier versions
+    of this module hashed the DER SubjectPublicKeyInfo encoding instead; that
+    incompatible derivation is retired so one prefix always means one
+    derivation algorithm across Python and TypeScript.
+    """
     encoded = public_key.public_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
     )
     return f"ed25519:{hashlib.sha256(encoded).hexdigest()[:32]}"
 
@@ -489,7 +499,7 @@ class ReferenceReplayService:
                 next_checkpoint = checkpoint + 1
                 next_digest = digest(
                     {
-                        "schema": "event-horizon.replay-checkpoint.v1",
+                        "schema": "event-horizon.replay-checkpoint.v2",
                         "previous_digest": checkpoint_digest,
                         "epoch": epoch,
                         "checkpoint": next_checkpoint,
@@ -952,8 +962,70 @@ class ReferenceReplayService:
             raise ReplayUnavailableError("replay service is closed")
 
 
+CLIENT_CONTINUITY_SCHEMA = "event-horizon.replay-client-continuity.v2"
+
+
+class ReplayClientContinuityStore(Protocol):
+    """Durable storage for the client's pinned replay-service continuity state.
+
+    Rollback protection must not rely solely on process RAM: persisting the
+    latest accepted checkpoint lets a restarted client distinguish true first
+    contact from recovery, and detect service rollback against remembered
+    history.
+    """
+
+    def save(self, state: Mapping[str, Any]) -> None: ...
+
+    def load(self) -> Mapping[str, Any] | None: ...
+
+
+class FileReplayClientContinuityStore:
+    """Single-file JSON store for client replay continuity (one host)."""
+
+    _FIELDS = {
+        "schema", "service_id", "server_key_id", "epoch",
+        "checkpoint", "checkpoint_digest",
+    }
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        if str(self.path) == ":memory:":
+            raise ValueError("durable replay client continuity path is invalid")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if os.name != "nt":
+            self.path.parent.chmod(0o700)
+
+    def save(self, state: Mapping[str, Any]) -> None:
+        value = dict(state)
+        if set(value) != self._FIELDS or value["schema"] != CLIENT_CONTINUITY_SCHEMA:
+            raise ReplayStateError("client continuity state fields are invalid")
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, self.path)
+
+    def load(self) -> Mapping[str, Any] | None:
+        if not self.path.exists():
+            return None
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ReplayStateError("client continuity store is malformed") from exc
+        if not isinstance(value, dict) or set(value) != self._FIELDS:
+            raise ReplayStateError("client continuity store fields are invalid")
+        return value
+
+
 class AuthenticatedReplayClient:
-    """Fail-closed client with a pinned epoch, server key, and checkpoint."""
+    """Fail-closed client with a pinned epoch, server key, and checkpoint.
+
+    When a continuity store is injected, every accepted checkpoint advance is
+    persisted so restarts recover the exact latest accepted root instead of
+    silently falling back to genesis.
+    """
 
     def __init__(
         self,
@@ -964,6 +1036,7 @@ class AuthenticatedReplayClient:
         epoch: int,
         checkpoint: int = 0,
         checkpoint_digest: str | None = None,
+        continuity_store: ReplayClientContinuityStore | None = None,
     ) -> None:
         self.signer = signer
         self.transport = transport
@@ -977,7 +1050,34 @@ class AuthenticatedReplayClient:
             checkpoint_digest,
             "client",
         )
+        self.continuity_store = continuity_store
         self._lock = threading.RLock()
+        if continuity_store is not None and checkpoint > 0:
+            # Recovered from caller-supplied state; make sure the durable copy
+            # agrees before any request is sent.
+            persisted = continuity_store.load()
+            if persisted is not None and (
+                int(persisted.get("checkpoint", -1)) > checkpoint
+                or (
+                    int(persisted.get("checkpoint", -1)) == checkpoint
+                    and persisted.get("checkpoint_digest") != checkpoint_digest
+                )
+            ):
+                raise ReplayStateError(
+                    "durable client continuity is ahead of or forked from the supplied state"
+                )
+
+    def _persist_continuity_locked(self) -> None:
+        if self.continuity_store is None:
+            return
+        self.continuity_store.save({
+            "schema": CLIENT_CONTINUITY_SCHEMA,
+            "service_id": self.signer.service_id,
+            "server_key_id": self.server_key_id,
+            "epoch": self.epoch,
+            "checkpoint": self.checkpoint,
+            "checkpoint_digest": self.checkpoint_digest,
+        })
 
     def call(
         self,
@@ -1007,6 +1107,7 @@ class AuthenticatedReplayClient:
             if response_checkpoint > self.checkpoint:
                 self.checkpoint = response_checkpoint
                 self.checkpoint_digest = str(verified["checkpoint_digest"])
+                self._persist_continuity_locked()
             return verified
 
     def adopt_epoch(
@@ -1053,6 +1154,7 @@ class AuthenticatedReplayClient:
             self.epoch = promoted_epoch
             self.checkpoint = promoted_checkpoint
             self.checkpoint_digest = promoted_digest
+            self._persist_continuity_locked()
 
     def _verify_response(
         self,

@@ -10,6 +10,7 @@ from typing import Any
 
 from event_horizon.broker import CapabilityError, CapabilityVerifier
 from event_horizon.models import ActionRequest, IssuedCapability, ValidationError
+from event_horizon.replay_state import InMemoryCapabilityConsumptionStore
 
 
 VECTOR_FIELDS = {
@@ -31,7 +32,9 @@ def verify_vector(payload: dict[str, Any]) -> tuple[bool, str]:
             raise ValidationError("test vector context fields are invalid")
         request = ActionRequest.from_dict(payload["request"])
         capability = IssuedCapability.from_dict(payload["capability"])
-        verifier = CapabilityVerifier(payload["public_key_pem"], capability.key_id)
+        verifier = CapabilityVerifier(
+            payload["public_key_pem"], capability.key_id, InMemoryCapabilityConsumptionStore()
+        )
         options = {**context, "now": payload["verification_time"]}
         if payload["preconsume"] is True:
             verifier.verify_and_consume(capability, request, **options)

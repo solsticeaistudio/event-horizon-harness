@@ -13,6 +13,7 @@ from event_horizon.concurrency_harness import (
     sqlite_verifier_factories,
 )
 from event_horizon.models import ActionRequest
+from event_horizon.replay_state import InMemoryCapabilityConsumptionStore
 from scripts.capability_fixture_support import authority_context, issue_options, verify_options
 
 
@@ -27,7 +28,11 @@ class ConcurrentRedemptionTests(unittest.TestCase):
         )
         self.authority = authority_context(self.request, FIXED_NOW)
         self.context = verify_options(self.authority)
-        self.broker = CapabilityBroker(b"concurrency-test-key-no-authority", ttl_seconds=60)
+        self.broker = CapabilityBroker(
+            b"concurrency-test-key-no-authority",
+            ttl_seconds=60,
+            consumption_store=InMemoryCapabilityConsumptionStore(),
+        )
         self.capability = self.broker.issue(
             self.request, **issue_options(self.authority), max_output_bytes=1_024, now=FIXED_NOW
         )

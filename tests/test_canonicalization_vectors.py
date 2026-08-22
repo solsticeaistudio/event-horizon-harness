@@ -8,7 +8,7 @@ from scripts.verify_canonicalization_vectors import DEFAULT_VECTORS, evaluate_ve
 class SharedCanonicalizationVectorTests(unittest.TestCase):
     def test_python_consumes_all_shared_adversarial_vectors(self) -> None:
         results = evaluate_vectors(DEFAULT_VECTORS)
-        self.assertEqual(len(results), 25)
+        self.assertEqual(len(results), 26)
         self.assertTrue(results["string-exact-byte-limit"]["accepted"])
         self.assertFalse(results["reject-negative-zero"]["accepted"])
         self.assertFalse(results["reject-nfd-string"]["accepted"])

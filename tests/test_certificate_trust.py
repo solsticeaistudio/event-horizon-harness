@@ -23,14 +23,20 @@ class CertificateTrustAnchorTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.repository_root = Path(__file__).resolve().parents[1]
         self.recorder = ExternalRecorder(self.root / "events.jsonl", b"R" * 32)
+        self.recorder.append(
+            "request.received",
+            {
+                "run_id": "legitimate-run",
+                "session_id": "legitimate-session",
+                "request_id": "req-1",
+                "request_digest": "a" * 64,
+            },
+            source_id="coordinator",
+        )
         self.legitimate = ContainmentCertificateBuilder(self.recorder, b"L" * 32)
         self.attacker_private = Ed25519PrivateKey.from_private_bytes(b"A" * 32)
         self.attacker = ContainmentCertificateBuilder(self.recorder, self.attacker_private)
-        self.certificate = self.legitimate.build(
-            run_id="legitimate-run",
-            session_id="legitimate-session",
-            assertions={"teardown_verified": True},
-        )
+        self.certificate = self.legitimate.build(run_id="legitimate-run")
 
     def _write(self, name: str, value: dict[str, object]) -> Path:
         path = self.root / name
@@ -60,14 +66,11 @@ class CertificateTrustAnchorTests(unittest.TestCase):
         ))
 
     def test_forged_certificate_with_attacker_key_is_rejected(self) -> None:
-        forged = self.attacker.build(
-            run_id="fabricated-run",
-            session_id="fabricated-session",
-            assertions={
-                "teardown_verified": True,
-                "no_unauthorized_egress": True,
-            },
-        )
+        # The attacker controls a builder (its own key) and signs a certificate
+        # over the same recorded evidence. The artifact is internally
+        # consistent but is not signed by the trusted anchor, so authoritative
+        # verification must reject it.
+        forged = self.attacker.build(run_id="legitimate-run")
         self.assertTrue(ContainmentCertificateBuilder.verify_self_consistency(forged))
         self.assertFalse(ContainmentCertificateBuilder.verify(
             forged,
@@ -126,11 +129,7 @@ class CertificateTrustAnchorTests(unittest.TestCase):
         self.assertNotIn("VERIFIED", result.stdout)
 
     def test_official_cli_rejects_forged_attacker_certificate(self) -> None:
-        forged = self.attacker.build(
-            run_id="attacker-run",
-            session_id="attacker-session",
-            assertions={"teardown_verified": True},
-        )
+        forged = self.attacker.build(run_id="legitimate-run")
         certificate_path = self._write("forged.json", forged)
         key_path = self.root / "trusted-signer.pem"
         key_path.write_text(self.legitimate.public_key_pem, encoding="ascii")
@@ -138,6 +137,17 @@ class CertificateTrustAnchorTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("INVALID", result.stdout)
         self.assertNotIn("VERIFIED", result.stdout)
+
+    def test_unknown_run_namespace_fails_closed(self) -> None:
+        with self.assertRaises(ValueError):
+            self.legitimate.build(run_id="no-such-run")
+
+    def test_caller_cannot_supply_truth_assertions(self) -> None:
+        with self.assertRaises(TypeError):
+            self.legitimate.build(
+                run_id="legitimate-run",
+                assertions={"teardown_verified": True},  # type: ignore[call-arg]
+            )
 
 
 if __name__ == "__main__":

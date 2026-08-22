@@ -40,7 +40,7 @@ function clientFixture(options = {}) {
 
 function signedResponse(request, serverKeys, epoch, checkpoint, checkpointDigest) {
   const unsigned = {
-    schema: 'event-horizon.replay-response.v1',
+    schema: 'event-horizon.replay-response.v2',
     algorithm: 'Ed25519',
     service_id: serviceId,
     server_key_id: keyIdFromPublicKey(serverKeys.publicKey),

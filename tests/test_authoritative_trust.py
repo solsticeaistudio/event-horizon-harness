@@ -4,6 +4,7 @@ import copy
 import unittest
 
 from event_horizon.broker import CapabilityBroker, CapabilityError, CapabilityVerifier
+from event_horizon.replay_state import InMemoryCapabilityConsumptionStore
 from event_horizon.canonical import digest
 from event_horizon.models import ActionRequest, ValidationError
 from event_horizon.task_policy import ProviderTrustState
@@ -40,7 +41,11 @@ class AuthoritativeTrustTests(unittest.TestCase):
     def setUp(self) -> None:
         self.request = request()
         self.authority = authority_context(self.request, NOW)
-        self.broker = CapabilityBroker(b"authoritative-trust-regression-key", ttl_seconds=60)
+        self.broker = CapabilityBroker(
+            b"authoritative-trust-regression-key",
+            ttl_seconds=60,
+            consumption_store=InMemoryCapabilityConsumptionStore(),
+        )
         self.capability = self.broker.issue(
             self.request,
             now=NOW,
@@ -50,7 +55,9 @@ class AuthoritativeTrustTests(unittest.TestCase):
 
     def verify(self, *, action=None, capability=None, **changes):
         options = {**verify_options(self.authority), **changes}
-        verifier = CapabilityVerifier(self.broker.public_key_pem, self.broker.key_id)
+        verifier = CapabilityVerifier(
+            self.broker.public_key_pem, self.broker.key_id, InMemoryCapabilityConsumptionStore()
+        )
         return verifier.verify_and_consume(
             capability or self.capability,
             action or self.request,

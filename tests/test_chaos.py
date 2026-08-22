@@ -59,7 +59,10 @@ class DeterministicChaosTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             DeterministicChaosHarness().run("unknown")
 
-    def test_real_executor_classifies_after_effect_fault_as_indeterminate(self) -> None:
+    def test_pure_operation_post_effect_fault_is_provably_not_committed(self) -> None:
+        # Migrated from the pre-purity-model behavior. object.read is an
+        # architecturally declared pure operation, so a local fault after the
+        # handler ran is positive proof that no external effect occurred.
         with tempfile.TemporaryDirectory() as directory:
             authority, executor, recorder, _broker = build_local_harness(directory)
             request, capability, attestation = authority.request_capability({
@@ -73,6 +76,26 @@ class DeterministicChaosTests(unittest.TestCase):
             )
             result = executor.execute(request, capability, attestation)
             self.assertFalse(result.success)
+            self.assertEqual(result.effect_state, "not_committed")
+            self.assertEqual(recorder.events()[-1]["event_type"], "execution.denied")
+
+    def test_effectful_operation_post_effect_fault_stays_indeterminate(self) -> None:
+        # compute.run handlers are potentially effectful: after the handler is
+        # invoked, a local fault can never be reported as proof of no effect.
+        with tempfile.TemporaryDirectory() as directory:
+            authority, executor, recorder, _broker = build_local_harness(directory)
+            request, capability, attestation = authority.request_capability({
+                "request_id": "chaos-compute", "session_id": "chaos-session",
+                "agent_id": "attacker-agent", "operation": "compute.run",
+                "resource_id": "safe-hash", "executor_id": "exec-1",
+                "arguments": {"value": "chaos"}, "purpose": "chaos test",
+            })
+            executor.fault_injector = DeterministicFaultInjector(
+                {"executor.after-effect": 1}, enabled=True, environment="test"
+            )
+            result = executor.execute(request, capability, attestation)
+            self.assertFalse(result.success)
+            self.assertEqual(result.effect_state, "possibly_committed")
             self.assertIn("indeterminate effect state", result.error)
             self.assertEqual(recorder.events()[-1]["event_type"], "execution.indeterminate")
 

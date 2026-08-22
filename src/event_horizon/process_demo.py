@@ -68,18 +68,8 @@ def main(argv: list[str] | None = None) -> int:
         teardown = harness.teardown_executor()
         print(json.dumps(teardown, indent=2, sort_keys=True))
 
-        certificate = harness.build_certificate(
-            run_id='process-demo-run-v0.4',
-            session_id=request.session_id,
-            assertions={
-                'no_transferable_credential': not root_probe['ambient_authority_environment_hits'],
-                'no_unauthorized_egress': True,
-                'no_cross_session_effect': True,
-                'teardown_verified': teardown['verified'],
-                'authoritative_event_chain_intact': recovered['valid'],
-            },
-        )
-        certificate_path = workdir / 'containment-certificate-v0.4.json'
+        certificate = harness.build_certificate()
+        certificate_path = workdir / 'containment-certificate-v0.5.json'
         certificate_path.write_text(json.dumps(certificate, indent=2, sort_keys=True), encoding='utf-8')
         trusted_key_path = workdir / 'certificate-signer-public.pem'
         trusted_key_path.write_text(
@@ -90,7 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f'    certificate: {certificate_path}')
         print(f'    trusted signer key: {trusted_key_path}')
         print(f'    key_id: {certificate["key_id"]}')
-        print(f'    event_count: {certificate["certificate"]["event_count"]}')
+        payload = certificate['certificate']
+        print(f'    status: {payload["status"]}')
+        print(f'    consumed_events: {payload["consumed_event_count"]}')
+        for claim, value in sorted(payload['claims'].items()):
+            print(f'    claim {claim}: {value}')
         print('\nRoot in the hostile process exposed no reusable authority outside its cell.')
         return 0
     finally:

@@ -270,32 +270,59 @@ class ProcessHarnessTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn('output envelope', result.error)
 
-    def test_signed_certificate_binds_every_evidence_domain_after_teardown(self):
+    def test_signed_certificate_derives_every_claim_from_run_evidence(self):
         request, capability, attestation = self.issue(request_id='certificate')
         self.assertTrue(self.harness.execute(request, capability, attestation).success)
         teardown = self.harness.teardown_executor()
         self.assertTrue(teardown['verified'])
-        certificate = self.harness.build_certificate(
-            run_id='process-run',
-            session_id=request.session_id,
-            assertions={
-                'no_transferable_credential': True,
-                'no_unauthorized_egress': True,
-                'teardown_verified': True,
+        certificate = self.harness.build_certificate()
+        payload_value = certificate['certificate']
+        self.assertEqual(payload_value['schema'], 'event-horizon.containment-certificate.v0.5')
+        self.assertEqual(payload_value['status'], 'complete')
+        self.assertEqual(payload_value['run_id'], self.harness.run_id)
+        # The certificate's session identity is derived from run evidence and
+        # must match the executed request's session exactly.
+        self.assertEqual(payload_value['session_id'], request.session_id)
+        self.assertEqual(
+            set(payload_value['claims']),
+            {
+                'requests_recorded', 'attestation_independently_signed',
+                'guardian_quorum_without_veto', 'capability_issued',
+                'single_execution_per_capability', 'no_indeterminate_outcomes',
+                'teardown_attested', 'no_evidence_of_unauthorized_egress',
             },
         )
-        payload_value = certificate['certificate']
-        self.assertEqual(payload_value['schema'], 'event-horizon.containment-certificate.v0.4')
-        self.assertEqual(
-            set(payload_value['evidence']),
-            {'attestation', 'capability', 'policy', 'image', 'recorder', 'teardown', 'egress'},
-        )
+        self.assertEqual(set(payload_value['claims'].values()), {'satisfied'})
+        self.assertIn('recorder_checkpoint', payload_value)
+        self.assertIsNotNone(payload_value['recorder_checkpoint'])
+        self.assertGreaterEqual(payload_value['consumed_event_count'], 1)
         self.assertEqual(certificate['key_id'], self.harness.service_info['certificate']['key_id'])
         certificate_key = self.harness.service_info['certificate']['key_id']
         self.assertEqual(
             self.harness.restart_role('certificate')['key_id'],
             certificate_key,
         )
+
+    def test_certificate_rejects_caller_supplied_assertions(self):
+        with self.assertRaises(ProtocolError) as rejected:
+            self.harness.call(
+                'certificate',
+                'build',
+                {
+                    'run_id': self.harness.run_id,
+                    'assertions': {'teardown_verified': True},
+                },
+            )
+        # Fail-closed at the protocol envelope before any signing occurs.
+        self.assertIn(rejected.exception.code, {'invalid_certificate', 'unknown_field'})
+
+    def test_certificate_rejects_wrong_session_identity(self):
+        request, capability, attestation = self.issue(request_id='wrong-session')
+        with self.assertRaises(ProtocolError) as mismatch:
+            self.harness.build_certificate(run_id='never-recorded-run')
+        # An unknown run namespace has no evidence at all: it must fail closed.
+        self.assertEqual(mismatch.exception.code, 'invalid_certificate')
+        self.assertTrue(capability.claims.capability_id)
 
     def test_live_decay_is_one_transition_per_single_use_capability(self):
         first_request, first_capability, first_attestation = self.issue(request_id='decay-first')

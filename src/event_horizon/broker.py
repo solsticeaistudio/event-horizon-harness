@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 from .canonical import canonical_bytes, digest
 from .models import ActionRequest, CapabilityClaims, IssuedCapability
-from .replay_state import CapabilityConsumptionStore, InMemoryCapabilityConsumptionStore
+from .replay_state import CapabilityConsumptionStore
 from .task_policy import (
     CompiledTaskPolicyCeiling,
     ProviderTrustState,
@@ -244,15 +244,27 @@ def _consume_once(
 
 
 class CapabilityVerifier:
-    """Public-key-only verifier with injected one-use consumption state."""
+    """Public-key-only verifier with injected one-use consumption state.
+
+    The consumption store is required: a one-use capability primitive must
+    never silently fall back to volatile replay state. Tests may inject
+    ``InMemoryCapabilityConsumptionStore`` explicitly; production call sites
+    must inject durable shared state.
+    """
 
     def __init__(
         self,
         public_key: str | bytes | Ed25519PublicKey,
         key_id: str,
-        consumption_store: CapabilityConsumptionStore | None = None,
+        consumption_store: CapabilityConsumptionStore,
         decay_engine: DecayEngine | None = None,
     ):
+        if not hasattr(consumption_store, "consume"):
+            raise TypeError(
+                "capability replay store is required; inject a durable "
+                "CapabilityConsumptionStore (volatile in-memory stores are "
+                "development-only)"
+            )
         if isinstance(public_key, Ed25519PublicKey):
             loaded = public_key
         else:
@@ -265,7 +277,7 @@ class CapabilityVerifier:
             raise ValueError("capability key_id does not match the supplied public key")
         self._public_key = loaded
         self.key_id = actual_key_id
-        self.consumption_store = consumption_store or InMemoryCapabilityConsumptionStore()
+        self.consumption_store = consumption_store
         self.decay_engine = decay_engine or DecayEngine()
 
     def verify_and_consume(
@@ -330,6 +342,12 @@ class CapabilityBroker:
         consumption_store: CapabilityConsumptionStore | None = None,
         decay_engine: DecayEngine | None = None,
     ):
+        if not hasattr(consumption_store, "consume"):
+            raise TypeError(
+                "capability replay store is required; inject a durable "
+                "CapabilityConsumptionStore (volatile in-memory stores are "
+                "development-only)"
+            )
         if isinstance(signing_key, Ed25519PrivateKey):
             self._private_key = signing_key
         elif isinstance(signing_key, bytes):
@@ -350,7 +368,7 @@ class CapabilityBroker:
         if not 0 < ttl_seconds <= 300:
             raise ValueError("capability TTL must be greater than zero and at most 300 seconds")
         self.ttl_seconds = ttl_seconds
-        self.consumption_store = consumption_store or InMemoryCapabilityConsumptionStore()
+        self.consumption_store = consumption_store
         self.decay_engine = decay_engine or DecayEngine()
 
     @property

@@ -47,7 +47,12 @@ class AuthorityTests(unittest.TestCase):
         self.assertTrue(self.executor.execute(request, capability, attestation).success)
         result = self.executor.execute(request, capability, attestation)
         self.assertFalse(result.success)
-        self.assertIn("replay", result.error)
+        # The lifecycle tracker rejects the duplicate attempt before any
+        # provider interaction; either wording denotes a one-use violation.
+        self.assertTrue(
+            "replay" in result.error or "duplicate execution" in result.error,
+            result.error,
+        )
 
     def test_argument_widening_is_denied_by_policy(self):
         with self.assertRaises(AuthorizationDenied):

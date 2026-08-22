@@ -98,7 +98,7 @@ function signedMock() {
       request_digest: sha256(canonicalBytes(request)),
     }));
     const unsignedResponse = {
-      schema: 'event-horizon.replay-response.v1',
+      schema: 'event-horizon.replay-response.v2',
       algorithm: 'Ed25519',
       service_id: serviceId,
       server_key_id: serverKeyId,
@@ -227,7 +227,7 @@ test('remote replay outage and stale epoch fail closed', async () => {
     now: () => fixedNow,
     transport: async (request) => {
       const unsigned = {
-        schema: 'event-horizon.replay-response.v1',
+        schema: 'event-horizon.replay-response.v2',
         algorithm: 'Ed25519',
         service_id: serviceId,
         server_key_id: keyIdFromPublicKey(fork.serverKeys.publicKey),

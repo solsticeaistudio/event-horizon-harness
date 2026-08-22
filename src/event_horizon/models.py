@@ -302,3 +302,5 @@ class ExecutionResult:
     output: Any = None
     output_bytes: int = 0
     error: str | None = None
+    effect_state: str = "unknown"
+    receipt: Mapping[str, Any] | None = None

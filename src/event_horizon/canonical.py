@@ -45,11 +45,11 @@ def _canonical_value(value: Any, *, depth: int = 0, active: set[int] | None = No
             raise CanonicalizationError("integer exceeds the interoperable exact range")
         return value
     if isinstance(value, float):
-        if not math.isfinite(value):
-            raise CanonicalizationError("non-finite values are not permitted")
-        if value == 0 and math.copysign(1.0, value) < 0:
-            raise CanonicalizationError("negative zero is not permitted")
-        return value
+        # Protocol numbers are integer-only. The JSON parsers already reject
+        # floating-point tokens; rejecting them here as well guarantees that
+        # programmatically built objects can never disagree with parsed
+        # objects, or with the TypeScript implementation, about numeric form.
+        raise CanonicalizationError("floating-point values are not permitted")
     if isinstance(value, str):
         if unicodedata.normalize("NFC", value) != value:
             raise CanonicalizationError("strings must already be Unicode NFC")

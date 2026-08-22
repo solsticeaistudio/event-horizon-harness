@@ -11,9 +11,17 @@ import threading
 from pathlib import Path
 from typing import Any, Mapping
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from .canonical import canonical_bytes, digest
 from .models import ActionRequest, ExecutionResult, IssuedCapability, ValidationError
 from .intent_canonicalizer import AuthorizationDenied
+from .statements import (
+    TYPE_TEARDOWN_ATTESTATION,
+    StatementSigner,
+    StatementVerifier,
+)
 from .protocol import ProtocolError, read_frame, request_envelope, validate_response, write_frame
 from .protected_boundary import (
     ProtectedRequestSigner,
@@ -151,8 +159,10 @@ class ProcessClient:
 
 
 def _write_config(path: Path, payload: Mapping[str, Any]) -> None:
+    # Role configuration files are local plaintext, not signed protocol
+    # objects: they may contain non-canonical numbers such as float TTLs.
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(canonical_bytes(payload))
+    path.write_text(json.dumps(dict(payload), sort_keys=True), encoding="utf-8")
     if os.name != 'nt':
         path.chmod(0o600)
 
@@ -169,7 +179,7 @@ class ProcessSeparatedHarness:
     ROLES = ('parser', 'verifier', 'guardians', 'signer', 'executor', 'recorder', 'certificate')
     PROTECTED_TYPES = {
         'signer': frozenset({'issue', 'consume'}),
-        'recorder': frozenset({'append'}),
+        'recorder': frozenset({'append', 'checkpoint'}),
         'certificate': frozenset({'build'}),
     }
 
@@ -189,6 +199,22 @@ class ProcessSeparatedHarness:
         self.capability_key_path = self.workdir / 'authority-secrets' / 'capability-signing.seed'
         self.recorder_key_path = self.workdir / 'evidence-secrets' / 'recorder-signing.seed'
         self.certificate_key_path = self.workdir / 'evidence-secrets' / 'certificate-signing.seed'
+        self.verifier_statement_key_path = (
+            self.trusted_dir / 'verifier-statement.signing.seed'
+        )
+        self.guardian_statement_key_path = (
+            self.trusted_dir / 'guardian-statement.signing.seed'
+        )
+        self.watchdog_key_path = self.workdir / 'watchdog' / 'teardown-attestation.seed'
+        self.executor_receipt_key_path = (
+            self.workdir / 'executor-state' / 'execution-receipts.seed'
+        )
+        self.recorder_checkpoint_anchor_path = (
+            self.trusted_dir / 'recorder-checkpoints.jsonl'
+        )
+        self.execution_state_database = (
+            self.trusted_dir / 'capability-execution-state.sqlite3'
+        )
         self.recorder_path = self.workdir / 'external-evidence' / 'events.jsonl'
         self.ttl_seconds = ttl_seconds
         self.inject_permissive_guardian = inject_permissive_guardian
@@ -197,9 +223,13 @@ class ProcessSeparatedHarness:
         self.service_info: dict[str, dict[str, Any]] = {}
         self.protected_request_signers: dict[str, ProtectedRequestSigner] = {}
         self.source_sequences: dict[str, int] = {}
+        self.run_id: str = f'run-{secrets.token_hex(8)}'
         self.attestations: list[dict[str, Any]] = []
+        self.attestation_statements: list[dict[str, Any]] = []
         self.capabilities: list[IssuedCapability] = []
         self.teardown_evidence: dict[str, Any] = {'verified': False, 'executor_pid': None}
+        self.teardown_statement: dict[str, Any] | None = None
+        self._watchdog_signer: StatementSigner | None = None
         self.egress_evidence: dict[str, Any] = {
             'unrestricted_connectors': 0,
             'network_device_default': 'none-in-microvm-target',
@@ -278,6 +308,29 @@ class ProcessSeparatedHarness:
         _provision_or_load_seed(self.capability_key_path)
         _provision_or_load_seed(self.recorder_key_path)
         _provision_or_load_seed(self.certificate_key_path)
+        verifier_statement_seed = _provision_or_load_seed(self.verifier_statement_key_path)
+        guardian_statement_seed = _provision_or_load_seed(self.guardian_statement_key_path)
+        watchdog_seed = _provision_or_load_seed(self.watchdog_key_path)
+        executor_receipt_seed = _provision_or_load_seed(self.executor_receipt_key_path)
+        verifier_statement_signer = StatementSigner(verifier_statement_seed, subject='verifier')
+        guardian_statement_signer = StatementSigner(guardian_statement_seed, subject='guardians')
+        self._watchdog_signer = StatementSigner(watchdog_seed, subject='watchdog')
+        executor_receipt_signer = StatementSigner(
+            executor_receipt_seed,
+            subject='executor:exec-1',
+        )
+        recorder_seed = load_private_seed(self.recorder_key_path)
+        recorder_public_pem = Ed25519PrivateKey.from_private_bytes(recorder_seed).public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode('ascii')
+
+        def statement_public_key(signer: StatementSigner) -> dict[str, str]:
+            return {
+                'public_key': signer.public_key_pem,
+                'key_id': signer.key_id,
+            }
+
         self.protected_request_signers = {
             'signer': ProtectedRequestSigner(secrets.token_bytes(32), 'capability-signer'),
             'recorder': ProtectedRequestSigner(secrets.token_bytes(32), 'evidence-recorder'),
@@ -305,6 +358,7 @@ class ProcessSeparatedHarness:
                     'device_seeds': {'exec-1': simulator_seed},
                     'replay_database': str(self.authority_replay_path),
                     'replay_namespace': replay_namespace,
+                    'statement_signing_key_path': str(self.verifier_statement_key_path),
                 },
             )
             self._start_role(
@@ -317,6 +371,7 @@ class ProcessSeparatedHarness:
                     'behavioral_state_database': str(
                         self.trusted_dir / 'behavioral-state.sqlite3'
                     ),
+                    'statement_signing_key_path': str(self.guardian_statement_key_path),
                 },
             )
             signer = self._start_role(
@@ -329,6 +384,7 @@ class ProcessSeparatedHarness:
                     'consumption_domain': 'broker',
                     'decay_database': str(self.trusted_dir / 'decay-state.sqlite3'),
                     'policy': policy,
+                    'guardian_statement_public_key': guardian_statement_signer.public_key_pem,
                     **protected_config('signer', self.authority_replay_path),
                 },
             )
@@ -338,6 +394,7 @@ class ProcessSeparatedHarness:
                     'path': str(self.recorder_path),
                     'signing_key_path': str(self.recorder_key_path),
                     'max_event_bytes': 16_384,
+                    'checkpoint_anchor_path': str(self.recorder_checkpoint_anchor_path),
                     **protected_config('recorder', self.evidence_replay_path),
                 },
             )
@@ -358,6 +415,7 @@ class ProcessSeparatedHarness:
                     'decay_database': str(
                         self.workdir / 'executor-state' / 'decay-state.sqlite3'
                     ),
+                    'receipt_signing_key_path': str(self.executor_receipt_key_path),
                     'objects': {
                         'target-source': {'name': 'synthetic-target', 'content': 'safe fixture'},
                         'public-evidence': {'finding': 'contained'},
@@ -370,6 +428,13 @@ class ProcessSeparatedHarness:
                 {
                     'recorder_path': str(self.recorder_path),
                     'signing_key_path': str(self.certificate_key_path),
+                    'checkpoint_anchor_path': str(self.recorder_checkpoint_anchor_path),
+                    'recorder_public_key_pem': recorder_public_pem,
+                    'executor_statement_public_key': executor_receipt_signer.public_key_pem,
+                    'verifier_statement_public_key': verifier_statement_signer.public_key_pem,
+                    'guardian_statement_public_key': guardian_statement_signer.public_key_pem,
+                    'watchdog_statement_public_key': self._watchdog_signer.public_key_pem,
+                    'execution_state_database': str(self.execution_state_database),
                     **protected_config('certificate', self.evidence_replay_path),
                 },
             )
@@ -392,12 +457,16 @@ class ProcessSeparatedHarness:
         source_id: str = 'coordinator',
     ) -> dict[str, Any]:
         sequence = self.source_sequences.get(source_id, 0) + 1
+        stamped = {
+            'run_id': self.run_id,
+            **dict(payload),
+        }
         response = self.call(
             'recorder',
             'append',
             {
                 'event_type': event_type,
-                'payload': dict(payload),
+                'payload': stamped,
                 'source_id': source_id,
                 'source_sequence': sequence,
             },
@@ -413,6 +482,14 @@ class ProcessSeparatedHarness:
             raise ServiceUnavailable('recorder receipt sequence mismatch')
         self.source_sequences[source_id] = sequence
         return record
+
+    def issue_checkpoint(self) -> dict[str, Any]:
+        """Anchor the current evidence chain outside the recorder file."""
+        response = self.call('recorder', 'checkpoint', {})
+        envelope = response.get('checkpoint')
+        if not isinstance(envelope, dict) or 'checkpoint' not in envelope:
+            raise ServiceUnavailable('recorder omitted signed checkpoint')
+        return envelope
 
     def request_capability(
         self,
@@ -435,7 +512,7 @@ class ProcessSeparatedHarness:
                     'request_digest': request.request_digest,
                 },
             )
-            attestation = self.call(
+            attestation_response = self.call(
                 'verifier',
                 'verify_executor',
                 {
@@ -443,7 +520,9 @@ class ProcessSeparatedHarness:
                     'session_id': request.session_id,
                     'purpose': request.purpose,
                 },
-            )['attestation']
+            )
+            attestation = attestation_response['attestation']
+            verifier_statement = attestation_response['statement']
             self.record(
                 'attestation.verified',
                 {
@@ -453,6 +532,8 @@ class ProcessSeparatedHarness:
                     'bundle_digest': attestation['bundleDigest'],
                     'verifier_policy_digest': attestation['verifierPolicyDigest'],
                     'nonce_context': attestation['nonceContext'],
+                    'session_id': request.session_id,
+                    'statement': verifier_statement,
                 },
             )
             guardian_result = self.call(
@@ -495,6 +576,7 @@ class ProcessSeparatedHarness:
                 },
             )
             self.attestations.append(attestation)
+            self.attestation_statements.append(verifier_statement)
             self.capabilities.append(capability)
             return request, capability, attestation
         except AuthorizationDenied:
@@ -512,6 +594,7 @@ class ProcessSeparatedHarness:
         capability: IssuedCapability,
         attestation: Mapping[str, Any],
     ) -> ExecutionResult:
+        consume_failed = False
         try:
             self.call(
                 'signer',
@@ -522,32 +605,60 @@ class ProcessSeparatedHarness:
                     'attestation': dict(attestation),
                 },
             )
-            response = self.call(
-                'executor',
-                'execute',
-                {
-                    'request': request.canonical_payload(),
-                    'capability': capability.to_dict(),
-                    'attestation': dict(attestation),
-                },
-            )
-            result = ExecutionResult(**response)
         except (ProtocolError, ServiceUnavailable, ValidationError) as exc:
             result = ExecutionResult(
                 False,
                 request.operation,
                 request.resource_id,
                 error=f'{type(exc).__name__}: {exc}',
+                effect_state='not_committed',
             )
-        event_type = 'execution.completed' if result.success else 'execution.denied'
+        else:
+            consume_failed = True
+            try:
+                response = self.call(
+                    'executor',
+                    'execute',
+                    {
+                        'request': request.canonical_payload(),
+                        'capability': capability.to_dict(),
+                        'attestation': dict(attestation),
+                    },
+                )
+                result = ExecutionResult(**response)
+            except (ProtocolError, ServiceUnavailable, ValidationError) as exc:
+                # The replay store may already hold this capability and the
+                # executor may already have acted: an RPC failure is never
+                # proof that nothing happened.
+                result = ExecutionResult(
+                    False,
+                    request.operation,
+                    request.resource_id,
+                    error=f'{type(exc).__name__}: {exc}',
+                    effect_state='possibly_committed',
+                )
+        if result.effect_state in {'possibly_committed', 'unknown'}:
+            event_type = 'execution.indeterminate'
+        elif result.success:
+            event_type = 'execution.completed'
+        else:
+            event_type = 'execution.denied'
         self.record(
             event_type,
             {
                 'request_id': request.request_id,
+                'session_id': request.session_id,
+                'request_digest': request.request_digest,
                 'capability_id': capability.claims.capability_id,
                 'success': result.success,
                 'output_bytes': result.output_bytes,
                 'error': result.error,
+                'effect_state': (
+                    'possibly_committed'
+                    if result.effect_state == 'possibly_committed'
+                    else ('committed' if result.success and result.effect_state == 'committed' else 'not_committed')
+                ),
+                'receipt': result.receipt if isinstance(result.receipt, dict) else None,
             },
         )
         return result
@@ -597,61 +708,37 @@ class ProcessSeparatedHarness:
             'executor_pid': pid,
             'process_stopped': stopped,
             'ephemeral_config_destroyed': disk_destroyed,
+            'run_id': self.run_id,
         }
-        self.record('teardown.verified', self.teardown_evidence, source_id='watchdog')
+        # The watchdog independently authenticates its own teardown conclusion
+        # so the certificate signer does not have to trust the coordinator.
+        statement = self._watchdog_signer.sign(TYPE_TEARDOWN_ATTESTATION, {
+            'run_id': self.run_id,
+            'executor_pid': pid,
+            'process_stopped': bool(stopped),
+            'ephemeral_config_destroyed': bool(disk_destroyed),
+            'verified': bool(stopped and disk_destroyed),
+        }).to_dict()
+        self.teardown_statement = statement
+        self.record(
+            'teardown.verified',
+            {**self.teardown_evidence, 'statement': statement},
+            source_id='watchdog',
+        )
         return dict(self.teardown_evidence)
 
-    def build_certificate(
-        self,
-        *,
-        run_id: str,
-        session_id: str,
-        assertions: Mapping[str, bool],
-    ) -> dict[str, Any]:
-        recorder_status = self.call('recorder', 'verify', {})
-        attestation = self.attestations[-1] if self.attestations else {}
-        capability = self.capabilities[-1] if self.capabilities else None
-        evidence = {
-            'attestation': {
-                'result_digest': attestation.get('resultDigest'),
-                'bundle_digest': attestation.get('bundleDigest'),
-                'device_id': attestation.get('deviceId'),
-                'key_id': attestation.get('keyId'),
-                'verifier_policy_digest': attestation.get('verifierPolicyDigest'),
-            },
-            'capability': {
-                'capability_id': capability.claims.capability_id if capability else None,
-                'signer_key_id': capability.key_id if capability else None,
-                'request_digest': capability.claims.request_digest if capability else None,
-                'expires_at': capability.claims.expires_at if capability else None,
-                'invocation_limit': capability.claims.invocation_limit if capability else None,
-            },
-            'policy': {
-                'digest': capability.claims.policy_digest if capability else None,
-                'deny_by_default': True,
-            },
-            'image': {
-                'executor_id': capability.claims.executor_id if capability else None,
-                'measurement_digest': capability.claims.executor_measurement if capability else None,
-            },
-            'recorder': {
-                'event_count': recorder_status['count'],
-                'chain_tip': recorder_status['detail'],
-                'chain_valid': recorder_status['valid'],
-                'key_id': recorder_status['key_id'],
-            },
-            'teardown': dict(self.teardown_evidence),
-            'egress': dict(self.egress_evidence),
-        }
+    def build_certificate(self, *, run_id: str | None = None) -> dict[str, Any]:
+        """Build a certificate derived entirely from the run's evidence.
+
+        The certificate signer accepts only the run selector: every claim,
+        including teardown and egress conclusions, is resolved from the signed
+        recorder history and independently authenticated source statements.
+        """
+        self.issue_checkpoint()
         response = self.call(
             'certificate',
             'build',
-            {
-                'run_id': run_id,
-                'session_id': session_id,
-                'assertions': dict(assertions),
-                'evidence': evidence,
-            },
+            {'run_id': run_id or self.run_id},
         )
         certificate = response['certificate']
         verified = self.call('certificate', 'verify', {'certificate': certificate})['valid']

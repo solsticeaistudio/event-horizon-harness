@@ -5,6 +5,7 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
 from event_horizon.broker import CapabilityBroker, CapabilityError
 from event_horizon.models import ActionRequest
+from event_horizon.replay_state import InMemoryCapabilityConsumptionStore
 from scripts.capability_fixture_support import authority_context, issue_options, verify_options
 
 
@@ -16,7 +17,11 @@ class CapabilityLifecycleMachine(RuleBasedStateMachine):
 
     def __init__(self) -> None:
         super().__init__()
-        self.broker = CapabilityBroker(b"stateful-capability-key-no-authority", ttl_seconds=10)
+        self.broker = CapabilityBroker(
+            b"stateful-capability-key-no-authority",
+            ttl_seconds=10,
+            consumption_store=InMemoryCapabilityConsumptionStore(),
+        )
         self.sequence = 0
         self.committed: set[str] = set()
         self.consumed: set[str] = set()

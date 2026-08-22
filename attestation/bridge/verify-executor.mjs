@@ -1,13 +1,25 @@
 #!/usr/bin/env node
+// Development attestation bridge.
+//
+// The enrollment seed is delivered over STDIN, never via argv: process
+// command lines are world-readable through the OS process listing while
+// pipes are not. The payload is a single line: <seed>.
 import { SimulatorProver } from '../packages/simulator/dist/index.js';
 import { SqliteNoncePersistence, Verifier } from '../packages/core/dist/index.js';
 
 const deviceId = process.argv[2];
-const seed = process.argv[3];
-const sessionId = process.argv[4];
-const purpose = process.argv[5];
-if (!deviceId || !seed || !sessionId || !purpose) {
-  console.error('usage: verify-executor.mjs <device-id> <seed> <session-id> <purpose>');
+const sessionId = process.argv[3];
+const purpose = process.argv[4];
+if (!deviceId || !sessionId || !purpose) {
+  console.error('usage: verify-executor.mjs <device-id> <session-id> <purpose> (seed on stdin)');
+  process.exit(2);
+}
+
+const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+const seed = Buffer.concat(chunks).toString('utf8').trim();
+if (!seed) {
+  console.error('enrollment seed was not supplied on stdin');
   process.exit(2);
 }
 

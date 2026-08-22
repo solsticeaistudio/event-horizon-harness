@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 from pathlib import Path
+from typing import Any, Mapping
 
 from .attestation import DevelopmentAttestationProvider
 from .broker import CapabilityBroker
@@ -17,10 +18,49 @@ from .replay_state import SqliteCapabilityConsumptionStore
 from .task_policy import TaskPolicySynthesizer, TrustedPolicyCompiler, default_policy_templates
 
 
-def build_local_harness(workdir: str | Path, *, ttl_seconds: float = 10.0):
+class RunNamespacedRecorder:
+    """Injects the owning run identity into every event payload at the source.
+
+    Containment certificates resolve evidence exclusively through run
+    namespaces, so all events written for a run must carry its identity.
+    """
+
+    def __init__(self, inner: ExternalRecorder, run_id: str) -> None:
+        if not isinstance(run_id, str) or not 0 < len(run_id) <= 256:
+            raise ValueError("run namespace is invalid")
+        self._inner = inner
+        self.run_id = run_id
+
+    @property
+    def key_id(self) -> str:
+        return self._inner.key_id
+
+    @property
+    def public_key_pem(self) -> str:
+        return self._inner.public_key_pem
+
+    def append(
+        self,
+        event_type: str,
+        payload: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        stamped = {"run_id": self.run_id, **dict(payload)}
+        return self._inner.append(event_type, stamped, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def build_local_harness(workdir: str | Path, *, ttl_seconds: float = 10.0, run_id: str | None = None):
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
-    recorder = ExternalRecorder(workdir / "external-recorder" / "events.jsonl")
+    raw_recorder = ExternalRecorder(workdir / "external-recorder" / "events.jsonl")
+    recorder = (
+        RunNamespacedRecorder(raw_recorder, run_id)
+        if run_id is not None
+        else raw_recorder
+    )
     attestation_seed = "event-horizon-attestation-rebuild"
     measurement = hashlib.sha256(f"simulator:executor:{attestation_seed}".encode()).hexdigest()
     attestation_root = Path(__file__).resolve().parents[2] / "attestation"

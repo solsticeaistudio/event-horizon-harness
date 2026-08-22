@@ -62,7 +62,15 @@ def capability_fixture():
         arguments={"length": 32, "offset": 0},
         purpose="durable replay regression",
     )
-    broker = CapabilityBroker(b"durable-capability-signing-seed!", ttl_seconds=60)
+    broker = CapabilityBroker(
+        b"durable-capability-signing-seed!",
+        ttl_seconds=60,
+        consumption_store=SqliteCapabilityConsumptionStore(
+            Path(tempfile.mkdtemp(prefix="eh-signer-replay-")) / "replay.sqlite3",
+            namespace="signing",
+            domain="authority-broker",
+        ),
+    )
     authority = authority_context(request, FIXED_NOW)
     options = verify_options(authority)
     capability = broker.issue(

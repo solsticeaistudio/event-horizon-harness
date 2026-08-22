@@ -109,8 +109,11 @@ class DevelopmentAttestationProvider:
                 if self.replay_database is not None:
                     environment["EH_ATTESTATION_REPLAY_DB"] = str(self.replay_database.resolve())
                     environment["EH_ATTESTATION_REPLAY_NAMESPACE"] = self.replay_namespace
+                # The enrollment seed travels over stdin: process command
+                # lines are world-readable via the OS process listing.
                 completed = subprocess.run(
-                    [self.node_binary, str(script), executor_id, seed, session_id, purpose],
+                    [self.node_binary, str(script), executor_id, session_id, purpose],
+                    input=f"{seed}\n",
                     cwd=self.attestation_root,
                     capture_output=True,
                     text=True,

@@ -15,14 +15,18 @@ concurrency:
 jobs:
   python:
     name: Python 3.11
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # Pinned to immutable commit SHAs; floating tags are a supply-chain risk.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.6.0
         with:
           python-version: "3.11"
           cache: pip
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.4.0
         with:
           node-version: "20"
           cache: npm
@@ -31,7 +35,9 @@ jobs:
       - name: Build Executor Attestation bridge
         run: npm run build:attestation-bridge
       - name: Install project
-        run: python -m pip install --disable-pip-version-check -e ".[test]"
+        # Dependencies are exactly version-pinned in pyproject.toml;
+        # binary-only wheels prevent unreviewed source builds.
+        run: python -m pip install --disable-pip-version-check --no-cache-dir --only-binary :all: -e ".[test]"
       - name: Lint Python sources
         run: python scripts/lint_python.py
       - name: Run Python tests
@@ -41,10 +47,13 @@ jobs:
 
   typescript:
     name: TypeScript / Node 20
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.4.0
         with:
           node-version: "20"
           cache: npm
@@ -59,28 +68,33 @@ jobs:
 
   integration:
     name: Integration and repository policy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     needs: [python, typescript]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.4.0
         with:
           node-version: "20"
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.6.0
         with:
           python-version: "3.11"
           cache: pip
       - name: Clean installs
         run: |
           npm ci
-          python -m pip install --disable-pip-version-check -e ".[test]"
+          python -m pip install --disable-pip-version-check --no-cache-dir --only-binary :all: -e ".[test]"
       - name: Build integration dependencies
         run: npm run build
       - name: Run complete public demonstration
         run: python -m event_horizon.public_demo --workdir "$RUNNER_TEMP/event-horizon-integration" --artifacts-dir "$RUNNER_TEMP/event-horizon-artifacts"
       - name: Verify cross-language remote replay protocol
         run: python scripts/verify_remote_replay_interop.py
+      - name: Verify shared canonicalization vectors in both languages
+        run: npm run test:canonical-interop
       - name: Verify generated evidence chain
         run: python scripts/verify_evidence_chain.py "$RUNNER_TEMP/event-horizon-integration/external-evidence/events.jsonl"
       - name: Verify generated containment certificate
@@ -89,3 +103,19 @@ jobs:
         run: python scripts/verify_capability_vectors.py test-vectors/valid-capability.json test-vectors/replayed-capability.json test-vectors/unknown-field.json test-vectors/invalid-signature.json
       - name: Enforce tracked-artifact and secret policy
         run: python scripts/check_repository_policy.py
+
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@da24556b548a50d056063f15f812cf2b8fd27704 # v4.7.1
+        with:
+          fail-on-severity: high

@@ -17,9 +17,9 @@ import type {
   NonceTransitionStatus,
 } from './nonce-authority.js';
 
-const REQUEST_SCHEMA = 'event-horizon.replay-request.v1';
-const RESPONSE_SCHEMA = 'event-horizon.replay-response.v1';
-const GENESIS_SCHEMA = 'event-horizon.replay-genesis.v1';
+const REQUEST_SCHEMA = 'event-horizon.replay-request.v2';
+const RESPONSE_SCHEMA = 'event-horizon.replay-response.v2';
+const GENESIS_SCHEMA = 'event-horizon.replay-genesis.v2';
 const REQUEST_FIELDS = [
   'algorithm',
   'client_key_id',

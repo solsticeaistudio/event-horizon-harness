@@ -13,6 +13,7 @@ from event_horizon.canary import (
     canary_ids_do_not_overlap,
 )
 from event_horizon.canonical import digest
+from event_horizon.replay_state import InMemoryCapabilityConsumptionStore
 from event_horizon.denial_certificate import DenialCertificateBuilder
 from event_horizon.executor import SacrificialExecutor
 from event_horizon.models import ActionRequest, IssuedCapability, ValidationError
@@ -78,7 +79,10 @@ class CanaryCapabilityTests(unittest.TestCase):
             measurement="1" * 64,
             verifier_policy_digest="2" * 64,
             policy_digest="3" * 64,
-            broker=CapabilityBroker(b"unused-real-capability-key-material"),
+            broker=CapabilityBroker(
+            b"unused-real-capability-key-material",
+            consumption_store=InMemoryCapabilityConsumptionStore(),
+        ),
             recorder=self.recorder,
             tenant="tenant-a",
             environment="test-range",

@@ -121,18 +121,13 @@ def run_demo(workdir: Path, artifacts_dir: Path) -> dict[str, Any]:
         )
         recorder_status = harness.call("recorder", "verify", {})
         teardown = harness.teardown_executor()
-        assertions = {
-            "authoritative_event_chain_intact": recorder_status["valid"] is True,
-            "evidence_tampering_detected": tampering_detected,
-            "no_cross_executor_transfer": not transfer_result.success,
-            "no_unauthorized_egress": network_denied,
-            "replay_denied": not replay_result.success,
-            "teardown_verified": teardown["verified"] is True,
-        }
-        certificate = harness.build_certificate(
-            run_id="public-demo-run-v0.4",
-            session_id=exact_request.session_id,
-            assertions=assertions,
+        certificate = harness.build_certificate()
+        payload = certificate["certificate"]
+        certificate_status = payload.get("status")
+        claims = payload.get("claims", {})
+        containment_proven = (
+            certificate_status == "complete"
+            and all(value == "satisfied" for value in claims.values())
         )
         certificate_path = artifacts_dir / "latest-containment-certificate.json"
         certificate_path.write_text(json.dumps(certificate, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -152,13 +147,16 @@ def run_demo(workdir: Path, artifacts_dir: Path) -> dict[str, Any]:
             "cross_executor_transfer": not transfer_result.success,
             "unauthorized_network_operation": network_denied,
             "evidence_tampering": tampering_detected,
-            "containment_certificate": certificate_verified,
+            "containment_certificate": bool(certificate_verified and containment_proven),
         }
         summary = {
-            "schema": "event-horizon.public-demo-result.v0.4",
+            "schema": "event-horizon.public-demo-result.v0.5",
             "mode": "process-separated synthetic harness",
             "results": results,
             "simulator_is_hardware_attestation": False,
+            "certificate_status": certificate_status,
+            "certificate_claims": claims,
+            "teardown_verified": teardown["verified"],
             "certificate": str(certificate_path),
             "trusted_certificate_key": str(trusted_key_path),
             "certificate_key_id": certificate["key_id"],

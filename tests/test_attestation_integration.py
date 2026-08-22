@@ -51,7 +51,9 @@ class ExecutorAttestationIntegrationTests(unittest.TestCase):
 
     def test_certificate_is_ed25519_signed_and_binds_attestation(self):
         with tempfile.TemporaryDirectory() as tmp:
-            neural, executor, recorder, _broker = build_local_harness(tmp)
+            neural, executor, recorder, _broker = build_local_harness(
+                tmp, run_id="cert-run"
+            )
             request, capability, attestation = neural.request_capability({
                 "request_id": "cert-1",
                 "session_id": "cert-session",
@@ -62,21 +64,31 @@ class ExecutorAttestationIntegrationTests(unittest.TestCase):
                 "arguments": {"offset": 0, "length": 10},
                 "purpose": "certificate test",
             })
-            executor.execute(request, capability, attestation)
+            result = executor.execute(request, capability, attestation)
+            self.assertTrue(result.success)
             certificate_builder = ContainmentCertificateBuilder(recorder, b"C" * 32)
-            certificate = certificate_builder.build(
-                run_id="cert-run",
-                session_id="cert-session",
-                assertions={"contained": True},
-            )
+            certificate = certificate_builder.build(run_id="cert-run")
             self.assertEqual(certificate["algorithm"], "Ed25519")
-            self.assertTrue(certificate["certificate"]["attestation_bundle_digests"])
+            payload = certificate["certificate"]
+            # This minimal in-process topology has no verifier statements or
+            # watchdog teardown events, so completeness must fail closed even
+            # though every recorded claim derives from genuine run evidence.
+            self.assertEqual(payload["status"], "incomplete")
+            self.assertIn(
+                "missing required evidence classes", "".join(payload["blocking_reasons"])
+            )
+            self.assertEqual(payload["session_id"], request.session_id)
+            self.assertIn(
+                attestation["resultDigest"],
+                payload["evidence"]["attestation"]["result_digests"],
+            )
+            self.assertEqual(payload["claims"]["capability_issued"], "satisfied")
             self.assertTrue(ContainmentCertificateBuilder.verify(
                 certificate,
                 public_key_pem=certificate_builder.public_key_pem,
                 expected_key_id=certificate_builder.key_id,
             ))
-            certificate["certificate"]["completed_actions"] = 999
+            payload["completed_actions"] = 999
             self.assertFalse(ContainmentCertificateBuilder.verify(
                 certificate,
                 public_key_pem=certificate_builder.public_key_pem,
