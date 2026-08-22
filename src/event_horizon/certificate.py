@@ -475,7 +475,7 @@ class ContainmentCertificateBuilder:
             "effect_mediation_enforced": policy_facts["effect_mediation_enforced"],
             "effects_reconciled": effects_reconciled_fact,
             "provider_receipts_authenticated": bool(
-                effects_summary["summary"].get("provider_receipts_authenticated")
+                effects_summary.get("provider_receipts_authenticated")
             ),
             "manifest_authorized_sources": self._manifest_authorized(),
             "quorum_approval_present": (

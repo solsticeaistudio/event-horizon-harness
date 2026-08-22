@@ -30,7 +30,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 from .canonical import canonical_bytes, digest
 
@@ -268,3 +271,46 @@ class ReferenceProviderServer:
             self._thread.join(timeout=5)
             self._thread = None
         self._server.server_close()
+
+
+def verify_provider_receipt_signature(
+    envelope: Mapping[str, Any], provider_public_key_pem: str
+) -> bool:
+    """Authenticate a provider receipt against a pinned provider key."""
+    try:
+        payload_fields = {
+            "schema", "provider_id", "provider_key_id", "idempotency_key",
+            "effect_id", "effect_fingerprint", "provider_transaction_id",
+            "state", "sequence", "request_digest", "issued_at_ms",
+        }
+        if not isinstance(envelope, dict):
+            return False
+        if set(envelope) != payload_fields | {"signature", "algorithm"}:
+            return False
+        if envelope["algorithm"] != "Ed25519":
+            return False
+        loaded = serialization.load_pem_public_key(
+            provider_public_key_pem.encode("ascii")
+        )
+        if not isinstance(loaded, Ed25519PublicKey):
+            return False
+        raw = loaded.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        expected_key_id = (
+            f"ed25519:{hashlib.sha256(raw).hexdigest()[:32]}"
+        )
+        if envelope["provider_key_id"] != expected_key_id:
+            return False
+        unsigned = {
+            k: v for k, v in envelope.items()
+            if k not in {"signature", "algorithm"}
+        }
+        decoded = base64.urlsafe_b64decode(
+            envelope["signature"] + "=" * (-len(envelope["signature"]) % 4)
+        )
+        loaded.verify(decoded, canonical_bytes(unsigned))
+        return True
+    except Exception:
+        return False
