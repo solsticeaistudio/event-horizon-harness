@@ -32,6 +32,8 @@ TYPE_EFFECT_RECEIPT = "effect-receipt"
 TYPE_EFFECT_RECONCILIATION = "effect-reconciliation"
 TYPE_WITNESS_ACKNOWLEDGMENT = "witness-acknowledgment"
 TYPE_APPROVAL = "approval"
+TYPE_DEPLOYMENT_POLICY = "deployment-policy"
+TYPE_PROVIDER_RECEIPT = "provider-receipt"
 
 STATEMENT_TYPES = frozenset({
     TYPE_VERIFIER_ATTESTATION,
@@ -44,6 +46,8 @@ STATEMENT_TYPES = frozenset({
     TYPE_EFFECT_RECONCILIATION,
     TYPE_WITNESS_ACKNOWLEDGMENT,
     TYPE_APPROVAL,
+    TYPE_DEPLOYMENT_POLICY,
+    TYPE_PROVIDER_RECEIPT,
 })
 
 _STATEMENT_TYPE_RE = re.compile(r"^[a-z][a-z0-9-]{2,63}$")

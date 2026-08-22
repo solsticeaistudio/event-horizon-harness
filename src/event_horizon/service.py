@@ -725,7 +725,7 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
             'watchdog_statement_public_key', 'execution_state_database',
             'deployment_id', 'trust_root_manifest_digest', 'witness_public_key_pem',
             'require_witness', 'approval_policy', 'trust_root_public_key_pem',
-            'manifest_envelope',
+            'manifest_envelope', 'deployment_policy_statement',
             *PROTECTED_CONFIG_FIELDS,
         },
     )
@@ -742,6 +742,8 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
         TYPE_GUARDIAN_DECISION: config['guardian_statement_public_key'],
         TYPE_TEARDOWN_ATTESTATION: config['watchdog_statement_public_key'],
         'executor-receipts': config['executor_statement_public_key'],
+        # Deployment-policy statements are signed by the deployment root.
+        'deployment-root': config['trust_root_public_key_pem'],
     })
     witness_verifier = StatementVerifier({
         'witness': config['witness_public_key_pem'],
@@ -859,6 +861,7 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
                 witness_acknowledgment=witness_acknowledgment,
                 witness_policy=WitnessPolicy(require_witness=require_witness),
                 approval_outcome=approval_outcome,
+                deployment_policy_statement=config.get('deployment_policy_statement'),
             )
         except (TypeError, ValueError, CertificateBuildError) as exc:
             raise ProtocolError('invalid_certificate', str(exc)) from exc

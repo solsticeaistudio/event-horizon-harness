@@ -1451,6 +1451,8 @@ class GovernedEffectExecutionTests(unittest.TestCase):
             last = recorder.events()[-1]
             self.assertEqual(last["event_type"], "execution.indeterminate")
             # Reconstruct the immutable effect identity and reconcile.
+            from event_horizon.executor import _governed_effect_id
+
             effect_request = make_effect_request(
                 deployment_id="dep-local",
                 environment=executor.environment,
@@ -1465,6 +1467,10 @@ class GovernedEffectExecutionTests(unittest.TestCase):
                 execution_id=_governed_execution_id(
                     capability.claims.capability_id, request.request_digest
                 ),
+                effect_id=_governed_effect_id(
+                    capability.claims.capability_id, request.request_digest
+                ),
+                provider_scope="default",
             )
             reconciled = executor.effect_gateway.reconcile(effect_request, provider)
             self.assertEqual(reconciled["state"], GATEWAY_RECONCILED)
@@ -1547,7 +1553,21 @@ class GovernedEffectExecutionTests(unittest.TestCase):
             self.assertEqual(
                 payload["claims"]["effect_mediation_consistent"], "satisfied"
             )
-            self.assertIn("mediated-effects", payload["assurance_guarantees"])
+            # v0.7: guarantees are independently evaluated facts; the named
+            # profile is derived from them. This minimal in-process topology
+            # has no attestation statements, so authenticated_sources is
+            # honestly False and the derived profile stays DEVELOPMENT even
+            # though mediation was observed and reconciled.
+            facts = payload["assurance_facts"]
+            self.assertTrue(facts["effect_mediated"])
+            self.assertTrue(facts["effects_reconciled"])
+            self.assertFalse(
+                facts["effect_mediation_enforced"],
+                "observed mediation must not imply enforced exclusivity",
+            )
+            self.assertFalse(facts["provider_receipts_authenticated"])
+            self.assertFalse(facts["authenticated_sources"])
+            self.assertEqual(payload["assurance_profile"], "DEVELOPMENT")
 
 
 if __name__ == "__main__":

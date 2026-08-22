@@ -489,6 +489,17 @@ class ManifestChain:
             f"manifest version {manifest_version} is not part of this verified chain"
         )
 
+    def version_for_digest(self, manifest_digest: str) -> int:
+        """Resolve a manifest digest to its position in this verified chain."""
+        if not isinstance(manifest_digest, str) or re.fullmatch(
+            r"[0-9a-f]{64}", manifest_digest
+        ) is None:
+            raise TrustManifestError("manifest digest is malformed")
+        for manifest in self._chain:
+            if manifest.manifest_digest == manifest_digest:
+                return manifest.manifest_version
+        raise TrustManifestError("manifest digest is unknown to this verified chain")
+
     # ------------------------------------------------------------ authorization
 
     def authorize(
@@ -596,6 +607,128 @@ class ManifestChain:
                 )
 
 
+@dataclass(frozen=True)
+class HistoricalTrustVerdict:
+    """Independently modeled predicates for historical statement trust.
+
+    Only the conjunction of all four predicates yields a historically
+    trusted statement. A signer-supplied timestamp or claimed manifest
+    version alone never establishes pre-revocation existence.
+    """
+
+    signature_valid: bool
+    key_authorized_for_claimed_manifest: bool
+    statement_observed_before_revocation: bool
+    historically_trusted: bool
+    reason: str
+
+
+def _verdict(
+    signature_valid: bool,
+    authorized: bool,
+    observed: bool,
+    reason: str,
+) -> HistoricalTrustVerdict:
+    return HistoricalTrustVerdict(
+        signature_valid=signature_valid,
+        key_authorized_for_claimed_manifest=authorized,
+        statement_observed_before_revocation=observed,
+        historically_trusted=signature_valid and authorized and observed,
+        reason=reason,
+    )
+
+
+_OBSERVATION_KIND_WITNESSED_CHECKPOINT = "witnessed_recorder_checkpoint"
+
+
+def historical_trust(
+    chain: "ManifestChain",
+    *,
+    key_id: str,
+    role: str,
+    purpose: str | None = None,
+    manifest_version: int,
+    signature_valid: bool,
+    observation: Mapping[str, Any] | None = None,
+) -> HistoricalTrustVerdict:
+    """Evaluate whether a statement may carry strong historical claims.
+
+    ``signature_valid`` must be established by the caller through the typed
+    statement verifier. Existence before revocation requires an independent
+    observation; the supported kind binds the statement's event into a
+    recorder checkpoint whose acknowledgment was produced by an external
+    witness. Signer-supplied timestamps are never consulted.
+    """
+    if not signature_valid:
+        return _verdict(False, False, False, "signature-invalid")
+    try:
+        chain.authorize(
+            key_id,
+            role=role,
+            purpose=purpose,
+            at_manifest_version=manifest_version,
+        )
+    except TrustManifestError as exc:
+        return _verdict(
+            True, False, False, f"not-authorized-at-claimed-manifest ({exc})"
+        )
+
+    if not isinstance(observation, Mapping):
+        return _verdict(True, True, False, "statement-existence-unobserved")
+    if observation.get("kind") != _OBSERVATION_KIND_WITNESSED_CHECKPOINT:
+        return _verdict(True, True, False, "unsupported-observation-kind")
+
+    from .witness import verify_witness_acknowledgment_signature
+
+    ack = observation.get("ack")
+    witness_public_key_pem = observation.get("witness_public_key_pem")
+    checkpoint_sequence = observation.get("checkpoint_sequence")
+    event_hash = observation.get("event_hash")
+    if (
+        not verify_witness_acknowledgment_signature(ack, witness_public_key_pem)
+        or type(checkpoint_sequence) is not int
+        or checkpoint_sequence < 1
+        or not isinstance(event_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", event_hash) is None
+    ):
+        return _verdict(True, True, False, "observation-unverifiable")
+
+    try:
+        checkpoint_trust_version = chain.version_for_digest(str(ack["manifest_digest"]))
+    except TrustManifestError:
+        return _verdict(True, True, False, "observation-from-unknown-trust-state")
+
+    # The claimed manifest must not be newer than the trust state under which
+    # the statement was observed.
+    if manifest_version > checkpoint_trust_version:
+        return _verdict(True, True, False, "claimed-manifest-newer-than-observation")
+
+    # The observation must predate every revocation of this key: both in
+    # manifest-chain order (the checkpointed trust state precedes the
+    # revoking manifest) and in recorder order (the witnessed checkpoint
+    # precedes the revocation's effective sequence).
+    revocation_versions = [
+        manifest.manifest_version
+        for manifest in chain._chain
+        for revocation in manifest.envelope["revocations"]
+        if revocation["key_id"] == key_id
+    ]
+    if revocation_versions:
+        earliest_revocation_version = min(revocation_versions)
+        if checkpoint_trust_version >= earliest_revocation_version:
+            return _verdict(True, True, False, "observed-at-or-after-revocation")
+        effective_sequences = [
+            revocation["effective_sequence"]
+            for manifest in chain._chain
+            for revocation in manifest.envelope["revocations"]
+            if revocation["key_id"] == key_id
+        ]
+        if checkpoint_sequence >= min(effective_sequences):
+            return _verdict(True, True, False, "observed-at-or-after-revocation")
+
+    return _verdict(True, True, True, "historically-trusted")
+
+
 class AuthorizedStatementVerifier:
     """Compose signature verification with manifest role authorization.
 
@@ -621,6 +754,8 @@ class AuthorizedStatementVerifier:
         expected_purpose: str | None = None,
         issued_at_ms_field: str = "issued_at",
         at_manifest_version: int | None = None,
+        observation: Mapping[str, Any] | None = None,
+        require_observation: bool = False,
     ) -> Any:
         statement = self.statement_verifier.verify(
             envelope, expected_type=expected_type
@@ -637,4 +772,23 @@ class AuthorizedStatementVerifier:
             at_manifest_version=at_manifest_version,
             at_ms=at_ms if isinstance(at_ms, int) else None,
         )
+        if require_observation or observation is not None:
+            verdict = historical_trust(
+                self.chain,
+                key_id=key_id,
+                role=expected_role,
+                purpose=expected_purpose,
+                manifest_version=(
+                    at_manifest_version
+                    if at_manifest_version is not None
+                    else self.chain.version
+                ),
+                signature_valid=True,
+                observation=observation,
+            )
+            if not verdict.historically_trusted:
+                raise KeyNotAuthorizedError(
+                    f"historical trust rejected: {verdict.reason}",
+                    reason_code=verdict.reason.split(" ")[0],
+                )
         return statement

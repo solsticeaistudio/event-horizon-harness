@@ -17,6 +17,7 @@ from .canonical import canonical_bytes
 from .execution_state import ExecutionStateError
 from .recorder import ExternalRecorder
 from .statements import (
+    TYPE_DEPLOYMENT_POLICY,
     TYPE_EXECUTION_RECEIPT,
     TYPE_GUARDIAN_DECISION,
     TYPE_TEARDOWN_ATTESTATION,
@@ -179,6 +180,7 @@ class ContainmentCertificateBuilder:
         witness_policy: Any = None,
         effect_reconciliation_statements: list[Mapping[str, Any]] | None = None,
         approval_outcome: Any = None,
+        deployment_policy_statement: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build a v0.6 certificate for one execution namespace.
 
@@ -401,37 +403,97 @@ class ContainmentCertificateBuilder:
 
         evidence_root = _merkle_root([event["event_hash"] for event in events])
 
-        # ---- assurance -------------------------------------------------------
-        guarantees = {"local"}
-        if attestations or decisions or teardown_events:
-            statements_ok = (
-                verifier_ok is not False
-                and guardian_ok is not False
-                and teardown_claim_value is not False
-                and self.statement_verifier is not None
-                and bool(attestations or decisions)
-            )
-            if statements_ok and not any("invalid" in reason for reason in blocking):
-                guarantees.add("authenticated")
-            if witness_verdict.ok and witness_acknowledgment is not None:
-                guarantees.add("witnessed")
-            if effects_summary["mediated_complete"]:
-                guarantees.add("mediated-effects")
-            if "authenticated" in guarantees and self._manifest_authorized():
-                guarantees.add("independent-trust")
-        assurance_level = "local"
-        for level in ASSURANCE_LEVELS:
-            if level == "local" or level in guarantees:
-                assurance_level = level
-            else:
-                break
+        # ---- assurance facts -------------------------------------------------
+        # Guarantees are independently evaluated machine-readable facts; the
+        # named profile is derived from them and never requested by callers.
+        from .assurance import derive_profile, normalize_facts
+        from .trust_manifest import AuthorizedStatementVerifier
+
+        policy_facts = {
+            "replay_durable": False,
+            "effect_mediation_enforced": False,
+            "keys_independently_administered": False,
+        }
+        if deployment_policy_statement is not None:
+            try:
+                policy_statement = self.statement_verifier.verify(
+                    deployment_policy_statement, expected_type=TYPE_DEPLOYMENT_POLICY
+                )
+            except (StatementError, TypeError, ValueError) as exc:
+                raise CertificateBuildError(
+                    f"deployment policy statement is invalid: {exc}"
+                ) from exc
+            if policy_statement.payload.get("deployment_id") != deployment_id:
+                raise CertificateBuildError(
+                    "deployment policy statement belongs to a different deployment"
+                )
+            for name in ("replay_durable", "effect_mediation_enforced",
+                         "keys_independently_administered"):
+                value = policy_statement.payload.get(name)
+                if type(value) is not bool:
+                    raise CertificateBuildError(
+                        f"deployment policy fact {name!r} must be boolean"
+                    )
+                policy_facts[name] = value
+
+        witness_independence = {}
+        if isinstance(witness_acknowledgment, Mapping):
+            ack_payload = witness_acknowledgment.get("ack")
+            if isinstance(ack_payload, Mapping):
+                independence = ack_payload.get("independence")
+                if isinstance(independence, Mapping):
+                    witness_independence = dict(independence)
+
+        effects_reconciled_fact = (
+            bool(effects_summary["summary"].get("reconciled_count"))
+            and not any("indeterminate" in reason or "unresolved" in reason
+                        for reason in blocking)
+        )
+        authenticated_sources = (
+            self.statement_verifier is not None
+            and bool(attestations or decisions)
+            and verifier_ok is not False
+            and guardian_ok is not False
+        )
+        assurance_facts = normalize_facts({
+            "authenticated_sources": authenticated_sources,
+            "namespace_complete": True,
+            "replay_durable": policy_facts["replay_durable"],
+            "history_witnessed": (
+                witness_acknowledgment is not None and witness_verdict.ok
+            ),
+            "witness_administratively_independent": bool(
+                witness_independence.get("administrative")
+            ),
+            "witness_storage_independent": bool(
+                witness_independence.get("storage")
+            ),
+            "keys_independently_administered": policy_facts[
+                "keys_independently_administered"
+            ],
+            "effect_mediated": effects_summary["mediated_complete"],
+            "effect_mediation_enforced": policy_facts["effect_mediation_enforced"],
+            "effects_reconciled": effects_reconciled_fact,
+            "provider_receipts_authenticated": bool(
+                effects_summary["summary"].get("provider_receipts_authenticated")
+            ),
+            "manifest_authorized_sources": self._manifest_authorized(),
+            "quorum_approval_present": (
+                approval_outcome.satisfied if approval_outcome is not None else False
+            ),
+        })
+        assurance_profile = derive_profile(assurance_facts)
 
         payload = {
             "schema": CERTIFICATE_SCHEMA,
             "deployment_id": deployment_id,
             "trust_root_manifest_digest": trust_root_manifest_digest,
-            "assurance_level": assurance_level,
-            "assurance_guarantees": sorted(guarantees),
+            "assurance_level": assurance_profile,
+            "assurance_profile": assurance_profile,
+            "assurance_facts": dict(sorted(assurance_facts.items())),
+            "assurance_guarantees": sorted(
+                name for name, value in assurance_facts.items() if value
+            ),
             "run_id": run_id,
             "session_id": derived_session_id,
             "created_at_ms": time.time_ns() // 1_000_000,
@@ -581,8 +643,11 @@ class ContainmentCertificateBuilder:
                 "summary": summary,
                 "consistency_claim": CLAIM_UNKNOWN,
                 "mediated_complete": False,
+                "has_conflict": False,
+                "provider_receipts_authenticated": False,
             }
         resolutions: dict[str, str] = {}
+        evidence_classes: list[str] = []
         unverified = 0
         for index, envelope in enumerate(reconciliation_statements):
             try:
@@ -598,7 +663,12 @@ class ContainmentCertificateBuilder:
             payload = statement.payload
             execution_key = str(payload.get("idempotency_key") or payload.get("execution_id"))
             resolutions[execution_key] = str(payload.get("resolution"))
+            evidence_class = payload.get("provider_evidence_class")
+            evidence_classes.append(
+                evidence_class if isinstance(evidence_class, str) else "unspecified"
+            )
         summary["unverified_statements"] = unverified
+        summary["provider_evidence_classes"] = sorted(set(evidence_classes))
         for resolution in resolutions.values():
             if resolution == "committed":
                 summary["committed"] += 1
@@ -672,6 +742,12 @@ class ContainmentCertificateBuilder:
             "consistency_claim": consistency_claim,
             "mediated_complete": mediated_complete and consistency_claim == CLAIM_SATISFIED,
             "has_conflict": bool(conflicted),
+            "provider_receipts_authenticated": bool(
+                evidence_classes
+                and all(
+                    cls == "provider_authenticated_receipt" for cls in evidence_classes
+                )
+            ),
         }
 
     def _manifest_authorized(self) -> bool:

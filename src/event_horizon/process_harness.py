@@ -387,6 +387,31 @@ class ProcessSeparatedHarness:
         )
         verified = chain.append(self.manifest_envelope)
         self.manifest_digest = verified.manifest_digest
+        # Externally pinnable root of trust for offline verification.
+        self.deployment_root_public_key_pem = authority.public_key_pem
+        # Signed deployment-policy statement (v0.7): these facts rest on
+        # authenticated provenance, never on caller assertion. Development
+        # values are honest about their limits: replay is durable SQLite,
+        # but mediation is NOT exclusive and keys are NOT independently
+        # administered under a single host account.
+        from .statements import TYPE_DEPLOYMENT_POLICY
+
+        self.deployment_policy_statement = (
+            StatementSigner(deployment_root_seed, subject='deployment-root').sign(
+                TYPE_DEPLOYMENT_POLICY,
+                {
+                    'deployment_id': self.deployment_id,
+                    'replay_durable': True,
+                    'effect_mediation_enforced': False,
+                    'keys_independently_administered': False,
+                },
+            ).to_dict()
+        )
+        self.trusted_dir.mkdir(parents=True, exist_ok=True)
+        (self.trusted_dir / 'deployment-policy.json').write_text(
+            json.dumps(self.deployment_policy_statement, indent=2, sort_keys=True),
+            encoding='utf-8',
+        )
         (self.trusted_dir / 'trust-manifest.json').write_text(
             json.dumps(self.manifest_envelope, indent=2, sort_keys=True),
             encoding='utf-8',
@@ -510,6 +535,9 @@ class ProcessSeparatedHarness:
                     'approval_policy': None,
                     'trust_root_public_key_pem': authority.public_key_pem,
                     'manifest_envelope': self.manifest_envelope,
+                    # Signed by the deployment root: dev-honest values. The
+                    # same-host witness is NOT administratively independent.
+                    'deployment_policy_statement': self.deployment_policy_statement,
                     'executor_statement_public_key': executor_receipt_signer.public_key_pem,
                     'verifier_statement_public_key': verifier_statement_signer.public_key_pem,
                     'guardian_statement_public_key': guardian_statement_signer.public_key_pem,

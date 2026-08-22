@@ -31,7 +31,7 @@ def payload(**overrides):
 class ProcessHarnessTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.harness = ProcessSeparatedHarness(self.tmp.name, ttl_seconds=1.0).start()
+        self.harness = ProcessSeparatedHarness(self.tmp.name, ttl_seconds=30.0).start()
 
     def tearDown(self):
         self.harness.close()
@@ -207,7 +207,7 @@ class ProcessHarnessTests(unittest.TestCase):
         with self.assertRaises(AuthorizationDenied):
             self.issue(request_id='verifier-down')
         self.harness.close()
-        self.harness = ProcessSeparatedHarness(self.tmp.name + '-signer', ttl_seconds=1.0).start()
+        self.harness = ProcessSeparatedHarness(self.tmp.name + '-signer', ttl_seconds=30.0).start()
         self.harness.stop_role('signer')
         with self.assertRaises(AuthorizationDenied):
             self.issue(request_id='signer-down')
@@ -283,10 +283,21 @@ class ProcessHarnessTests(unittest.TestCase):
         # v0.6 bindings: deployment identity and trust-root manifest version.
         self.assertEqual(payload_value['deployment_id'], self.harness.deployment_id)
         self.assertEqual(payload_value['trust_root_manifest_digest'], self.harness.manifest_digest)
-        self.assertIn(payload_value['assurance_level'], {
-            'local', 'authenticated', 'witnessed', 'mediated-effects', 'independent-trust',
-        })
-        self.assertIn('authenticated', payload_value['assurance_guarantees'])
+        # v0.7: assurance is fact-derived. This dev topology is externally
+        # witnessed but its witness is same-host and mediation is not
+        # enforced, so the honest derived profile is WITNESSED_HISTORY.
+        facts = payload_value['assurance_facts']
+        self.assertTrue(facts['authenticated_sources'])
+        self.assertTrue(facts['namespace_complete'])
+        self.assertTrue(facts['replay_durable'])
+        self.assertTrue(facts['history_witnessed'])
+        self.assertFalse(facts['witness_administratively_independent'])
+        self.assertFalse(facts['effect_mediation_enforced'])
+        self.assertEqual(payload_value['assurance_profile'], 'WITNESSED_HISTORY')
+        self.assertEqual(payload_value['assurance_level'], 'WITNESSED_HISTORY')
+        self.assertIn(
+            'authenticated_sources', payload_value['assurance_guarantees']
+        )
         # The certificate's session identity is derived from run evidence and
         # must match the executed request's session exactly.
         self.assertEqual(payload_value['session_id'], request.session_id)

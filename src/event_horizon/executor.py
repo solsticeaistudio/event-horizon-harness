@@ -110,6 +110,18 @@ def _governed_execution_id(capability_id: str, request_digest: str) -> str:
     return f"exec_{material[:32]}"
 
 
+def _governed_effect_id(capability_id: str, request_digest: str) -> str:
+    """Deterministic logical-effect identity for one capability execution.
+
+    Retryable: the same capability execution always maps to the same effect.
+    Distinct capabilities (or distinct requests) map to distinct effects, so
+    intentionally repeating identical semantics under a fresh one-use
+    capability is a genuinely new logical effect.
+    """
+    material = hashlib.sha256(f"{capability_id}:{request_digest}".encode("utf-8")).hexdigest()
+    return f"eff_{material[32:64]}"
+
+
 @dataclass
 class SacrificialExecutor:
     executor_id: str
@@ -131,6 +143,7 @@ class SacrificialExecutor:
     effect_provider: ProviderAdapter | None = None
     deployment_id: str = "local-dev"
     run_namespace: str | None = None
+    provider_scope: str = "default"
 
     def __post_init__(self) -> None:
         # Process-scoped duplicate-execution detection fallback. Production
@@ -376,6 +389,8 @@ class SacrificialExecutor:
             policy_digest=self.policy_digest,
             executor_identity=self.executor_id,
             execution_id=_governed_execution_id(capability_id, request.request_digest),
+            effect_id=_governed_effect_id(capability_id, request.request_digest),
+            provider_scope=self.provider_scope,
         )
         provider = self.effect_provider or LocalHandlerProvider(
             lambda: self._invoke_handler(request)

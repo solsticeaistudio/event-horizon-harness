@@ -49,12 +49,29 @@ WITNESS_ACK_FIELDS = {
     "chain_tip",
     "previous_checkpoint_digest",
     "checkpoint_digest",
+    "independence",
     "witnessed_at_ms",
+}
+
+WITNESS_CONFLICT_STATEMENT_TYPE = "witness-conflict"
+WITNESS_CONFLICT_FIELDS = {
+    "statement_type",
+    "witness_id",
+    "deployment_id",
+    "recorder_key_id",
+    "conflict_kind",
+    "rejected_checkpoint_digest",
+    "accepted_checkpoint_sequence",
+    "issued_at_ms",
 }
 
 
 class WitnessError(RuntimeError):
     pass
+
+
+class WitnessConflictEvidence(Exception):
+    """Carrier exposing the signed conflict record attached to a refusal."""
 
 
 @dataclass(frozen=True)
@@ -88,6 +105,8 @@ class LocalCheckpointWitness:
         witness_id: str,
         signing_key: bytes | Ed25519PrivateKey,
         deployment_id: str,
+        administratively_independent: bool = False,
+        storage_independent: bool = False,
     ) -> None:
         self.path = Path(journal_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +127,15 @@ class LocalCheckpointWitness:
         if not isinstance(deployment_id, str) or not deployment_id:
             raise WitnessError("witness deployment binding is invalid")
         self.deployment_id = deployment_id
+        # Independence is a signed declaration carried inside every
+        # acknowledgment. A same-host development witness must never satisfy
+        # the independent-witness assurance facts merely because it holds a
+        # different Ed25519 key: these flags are deployment properties and are
+        # false by default.
+        self.independence = {
+            "administrative": bool(administratively_independent),
+            "storage": bool(storage_independent),
+        }
 
     # ------------------------------------------------------------------ API
 
@@ -127,12 +155,28 @@ class LocalCheckpointWitness:
         latest = self.latest_acknowledgment(payload["recorder_id"])
         if latest is not None:
             if payload["sequence"] < latest["checkpoint_sequence"]:
-                raise WitnessError("witness refuses checkpoint rollback")
+                conflict = self._record_conflict(
+                    recorder_key_id=payload["recorder_id"],
+                    conflict_kind="rollback",
+                    rejected_payload=payload,
+                    accepted_sequence=latest["checkpoint_sequence"],
+                )
+                raise WitnessError(
+                    "witness refuses checkpoint rollback"
+                ) from WitnessConflictEvidence(conflict)
             if (
                 payload["sequence"] == latest["checkpoint_sequence"]
                 and payload["chain_tip"] != latest["chain_tip"]
             ):
-                raise WitnessError("witness refuses conflicting checkpoint fork")
+                conflict = self._record_conflict(
+                    recorder_key_id=payload["recorder_id"],
+                    conflict_kind="fork",
+                    rejected_payload=payload,
+                    accepted_sequence=latest["checkpoint_sequence"],
+                )
+                raise WitnessError(
+                    "witness refuses conflicting checkpoint fork"
+                ) from WitnessConflictEvidence(conflict)
             if (
                 payload["sequence"] == latest["checkpoint_sequence"]
                 and payload["chain_tip"] == latest["chain_tip"]
@@ -148,6 +192,7 @@ class LocalCheckpointWitness:
             "chain_tip": payload["chain_tip"],
             "previous_checkpoint_digest": payload["previous_checkpoint_digest"],
             "checkpoint_digest": digest(dict(payload)),
+            "independence": dict(self.independence),
             "witnessed_at_ms": time.time_ns() // 1_000_000,
         }
         signature = base64.urlsafe_b64encode(
@@ -169,6 +214,43 @@ class LocalCheckpointWitness:
         return self._load_all()
 
     # -------------------------------------------------------------- internal
+
+    def _record_conflict(
+        self,
+        *,
+        recorder_key_id: str,
+        conflict_kind: str,
+        rejected_payload: Mapping[str, Any],
+        accepted_sequence: int,
+    ) -> dict[str, Any]:
+        """Persist and sign evidence of an equivocation attempt.
+
+        The witness is accountable for contradictory statements: a refused
+        incompatible branch produces an authenticated conflict record that
+        third-party verifiers can detect, not just a transient exception.
+        """
+        conflict = {
+            "statement_type": WITNESS_CONFLICT_STATEMENT_TYPE,
+            "witness_id": self.witness_id,
+            "deployment_id": self.deployment_id,
+            "recorder_key_id": recorder_key_id,
+            "conflict_kind": conflict_kind,
+            "rejected_checkpoint_digest": digest(dict(rejected_payload)),
+            "accepted_checkpoint_sequence": accepted_sequence,
+            "issued_at_ms": time.time_ns() // 1_000_000,
+        }
+        signature = base64.urlsafe_b64encode(
+            self._private_key.sign(canonical_bytes(conflict))
+        ).rstrip(b"=").decode("ascii")
+        record = {**conflict, "signature": signature, "key_id": self.key_id}
+        self._append(record)
+        return record
+
+    def conflicts(self) -> list[Mapping[str, Any]]:
+        return [
+            record for record in self._load_all()
+            if record.get("statement_type") == WITNESS_CONFLICT_STATEMENT_TYPE
+        ]
 
     def _append(self, record: Mapping[str, Any]) -> None:
         encoded = canonical_bytes(record).decode("utf-8") + "\n"
