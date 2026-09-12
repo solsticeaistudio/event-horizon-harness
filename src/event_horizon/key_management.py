@@ -216,8 +216,19 @@ class KeyManager:
         ).decode("ascii")
 
     def _sign(self, payload: Mapping[str, Any]) -> str:
+        """Sign payload using HSM if available, otherwise software key."""
+        data = canonical_bytes(payload)
+        if self._hsm is not None and self._hsm_key_info is not None:
+            # Use HSM for signing
+            try:
+                signature = self._hsm.sign_ed25519(self._hsm_key_info.key_id, data)
+                return base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii")
+            except Exception as e:
+                # Fall back to software key if HSM signing fails
+                pass
+        # Software fallback
         return base64.urlsafe_b64encode(
-            self._private_key.sign(canonical_bytes(payload))
+            self._private_key.sign(data)
         ).rstrip(b"=").decode("ascii")
 
     def _record_provenance(self, key_id: str, action: str, actor: str, details: Mapping[str, Any]) -> None:
@@ -246,6 +257,27 @@ class KeyManager:
 
     def generate_key(self, purpose: str, *, actor: str = "operator", metadata: Mapping[str, Any] | None = None) -> KeyMetadata:
         """Generate a new key for a specific purpose."""
+        if self._hsm is not None and self._hsm_key_label:
+            # Generate key in HSM
+            try:
+                hsm_key_info = self._hsm.generate_ed25519_key(self._hsm_key_label, f"{purpose}-{int(time.time())}")
+                self._hsm_key_info = hsm_key_info
+                self._record_hsm_key_info()
+                return self._row_to_metadata((
+                    hsm_key_info.key_id,
+                    hsm_key_info.public_key_pem,
+                    hsm_key_info.created_at,
+                    None,
+                    "hsm-signing",
+                    "active",
+                    None,
+                    None,
+                    json.dumps({"hsm_backed": True, "hsm_label": self._hsm_key_label})
+                ))
+            except Exception:
+                # Fall through to software generation
+                pass
+        
         private_key = Ed25519PrivateKey.generate()
         public_key = private_key.public_key()
         key_id_str = key_id(public_key)
@@ -469,16 +501,17 @@ class KeyManager:
 
     def is_revoked(self, key_id_str: str) -> bool:
         """Check if a key is revoked."""
-        row = self._db.execute("SELECT status FROM keys WHERE key_id = ?", (key_id_str,)).fetchone()
+        row = self._db.execute("SELECT * FROM keys WHERE key_id = ?", (key_id_str,)).fetchone()
         return row is not None and row[5] == "revoked"
 
     def get_revocation_list(self, since: str | None = None) -> list[KeyRevocation]:
         """Get all revocations, optionally since a given timestamp."""
-        query = "SELECT * FROM revocations ORDER BY revoked_at"
+        query = "SELECT * FROM revocations"
         params: list[Any] = []
         if since:
             query += " WHERE revoked_at > ?"
             params.append(since)
+        query += " ORDER BY revoked_at"
         rows = self._db.execute(query, params).fetchall()
         revocations = []
         for row in rows:
@@ -521,140 +554,24 @@ class KeyManager:
         if not row:
             return None
         return self._row_to_metadata(row)
-
-    def list_keys(self, purpose: str | None = None, status: str | None = None) -> list[KeyMetadata]:
-        """List keys, optionally filtered by purpose and status."""
-        query = "SELECT * FROM keys WHERE 1=1"
-        params: list[Any] = []
-        if purpose:
-            query += " AND purpose = ?"
-            params.append(purpose)
-        if status:
-            query += " AND status = ?"
-            params.append(status)
-        rows = self._db.execute(query, params).fetchall()
-        return [self._row_to_metadata(row) for row in rows]
-
-    def get_provenance(self, key_id_str: str) -> list[Mapping[str, Any]]:
+    def get_provenance(self, key_id_str: str) -> list[dict]:
+        """Get provenance records for a key."""
         rows = self._db.execute(
-            "SELECT action, actor, timestamp, details_json, signature FROM key_provenance WHERE key_id = ? ORDER BY timestamp",
-            (key_id_str,),
+            "SELECT * FROM key_provenance WHERE key_id = ? ORDER BY timestamp",
+            (key_id_str,)
         ).fetchall()
         return [
-            {"action": r[0], "actor": r[1], "timestamp": r[2], "details": json.loads(r[3]), "signature": r[4]}
-            for r in rows
+            {
+                'key_id': row[0],
+                'action': row[1],
+                'actor': row[2],
+                'timestamp': row[3],
+                'details_json': row[4],
+                'signature': row[5],
+            }
+            for row in rows
         ]
 
-    def check_rotation_needed(self) -> list[KeyMetadata]:
-        """Check which keys need rotation."""
-        rows = self._db.execute(
-            "SELECT * FROM keys WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < ?",
-            (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),),
-        ).fetchall()
-        return [self._row_to_metadata(row) for row in rows]
-
-    def auto_rotate_due(self) -> None:
-        """Auto-rotate keys that are due."""
-        if not self.rotation_policy.auto_rotate:
-            return
-        for key in self.check_rotation_needed():
-            try:
-                self.rotate_key(key.key_id, actor="auto", reason="auto-rotation")
-            except KeyManagementError:
-                pass
-
-    def list_keys(self, purpose: str | None = None, status: str | None = None) -> list[KeyMetadata]:
-        """List keys, optionally filtered by purpose and status."""
-        query = "SELECT * FROM keys WHERE 1=1"
-        params: list[Any] = []
-        if purpose:
-            query += " AND purpose = ?"
-            params.append(purpose)
-        if status:
-            query += " AND status = ?"
-            params.append(status)
-        rows = self._db.execute(query, params).fetchall()
-        return [self._row_to_metadata(row) for row in rows]
-
-    def check_rotation_needed(self) -> list[KeyMetadata]:
-        """Check which keys need rotation."""
-        rows = self._db.execute(
-            "SELECT * FROM keys WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < ?",
-            (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),),
-        ).fetchall()
-        return [self._row_to_metadata(row) for row in rows]
-
-    def auto_rotate_due(self) -> None:
-        """Auto-rotate keys that are due."""
-        if not self.rotation_policy.auto_rotate:
-            return
-        for key in self.check_rotation_needed():
-            try:
-                self.rotate_key(key.key_id, actor="auto", reason="auto-rotation")
-            except KeyManagementError:
-                pass
-
-    def list_keys(self, purpose: str | None = None, status: str | None = None) -> list[KeyMetadata]:
-        """List keys, optionally filtered by purpose and status."""
-        query = "SELECT * FROM keys WHERE 1=1"
-        params: list[Any] = []
-        if purpose:
-            query += " AND purpose = ?"
-            params.append(purpose)
-        if status:
-            query += " AND status = ?"
-            params.append(status)
-        rows = self._db.execute(query, params).fetchall()
-        return [self._row_to_metadata(row) for row in rows]
-
-    def check_rotation_needed(self) -> list[KeyMetadata]:
-        """Check which keys need rotation."""
-        rows = self._db.execute(
-            "SELECT * FROM keys WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < ?",
-            (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),),
-        ).fetchall()
-        return [self._row_to_metadata(row) for row in rows]
-
-    def auto_rotate_due(self) -> None:
-        """Auto-rotate keys that are due."""
-        if not self.rotation_policy.auto_rotate:
-            return
-        for key in self.check_rotation_needed():
-            try:
-                self.rotate_key(key.key_id, actor="auto", reason="auto-rotation")
-            except KeyManagementError:
-                pass
-
-    def list_keys(self, purpose: str | None = None, status: str | None = None) -> list[KeyMetadata]:
-        """List keys, optionally filtered by purpose and status."""
-        query = "SELECT * FROM keys WHERE 1=1"
-        params: list[Any] = []
-        if purpose:
-            query += " AND purpose = ?"
-            params.append(purpose)
-        if status:
-            query += " AND status = ?"
-            params.append(status)
-        rows = self._db.execute(query, params).fetchall()
-        return [self._row_to_metadata(row) for row in rows]
-
-    def check_rotation_needed(self) -> list[KeyMetadata]:
-        """Check which keys need rotation."""
-        rows = self._db.execute(
-            "SELECT * FROM keys WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < ?",
-            (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),),
-        ).fetchall()
-        return [self._row_to_metadata(row) for row in rows]
-
-    def auto_rotate_due(self) -> None:
-        """Auto-rotate keys that are due."""
-        if not self.rotation_policy.auto_rotate:
-            return
-        for key in self.check_rotation_needed():
-            try:
-                self.rotate_key(key.key_id, actor="auto", reason="auto-rotation")
-            except KeyManagementError:
-                pass
 
     def list_keys(self, purpose: str | None = None, status: str | None = None) -> list[KeyMetadata]:
         """List keys, optionally filtered by purpose and status."""

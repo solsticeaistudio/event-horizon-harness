@@ -1,5 +1,5 @@
 {
-  "build_identifier": "c4f3711e4f3d3983169086ae6e7945c3cada1ef42f633a1d8390326ffc58c78b",
+  "build_identifier": "23d1326aea47f3ecee378572b4601f985961a3ccd1f2287768b69bb2c9ae367a",
   "campaign_budget": {
     "maximum_commands": 5,
     "maximum_turns": 5
@@ -7,7 +7,7 @@
   "compiler_version": "trusted-policy-compiler-v1",
   "configuration": "bounded-deterministic-default",
   "dirty_tree_at_start": true,
-  "ended_at_unix_ms": 1789242032416,
+  "ended_at_unix_ms": 1789256604625,
   "environment": {
     "ci": false,
     "platform": "Windows-10-10.0.26200-SP0",
@@ -87,76 +87,76 @@
   "policy_version": "policy-v1 / eh-process-policy-v0.4",
   "schema": "event-horizon.security-evaluation-report.v1",
   "seed": 7,
-  "source_revision": "33ae8ffce563d77108f7b2741dcf04ffe6b7a00f",
-  "started_at_unix_ms": 1789242011954,
+  "source_revision": "0148b23d576757a4aa2ee0513c3b7c6f9b642600",
+  "started_at_unix_ms": 1789256584226,
   "suite_results": {
     "adaptive_adversary": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_adaptive_adversary -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 129,
+      "duration_milliseconds": 130,
       "passed": true,
       "test_count": 4
     },
     "behavioral_guardian": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_behavioral_guardian -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 153,
+      "duration_milliseconds": 154,
       "passed": true,
       "test_count": 10
     },
     "canary_events": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_canary_capabilities -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 347,
+      "duration_milliseconds": 359,
       "passed": true,
       "test_count": 11
     },
     "chaos_recovery": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_chaos -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 380,
+      "duration_milliseconds": 327,
       "passed": true,
       "test_count": 6
     },
     "concurrent_redemption": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_concurrent_redemption -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 1334,
+      "duration_milliseconds": 1306,
       "passed": true,
       "test_count": 3
     },
     "denial_certificates": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_denial_certificates -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 310,
+      "duration_milliseconds": 308,
       "passed": true,
       "test_count": 11
     },
     "formal_model_structure": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_formal_model -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 85,
+      "duration_milliseconds": 84,
       "passed": true,
       "test_count": 1
     },
     "hardware_simulator": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_hardware_failsafe -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 134,
+      "duration_milliseconds": 133,
       "passed": true,
       "test_count": 10
     },
     "literature_feed": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_literature_feed -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 99,
+      "duration_milliseconds": 96,
       "passed": true,
       "test_count": 4
     },
     "policy_ceiling_evaluation": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_task_policy_ceiling -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 134,
+      "duration_milliseconds": 132,
       "passed": true,
       "test_count": 16
     },
@@ -170,7 +170,7 @@
     "protocol_property": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_protocol_properties tests.test_capability_stateful -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 5237,
+      "duration_milliseconds": 5247,
       "passed": true,
       "test_count": 6
     },
@@ -184,7 +184,7 @@
     "trust_tier": {
       "command": "C:\\Users\\jhmei\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m unittest tests.test_authoritative_trust -v",
       "diagnostic_tail": "",
-      "duration_milliseconds": 174,
+      "duration_milliseconds": 175,
       "passed": true,
       "test_count": 8
     }

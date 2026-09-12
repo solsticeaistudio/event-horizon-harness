@@ -34,6 +34,12 @@ class HTTPConfig:
     client_cert: Optional[str] = None
     client_key: Optional[str] = None
     ca_bundle: Optional[str] = None
+    # Dry-run parameter for prepare phase validation (e.g., "dry_run=true", "preview=true")
+    # If None, uses HEAD request for validation
+    dry_run_param: Optional[str] = None
+    # HTTP method for prepare validation (if dry_run_param not set)
+    # "HEAD" validates without body, "OPTIONS" checks allowed methods
+    prepare_method: str = "HEAD"
 
 
 class HTTPAdapter:
@@ -87,7 +93,11 @@ class HTTPAdapter:
         transaction_id: str,
         operation: Mapping[str, Any],
     ) -> PrepareResult:
-        """Prepare phase: send request with idempotency key, store response."""
+        """Prepare phase: validate the request WITHOUT causing external effects.
+        
+        Uses dry-run parameter or HEAD/OPTIONS request for validation.
+        The actual write occurs only in commit().
+        """
         try:
             op_type = operation.get("type", "POST")
             op_data = operation.get("data", {})
@@ -102,14 +112,29 @@ class HTTPAdapter:
 
             url = f"{self.config.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
 
-            # For prepare, we send the request but don't fully commit
-            # Some APIs support a "dry_run" or "preview" mode
-            # For now, we'll send the request and store the response
+            # Prepare phase: validate WITHOUT causing external effect
+            # Option 1: Use dry_run parameter if configured
+            # Option 2: Use HEAD/OPTIONS request for validation
+            prepare_url = url
+            prepare_method = self.config.prepare_method
+            prepare_headers = dict(headers)
+            prepare_json = None
+            
+            if self.config.dry_run_param:
+                # Add dry-run parameter to URL or body
+                separator = "&" if "?" in url else "?"
+                prepare_url = f"{url}{separator}{self.config.dry_run_param}"
+                prepare_method = method
+                prepare_json = op_data
+            else:
+                # Use HEAD or OPTIONS for validation (no body)
+                prepare_json = None
+
             response = self._session.request(
-                method=method,
-                url=url,
-                json=operation.get("data", {}),
-                headers=headers,
+                method=prepare_method,
+                url=prepare_url,
+                json=prepare_json,
+                headers=prepare_headers,
                 timeout=self.config.timeout,
             )
 
@@ -120,22 +145,23 @@ class HTTPAdapter:
                     error=f"HTTP {response.status_code}: {response.text}",
                 )
 
-            # Store response for commit/abort
+            # Store pending transaction for commit/abort
             with self._lock:
                 self._pending[transaction_id] = {
-                    "response": response.json() if response.text else {},
-                    "status_code": response.status_code,
-                    "idempotency_key": idempotency_key,
                     "url": url,
                     "method": method,
+                    "data": op_data,
+                    "idempotency_key": idempotency_key,
+                    "headers": headers,
+                    "prepare_status": response.status_code,
                 }
 
             return PrepareResult(
                 transaction_id=transaction_id,
                 success=True,
                 metadata={
-                    "status_code": response.status_code,
-                    "response": response.json() if response.text else {},
+                    "prepare_status": response.status_code,
+                    "validated": True,
                 },
             )
 
@@ -151,7 +177,10 @@ class HTTPAdapter:
         transaction_id: str,
         prepare_metadata: Mapping[str, Any],
     ) -> CommitResult:
-        """Commit phase: confirm with same idempotency key (idempotent)."""
+        """Commit phase: execute the ACTUAL write with idempotency key.
+        
+        This is where the external effect occurs. The prepare phase only validated.
+        """
         try:
             with self._lock:
                 pending = self._pending.pop(transaction_id, None)
@@ -163,16 +192,16 @@ class HTTPAdapter:
                     error="No pending transaction found",
                 )
 
-            # For HTTP, commit is just re-sending with same idempotency key
-            # which is idempotent by design
+            # Commit phase: execute the actual write with idempotency key
             idempotency_key = pending["idempotency_key"]
-            headers = {"Idempotency-Key": idempotency_key, "Content-Type": "application/json"}
+            headers = dict(pending["headers"])
+            headers["Idempotency-Key"] = idempotency_key
 
-            # Re-send to confirm (idempotent)
+            # Send the ACTUAL request with the operation data
             response = self._session.request(
                 method=pending["method"],
                 url=pending["url"],
-                json={},  # Empty body for confirmation
+                json=pending["data"],
                 headers=headers,
                 timeout=self.config.timeout,
             )
