@@ -2,6 +2,8 @@
 
 ## Process topology
 
+This is the portable development topology. All services, development keys, and databases run under one host account. The logical separation described below is not an enforced filesystem or process-memory boundary against compromise of that account. A separate opt-in [Linux/KVM dataset lab](LINUX_ISOLATION.md) now demonstrates jailed guest root and a host-side effect service under distinct host UIDs; it uses a synthetic issuer and does not replace this seven-process flow.
+
 ```text
 hostile request
       |
@@ -45,6 +47,8 @@ Each named box is a separate OS process in `ProcessSeparatedHarness`. Processes 
 7. Redemption reconstructs the signed decay profile, applies the live per-capability inputs before authorization, atomically records the one-use capability's decay state, and intersects that state with all preceding authority. Session-scoped behavioral history is enforced separately by the Behavioral Transition Guardian; the live broker does not accumulate `DecayEngine` counters across fresh capability IDs.
 8. Canary artifacts follow a disjoint signed schema. The executor checks them before the ordinary capability path, records the tripwire event, and cannot route them to an effect.
 9. The independent logical evidence recorder returns a signed receipt for every fixed-size event envelope. Evidence Chain Verification signs a certificate only after recorder verification and verified teardown. Denial certificates provide a separate exact-attempt receipt and preserve ambiguous effect states.
+
+Operation dispatch is tracked separately from successful response delivery. Failures after dispatch are indeterminate and never refund consumption; see [Execution outcomes](EXECUTION_OUTCOMES.md). The process executor's local recorder is a null implementation, so authoritative logical execution evidence is appended by the coordinator after a response, and missing responses remain unknown.
 
 ## Capability bindings
 

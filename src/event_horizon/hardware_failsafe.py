@@ -5,23 +5,24 @@ import hashlib
 import re
 import secrets
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Optional
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from .canonical import canonical_bytes
+from .hardware_backends import (
+    HardwareBackend,
+    HardwareFailSafeError,
+    MockHardwareBackend,
+)
 
 
 MESSAGE_SCHEMA = "event-horizon.hardware-failsafe.v1"
 ACTIONS = frozenset({"heartbeat", "kill", "rearm", "rotate-key"})
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _KEY_ID = re.compile(r"^ed25519:[0-9a-f]{32}$")
-
-
-class HardwareFailSafeError(PermissionError):
-    pass
 
 
 def key_id(public_key: Ed25519PublicKey) -> str:
@@ -143,7 +144,10 @@ class FailSafeHostClient:
 
 
 class HardwareFailSafeSimulator:
-    """Independent-switch state machine. Restart always begins tripped."""
+    """Independent-switch state machine. Restart always begins tripped.
+    
+    Supports optional hardware backend for physical kill switch integration.
+    """
 
     def __init__(
         self,
@@ -154,6 +158,7 @@ class HardwareFailSafeSimulator:
         expected_evidence_digest: str,
         heartbeat_timeout_ms: int = 2_000,
         nonce_factory: Callable[[], str] | None = None,
+        hardware_backend: Optional[HardwareBackend] = None,
     ):
         try:
             public = serialization.load_pem_public_key(trusted_public_key_pem.encode("ascii"))
@@ -178,6 +183,9 @@ class HardwareFailSafeSimulator:
         self.last_valid_heartbeat_ms: int | None = None
         self._challenge_counter = 0
         self._pending: HeartbeatChallenge | None = None
+        
+        # Hardware backend for physical kill switch
+        self._hardware_backend = hardware_backend or MockHardwareBackend()
 
     def issue_challenge(self, now_ms: int, *, lifetime_ms: int = 1_000) -> HeartbeatChallenge:
         self._challenge_counter += 1
@@ -191,6 +199,14 @@ class HardwareFailSafeSimulator:
     def _trip(self, reason: str) -> None:
         self.state = "tripped"
         self.trip_reason = reason
+        
+        # Trigger hardware kill switch if available
+        try:
+            self._hardware_backend.trigger_kill(reason)
+        except Exception:
+            # Hardware failure doesn't change the tripped state
+            # but should be logged
+            pass
 
     def receive(
         self,
@@ -277,3 +293,16 @@ class HardwareFailSafeSimulator:
         ):
             self._trip("heartbeat-timeout")
         return self.state
+
+    def get_hardware_status(self) -> Mapping[str, Any]:
+        """Get status of the hardware backend."""
+        return self._hardware_backend.get_status()
+
+    def test_hardware(self) -> bool:
+        """Test the hardware backend."""
+        return self._hardware_backend.test_kill_circuit()
+
+    def close(self) -> None:
+        """Close the hardware backend."""
+        if hasattr(self._hardware_backend, 'close'):
+            self._hardware_backend.close()

@@ -1,10 +1,12 @@
 # Threat model
 
+The [owned package-service experiment](PACKAGE_ISOLATION.md) adds a scoped compromised-service configuration: the package worker is untrusted at host UID 60001, while the retrieval gate, artifact recipient, root-owned replay/decay/evidence, supervisor, and watchdog remain trusted. Paired synthetic effects and useful work were observed with actual guest-root VMs. This does not cover host-root/gate compromise, concurrent tenant VMs, real package installation, or arbitrary service vulnerabilities.
+
 ## Security claim
 
-Root or total compromise inside the hostile execution cell must not create transferable authority outside it. The harness fails closed against capability replay or widening, session/executor substitution, expiry bypass, ambient credentials, unrestricted egress, persistence after teardown, lateral movement, evidence tampering, one compromised guardian, and signer/verifier unavailability.
+The target property is that root or total compromise inside the hostile execution cell cannot create transferable authority outside it. Portable tests exercise capability replay/widening, session/executor substitution, expiry checks, evidence integrity, guardian vetoes, and service unavailability through intended interfaces. The separate [Linux/KVM lab](LINUX_ISOLATION.md) additionally exercises real guest root with jailed Firecracker, host-side dataset enforcement, protected replay/decay/evidence, no NIC/MMDS, and external teardown. This is a bounded static experiment; auxiliary-service compromise, arbitrary workloads, concurrent sessions, and unknown isolation bypasses remain untested.
 
-This is an authority-containment claim under the topology and assumptions below, not a claim that all hypervisors, kernels, firmware, or physical systems are invulnerable.
+The portable development demo runs services under one host account. Separate processes and authenticated requests do not prevent that account from reading keys or mutating databases. The Linux lab uses distinct VM/effect UIDs and root-owned authoritative observation, but still trusts host kernel, hypervisor, firmware, administrators, supervisor, recorder, and effect-service integrity.
 
 ## Adversary
 
@@ -31,20 +33,25 @@ Assume the workload can inspect all guest inputs and local files, execute arbitr
 
 ## Fail-closed transitions
 
-| Threat | Enforced boundary |
-|---|---|
-| Replay | One-use external broker redemption plus nonce/proof replay stores |
-| Scope/argument widening | Exact canonical request digest and claim comparison |
-| Session/executor transfer | Session, executor, device, measurement, and attestation bindings |
-| Expiry bypass | Signer and executor deadlines using fresh verification |
-| Ambient credentials | Sanitized child environment, no mounted identities, root probe |
-| Egress/lateral movement | Static policy veto; Firecracker has no NIC/MMDS |
-| Persistence | External watchdog and scratch/config destruction evidence |
-| Evidence mutation/loss/reordering | Hash chain, source/global sequence, signed receipts, restart validation |
-| Forged protected-service request | Exact-envelope Ed25519 client authorization plus durable one-use nonce |
-| One guardian compromise | Veto quorum; guardians only subtract authority |
-| Signer/verifier outage | No local key or cached authorization fallback |
-| Parser/output pressure | Fixed framing and byte/depth/request/output limits |
+The table below describes the portable process path. The separate Linux lab's enforced boundaries and evidence coverage are specified in [Linux isolation](LINUX_ISOLATION.md); its results do not upgrade the portable path's guarantees.
+
+| Threat | Implemented/tested behavior | Remaining boundary |
+|---|---|---|
+| Replay | Atomic one-use broker/executor consumption and nonce/proof stores | Databases are accessible to the host account; no distributed guarantee |
+| Scope/argument widening | Exact canonical request digest and claim comparison | Guest-root-resistant external effect enforcement is planned |
+| Session/executor transfer | Session, executor, device, measurement, and attestation bindings | Protocol rejection does not establish cross-session filesystem isolation |
+| Expiry bypass | Signer/executor deadlines and fresh verification | Trusted clocks and state remain assumptions |
+| Ambient credentials | Sanitized child environment and bounded root probes | Probes do not exclude host file/process access or undiscovered secrets |
+| Egress/lateral movement | Static policy rejects unsupported network operations; Firecracker target omits NIC/MMDS | Process fallback has no enforced network isolation; service-mediated egress is unproven |
+| Persistence | Configured process stop and scratch/config teardown checks | Hostile descendant cleanup, revocation, and later-session isolation need external validation |
+| Evidence mutation/loss/reordering | Hash chain, sequences, signed receipts, restart checks | Missing observations, rollback, and trusted-source dishonesty are not eliminated |
+| Forged protected-service request | Exact-envelope Ed25519 authorization and durable nonce | Role-scoped independent credentials and protected storage are deployment work |
+| One guardian compromise | Veto quorum and static ceiling | Signer/static policy and remaining vetoes stay trusted |
+| Signer/verifier outage | No permissive issuance fallback | Previously started effects are not undone |
+| Parser/output pressure | Framing and byte/depth/request/output limits | Output remains untrusted; byte limits are not secret filtering |
+| Failure after operation dispatch | Indeterminate outcome, retained consumption, no automatic retry | No rollback, exactly-once effect, or automatic reconciliation guarantee |
+
+See [Execution outcomes and the external-effect contract](EXECUTION_OUTCOMES.md) for failure semantics and independent synthetic effect tests.
 
 ## Non-goals and residual risk
 

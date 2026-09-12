@@ -512,6 +512,7 @@ class ProcessSeparatedHarness:
         capability: IssuedCapability,
         attestation: Mapping[str, Any],
     ) -> ExecutionResult:
+        effect_state = 'not-started'
         try:
             self.call(
                 'signer',
@@ -522,6 +523,8 @@ class ProcessSeparatedHarness:
                     'attestation': dict(attestation),
                 },
             )
+            # Once dispatched, a lost or malformed response cannot establish no effect.
+            effect_state = 'possibly-committed'
             response = self.call(
                 'executor',
                 'execute',
@@ -532,24 +535,31 @@ class ProcessSeparatedHarness:
                 },
             )
             result = ExecutionResult(**response)
-        except (ProtocolError, ServiceUnavailable, ValidationError) as exc:
+        except (ProtocolError, ServiceUnavailable, ValidationError, TypeError) as exc:
             result = ExecutionResult(
                 False,
                 request.operation,
                 request.resource_id,
                 error=f'{type(exc).__name__}: {exc}',
+                effect_state=effect_state,
             )
-        event_type = 'execution.completed' if result.success else 'execution.denied'
-        self.record(
-            event_type,
-            {
-                'request_id': request.request_id,
-                'capability_id': capability.claims.capability_id,
-                'success': result.success,
-                'output_bytes': result.output_bytes,
-                'error': result.error,
-            },
-        )
+        try:
+            self.record(
+                result.event_type,
+                {
+                    'request_id': request.request_id,
+                    'capability_id': capability.claims.capability_id,
+                    'success': result.success,
+                    'output_bytes': result.output_bytes,
+                    'error': result.error,
+                    'effect_state': result.effect_state,
+                },
+            )
+        except Exception as exc:
+            return ExecutionResult(
+                False, request.operation, request.resource_id,
+                error=f'evidence recording failed: {exc}', effect_state=result.effect_state,
+            )
         return result
 
     def root_probe(self, probe_names: list[str] | None = None) -> dict[str, Any]:
@@ -607,6 +617,9 @@ class ProcessSeparatedHarness:
         run_id: str,
         session_id: str,
         assertions: Mapping[str, bool],
+        mode: str = "simulation",
+        trust_assumptions: list[str] | None = None,
+        unknown_outcomes: list[str] | None = None,
     ) -> dict[str, Any]:
         recorder_status = self.call('recorder', 'verify', {})
         attestation = self.attestations[-1] if self.attestations else {}
@@ -651,6 +664,9 @@ class ProcessSeparatedHarness:
                 'session_id': session_id,
                 'assertions': dict(assertions),
                 'evidence': evidence,
+                'mode': mode,
+                'trust_assumptions': trust_assumptions,
+                'unknown_outcomes': unknown_outcomes,
             },
         )
         certificate = response['certificate']

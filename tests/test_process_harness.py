@@ -5,11 +5,12 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from unittest.mock import patch
 
 from event_horizon.canonical import digest
 from event_horizon.models import ActionRequest
 from event_horizon.intent_canonicalizer import AuthorizationDenied
-from event_horizon.process_harness import ProcessSeparatedHarness
+from event_horizon.process_harness import ProcessSeparatedHarness, ServiceUnavailable
 from event_horizon.protocol import ProtocolError
 
 
@@ -261,7 +262,7 @@ class ProcessHarnessTests(unittest.TestCase):
             self.harness.record('host-compromise.after', {'trusted': False})
         self.assertEqual(denied.exception.code, 'recording_denied')
 
-    def test_output_channel_pressure_is_denied(self):
+    def test_output_channel_pressure_rejects_response_without_claiming_no_effect(self):
         request, capability, attestation = self.issue(
             request_id='oversized-output',
             resource_id='oversized-object',
@@ -269,6 +270,30 @@ class ProcessHarnessTests(unittest.TestCase):
         result = self.harness.execute(request, capability, attestation)
         self.assertFalse(result.success)
         self.assertIn('output envelope', result.error)
+        self.assertEqual(result.effect_state, 'possibly-committed')
+
+    def test_lost_executor_response_is_indeterminate_and_cannot_be_replayed(self):
+        request, capability, attestation = self.issue(request_id='lost-response')
+        original_call = self.harness.call
+
+        def lose_response(role, message_type, body, **kwargs):
+            response = original_call(role, message_type, body, **kwargs)
+            if role == 'executor' and message_type == 'execute':
+                self.assertTrue(response['success'])
+                raise ServiceUnavailable('synthetic lost response after real IPC execution')
+            return response
+
+        with patch.object(self.harness, 'call', side_effect=lose_response):
+            result = self.harness.execute(request, capability, attestation)
+        self.assertFalse(result.success)
+        self.assertEqual(result.effect_state, 'possibly-committed')
+        events = [json.loads(line) for line in self.harness.recorder_path.read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(events[-1]['event_type'], 'execution.indeterminate')
+        with closing(sqlite3.connect(self.harness.executor_replay_path)) as database:
+            self.assertEqual(database.execute('SELECT COUNT(*) FROM capability_consumptions').fetchone()[0], 1)
+        replay = self.harness.execute(request, capability, attestation)
+        self.assertEqual(replay.effect_state, 'not-started')
+        self.assertIn('replay', replay.error)
 
     def test_signed_certificate_binds_every_evidence_domain_after_teardown(self):
         request, capability, attestation = self.issue(request_id='certificate')
@@ -283,13 +308,18 @@ class ProcessHarnessTests(unittest.TestCase):
                 'no_unauthorized_egress': True,
                 'teardown_verified': True,
             },
+            mode='simulation',
         )
         payload_value = certificate['certificate']
-        self.assertEqual(payload_value['schema'], 'event-horizon.containment-certificate.v0.4')
+        self.assertEqual(payload_value['schema'], 'event-horizon.containment-certificate.v0.5')
         self.assertEqual(
             set(payload_value['evidence']),
             {'attestation', 'capability', 'policy', 'image', 'recorder', 'teardown', 'egress'},
         )
+        self.assertIn('trust_assumptions', payload_value)
+        self.assertIn('unknown_outcomes', payload_value)
+        self.assertIn('mode', payload_value)
+        self.assertEqual(payload_value['mode'], 'simulation')
         self.assertEqual(certificate['key_id'], self.harness.service_info['certificate']['key_id'])
         certificate_key = self.harness.service_info['certificate']['key_id']
         self.assertEqual(

@@ -28,8 +28,8 @@ def authority_context(
     trust_level: str = "simulated",
     method: str = "simulator",
     required_trust: str = "simulated",
+    measurement: str = "1" * 64,
 ) -> dict[str, Any]:
-    measurement = "1" * 64
     verifier_policy_digest = digest({"fixture-verifier": request.executor_id})
     attestation: dict[str, Any] = {
         "valid": True,

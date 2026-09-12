@@ -617,12 +617,18 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
             raise ProtocolError('invalid_certificate', 'certificate assertions and evidence must be objects')
         if any(not isinstance(value, bool) for value in body['assertions'].values()):
             raise ProtocolError('invalid_certificate', 'certificate assertions must be booleans')
+        mode = body.get('mode', 'simulation')
+        trust_assumptions = body.get('trust_assumptions')
+        unknown_outcomes = body.get('unknown_outcomes')
         try:
             certificate = builder.build(
                 run_id=body['run_id'],
                 session_id=body['session_id'],
                 assertions=body['assertions'],
                 evidence=body['evidence'],
+                mode=mode,
+                trust_assumptions=trust_assumptions,
+                unknown_outcomes=unknown_outcomes,
             )
         except (TypeError, ValueError) as exc:
             raise ProtocolError('invalid_certificate', str(exc)) from exc
@@ -649,7 +655,7 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
             },
         ),
         'build': MessageSpec(
-            frozenset({'run_id', 'session_id', 'assertions', 'evidence'}),
+            frozenset({'run_id', 'session_id', 'assertions', 'evidence', 'mode', 'trust_assumptions', 'unknown_outcomes'}),
             build,
             request_authorizer.authorize,
         ),

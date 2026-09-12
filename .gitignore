@@ -1,43 +1,197 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
-**/__pycache__/
 *.py[cod]
-.pytest_cache/
-**/.pytest_cache/
+*$py.class
+
+# Virtual environments
+venv/
+env/
 .venv/
-**/.venv/
-*.egg-info/
-**/*.egg-info/
 
-# Node and TypeScript
-node_modules/
-**/node_modules/
-dist/
-**/dist/
-build/
-**/build/
-coverage/
-**/coverage/
-.nyc_output/
-**/.nyc_output/
-*.tsbuildinfo
-*.log
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Local environments and secrets
-.env
-.env.*
-!.env.example
-*.seed
-
-# Test and demo output
-.demo/
-coverage.xml
-.coverage
-artifacts/reports/
-
-# Internal development material is not part of the public artifact
-internal/
-
-# Operating-system metadata
+# OS
 .DS_Store
 Thumbs.db
+
+# Test outputs
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+
+# Debug/fix scripts (not for production)
+fix_*.py
+fix_*.py.*
+debug_*.py
+check_*.py
+check_*.py.*
+fix_*.py
+
+# Temporary test files
+test_*.py
+test_*.py.*
+test_*.pyc
+
+# Build artifacts
+*.bin
+*.tla
+*.jar
+*.zip
+
+# Firecracker binaries
+firecracker.zip
+firecracker/build/
+firecracker/guest/*.bin
+firecracker/guest/*.o
+
+# TLC/TLA artifacts
+formal/*.bin
+formal/*.tla
+formal/*.jar
+formal/states/
+formal/tla2tools.jar
+
+# Debug scripts
+debug_*.py
+debug_*.py.*
+fix_*.py
+fix_*.py.*
+fix_heartbeat*.py
+fix_heartbeat*.py
+fix_indent.py
+fix_provenance_order.py
+fix_raft.py
+fix_raft2.py
+fix_raft_start.py
+fix_rotate_provenance.py
+fix_start2.py
+fix_start_method.py
+fix_start_method2.py
+fix_timestamp.py
+
+# Generated formal verification artifacts
+formal/*.bin
+formal/*_TTrace_*.bin
+formal/*_TTrace_*.tla
+formal/states/
+
+# Debug/test temporary files
+test_*.py
+test_*.py.*
+test_exact_line.py
+test_indent.py
+test_parse.py
+check_*.py
+check_*.py.*
+
+# Random dev scripts
+add_service_key_provider.py
+rebuild_key_management.py
+rewrite_key_management.py
+check_braces.py
+check_indent.py
+check_tabs.py
+fix_braces.py
+fix_final.py
+fix_heartbeat2.py
+fix_heartbeat_final.py
+fix_indent.py
+fix_provenance_order.py
+fix_raft.py
+fix_raft2.py
+fix_raft_start.py
+fix_rotate_provenance.py
+fix_start2.py
+fix_start_method.py
+fix_start_method2.py
+fix_timestamp.py
+
+# Build artifacts
+firecracker.zip
+firecracker/build/
+firecracker/guest/
+firecracker/linux-kvm.lock.json
+firecracker/guest/compromised_package.c
+
+# Formal verification artifacts
+formal/tla2tools.jar
+formal/states/
+formal/EventHorizonBroken*.bin
+formal/EventHorizonBroken*.tla
+formal/EventHorizonBroken*.bin
+formal/EventHorizonBroken*.tla
+formal/EventHorizon_TTrace_*.bin
+formal/EventHorizonBroken_TTrace_*.bin
+formal/EventHorizonBroken_TTrace_*.tla
+formal/states/
+
+# Build directories
+deployment/
+node_modules/
+dist/
+
+# Documentation drafts
+AUDIT_PREPARATION.md
+GTM.md
+ROADMAP.md
+SESSION_HANDOFF.md
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Secrets
+*.key
+*.pem
+*.crt
+*.p12
+*.pem
+
+# Database
+*.sqlite3
+*.sqlite3-journal
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini

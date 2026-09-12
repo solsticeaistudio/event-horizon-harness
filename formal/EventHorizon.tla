@@ -61,7 +61,7 @@ Propose ==
                         everConsumed, effectAmbiguous, denialState>>
 
 Compile ==
-    /\ capState \in {"none", "expired", "revoked"}
+    /\ capState = "none"
     /\ compiled' = proposal \cap Authority
     /\ UNCHANGED <<proposal, signed, attested, guardian, behavioral, decay,
                     decayUpper, capState, committedEffects, attestationValid,

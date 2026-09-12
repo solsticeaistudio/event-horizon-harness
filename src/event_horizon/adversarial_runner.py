@@ -5,7 +5,9 @@ import queue
 import re
 import threading
 import time
-from dataclasses import asdict, dataclass
+import uuid
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .canonical import canonical_bytes, digest
@@ -83,6 +85,128 @@ class CampaignLimits:
             raise CampaignValidationError("campaign time or byte limit exceeds public maximum")
         if self.maximum_concurrency > 4:
             raise CampaignValidationError("campaign concurrency exceeds public maximum")
+
+
+@dataclass(frozen=True)
+class TenantQuota:
+    """Resource quota for a tenant in a multi-tenant campaign."""
+    tenant_id: str
+    max_turns: int
+    maximum_commands: int
+    maximum_wall_seconds: int
+    maximum_bytes: int
+    priority_weight: float = 1.0  # Weight for fair scheduling (higher = more priority)
+
+    def __post_init__(self) -> None:
+        if not self.tenant_id or not isinstance(self.tenant_id, str):
+            raise CampaignValidationError("tenant_id is required and must be a string")
+        for name, value in [
+            ("max_turns", self.max_turns),
+            ("maximum_commands", self.maximum_commands),
+            ("maximum_wall_seconds", self.maximum_wall_seconds),
+            ("maximum_bytes", self.maximum_bytes),
+            ("priority_weight", self.priority_weight),
+        ]:
+            if type(getattr(self, name)) is not (int if name != "priority_weight" else float):
+                raise CampaignValidationError(f"tenant quota {name} must be numeric")
+            if value <= 0:
+                raise CampaignValidationError(f"tenant quota {name} must be positive")
+        if self.priority_weight > 100:
+            raise CampaignValidationError("priority_weight cannot exceed 100")
+
+
+@dataclass
+class TenantState:
+    """Runtime state for a tenant in a multi-tenant campaign."""
+    tenant_id: str
+    quota: TenantQuota
+    consumed_turns: int = 0
+    consumed_commands: int = 0
+    consumed_wall_seconds: float = 0.0
+    consumed_bytes: int = 0
+    active: bool = True
+    last_scheduled: float = 0.0
+    virtual_time: float = 0.0  # For weighted fair queuing
+
+
+class TenantScheduler:
+    """Weighted fair queuing scheduler for multi-tenant campaigns."""
+
+    def __init__(self, tenants: Mapping[str, TenantQuota]) -> None:
+        self._tenants: dict[str, TenantState] = {}
+        for tenant_id, quota in tenants.items():
+            # Higher priority tenants start with a virtual_time advantage
+            # They get scheduled first because virtual_finish = virtual_time + 1/weight
+            # Start higher priority tenants with negative virtual_time
+            initial_virtual_time = -quota.priority_weight * 1000
+            self._tenants[tenant_id] = TenantState(
+                tenant_id=tenant_id, quota=quota, virtual_time=initial_virtual_time
+            )
+        self._lock = threading.RLock()
+
+    def get_next_tenant(self) -> str | None:
+        """Get the next tenant to schedule based on weighted fair queuing."""
+        with self._lock:
+            active_tenants = [
+                (tenant_id, state)
+                for tenant_id, state in self._tenants.items()
+                if state.active and not self._quota_exhausted(state)
+            ]
+            if not active_tenants:
+                return None
+
+            # Weighted fair queuing: pick tenant with minimum virtual_finish
+            # virtual_finish = virtual_time + 1/weight
+            next_tenant = min(
+                active_tenants,
+                key=lambda ts: ts[1].virtual_time + 1.0 / max(ts[1].quota.priority_weight, 0.01)
+            )[0]
+
+            # Update virtual_time for the scheduled tenant
+            weight = self._tenants[next_tenant].quota.priority_weight
+            self._tenants[next_tenant].virtual_time += 1.0 / max(weight, 0.01)
+            self._tenants[next_tenant].last_scheduled = time.monotonic()
+            return next_tenant
+
+    def _quota_exhausted(self, state: TenantState) -> bool:
+        return (
+            state.consumed_turns >= state.quota.max_turns or
+            state.consumed_commands >= state.quota.maximum_commands or
+            state.consumed_wall_seconds >= state.quota.maximum_wall_seconds or
+            state.consumed_bytes >= state.quota.maximum_bytes
+        )
+
+    def record_consumption(
+        self,
+        tenant_id: str,
+        turns: int = 0,
+        commands: int = 0,
+        wall_seconds: float = 0.0,
+        bytes_consumed: int = 0,
+    ) -> bool:
+        """Record resource consumption for a tenant. Returns False if quota exhausted."""
+        with self._lock:
+            state = self._tenants.get(tenant_id)
+            if not state or not state.active:
+                return False
+
+            state.consumed_turns += 1
+            state.consumed_commands += 1
+            state.consumed_wall_seconds += 0.001  # approximate
+            state.virtual_time += 1.0 / max(state.quota.priority_weight, 0.01)
+
+            if self._quota_exhausted(state):
+                state.active = False
+                return False
+            return True
+
+    def get_tenant_state(self, tenant_id: str) -> TenantState | None:
+        with self._lock:
+            return self._tenants.get(tenant_id)
+
+    def get_all_states(self) -> Mapping[str, TenantState]:
+        with self._lock:
+            return dict(self._tenants)
 
 
 @dataclass(frozen=True)
@@ -388,6 +512,169 @@ class BoundedSyntheticAdversarialRunner:
             transcript_digest=digest(transcript),
             bytes_recorded=bytes_recorded,
         )
+
+    def replay(self, manifest: CampaignManifest, expected: CampaignResult) -> bool:
+        replayed = self.run(manifest)
+        return replayed.to_dict() == expected.to_dict()
+
+
+class MultiTenantAdversarialRunner:
+    """Multi-tenant campaign runner with weighted fair queuing and per-tenant quotas."""
+
+    def __init__(
+        self,
+        declared_range_ids: Sequence[str],
+        tenant_quotas: Mapping[str, TenantQuota],
+        *,
+        adapter: CampaignAdapter | None = None,
+        human_approval: Callable[[CampaignManifest, CampaignAdapter], bool] | None = None,
+        recorder: Callable[[str, Mapping[str, Any]], None] | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+    ):
+        self.declared_range_ids = frozenset(declared_range_ids)
+        if not self.declared_range_ids or any(
+            SYNTHETIC_RANGE_ID.fullmatch(value) is None for value in self.declared_range_ids
+        ):
+            raise CampaignValidationError("declared ranges must contain only synthetic range IDs")
+        if not tenant_quotas:
+            raise CampaignValidationError("at least one tenant quota is required")
+        self.scheduler = TenantScheduler(tenant_quotas)
+        self.adapter = adapter or HarmlessSyntheticAdapter()
+        self.human_approval = human_approval
+        self.recorder = recorder or (lambda _event, _payload: None)
+        self.monotonic = monotonic
+
+    def _proposals(self, manifest: CampaignManifest) -> list[ActionProposal]:
+        targets = (
+            "credential",
+            "credential-replay",
+            "executor-transfer",
+            "network-policy",
+            "evidence-copy",
+        )
+        return [
+            ActionProposal(index, action, manifest.range_id, f"{manifest.range_id}/fixture/{target}", {})
+            for index, (action, target) in enumerate(zip(SAFE_ACTIONS, targets, strict=True), 1)
+        ]
+
+    def _observe_with_deadline(
+        self,
+        proposal: ActionProposal,
+        remaining_seconds: float,
+    ) -> Observation:
+        outcome: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+
+        def invoke() -> None:
+            try:
+                outcome.put((True, self.adapter.observe(proposal)), block=False)
+            except Exception as exc:
+                outcome.put((False, exc), block=False)
+
+        worker = threading.Thread(target=invoke, daemon=True, name="synthetic-campaign-adapter")
+        worker.start()
+        worker.join(max(0, remaining_seconds))
+        if worker.is_alive():
+            raise CampaignValidationError("campaign adapter exceeded the wall-time limit")
+        try:
+            succeeded, value = outcome.get_nowait()
+        except queue.Empty as exc:
+            raise CampaignValidationError("campaign adapter returned no observation") from exc
+        if not succeeded:
+            raise CampaignValidationError("campaign adapter failed closed") from value
+        if not isinstance(value, Observation):
+            raise CampaignValidationError("campaign adapter returned malformed output")
+        return value
+
+    def run(self, manifest: CampaignManifest) -> CampaignResult:
+        if manifest.range_id not in self.declared_range_ids:
+            raise CampaignValidationError("campaign range is not declared")
+        if self.adapter.name != manifest.adapter:
+            raise CampaignValidationError("manifest adapter does not match configured adapter")
+        if (
+            type(self.adapter.maximum_observation_bytes) is not int
+            or not 1 <= self.adapter.maximum_observation_bytes <= 65_536
+        ):
+            raise CampaignValidationError("adapter observation bound is invalid")
+        if not self.adapter.simulated and not (
+            self.human_approval is not None and self.human_approval(manifest, self.adapter) is True
+        ):
+            raise CampaignValidationError("non-simulated adapters require explicit human approval")
+        if manifest.limits.maximum_concurrency > 4:
+            raise CampaignValidationError("campaign concurrency exceeds maximum (4)")
+
+        started = self.monotonic()
+        proposals: list[ActionProposal] = []
+        observations: list[Observation] = []
+        bytes_recorded = 0
+        limit_exceeded = False
+
+        # Use the scheduler to get the next tenant for each turn
+        for proposal in self._proposals(manifest):
+            # Check global limits
+            if (
+                len(proposals) >= manifest.limits.maximum_turns
+                or len(proposals) >= manifest.limits.maximum_commands
+                or self.monotonic() - started > manifest.limits.maximum_wall_seconds
+            ):
+                limit_exceeded = True
+                break
+
+            # Get next tenant from scheduler
+            tenant_id = self.scheduler.get_next_tenant()
+            if tenant_id is None:
+                limit_exceeded = True
+                break
+
+            # Check if tenant can make this proposal
+            proposal_bytes = len(canonical_bytes(proposal.to_dict()))
+            if (
+                bytes_recorded + proposal_bytes + self.adapter.maximum_observation_bytes
+                > manifest.limits.maximum_bytes
+            ):
+                limit_exceeded = True
+                break
+
+            # Record consumption for the tenant
+            if not self.scheduler.record_consumption(tenant_id):
+                continue  # Tenant quota exhausted, try next
+
+            proposals.append(proposal)
+            bytes_recorded += proposal_bytes
+            self.recorder("adversarial.action-proposal", {**proposal.to_dict(), "tenant_id": tenant_id})
+
+            remaining = manifest.limits.maximum_wall_seconds - (self.monotonic() - started)
+            if remaining <= 0:
+                limit_exceeded = True
+                break
+            observation = self._observe_with_deadline(proposal, remaining)
+            if observation.sequence != proposal.sequence or observation.proposal_digest != digest(proposal.to_dict()):
+                raise CampaignValidationError("adapter observation is not bound to its proposal")
+            observation_bytes = len(canonical_bytes(observation.to_dict()))
+            if observation_bytes > self.adapter.maximum_observation_bytes:
+                raise CampaignValidationError("adapter observation exceeded its declared byte bound")
+            observations.append(observation)
+            bytes_recorded += observation_bytes
+            self.recorder("adversarial.observation", {**observation.to_dict(), "tenant_id": tenant_id})
+
+        transcript = {
+            "manifest_digest": digest(manifest.to_dict()),
+            "proposals": [proposal.to_dict() for proposal in proposals],
+            "observations": [observation.to_dict() for observation in observations],
+        }
+        return CampaignResult(
+            campaign_id=manifest.campaign_id,
+            range_id=manifest.range_id,
+            manifest_digest=transcript["manifest_digest"],
+            completed=len(observations) == len(SAFE_ACTIONS) and not limit_exceeded,
+            limit_exceeded=limit_exceeded,
+            proposals=tuple(proposals),
+            observations=tuple(observations),
+            transcript_digest=digest(transcript),
+            bytes_recorded=bytes_recorded,
+        )
+
+    def get_tenant_states(self) -> Mapping[str, TenantState]:
+        return self.scheduler.get_all_states()
 
     def replay(self, manifest: CampaignManifest, expected: CampaignResult) -> bool:
         replayed = self.run(manifest)

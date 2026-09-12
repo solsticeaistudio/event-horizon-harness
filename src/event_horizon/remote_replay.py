@@ -7,6 +7,7 @@ import math
 import re
 import secrets
 import sqlite3
+import ssl
 import threading
 import time
 import urllib.error
@@ -77,6 +78,8 @@ _OPERATIONS = {
     "nonce-consume",
     "nonce-create",
     "nonce-inspect",
+    "raft-vote",
+    "raft-append",
 }
 
 
@@ -427,6 +430,48 @@ class ReferenceReplayService:
             self.public_key = promoted_public_key
             self.server_key_id = promoted_key_id
 
+    def rotate_key(self, *, signing_key: bytes | Ed25519PrivateKey | None = None) -> tuple[str, str]:
+        """Rotate the server signing key in-place.
+
+        Generates a new Ed25519 key pair, updates the database metadata,
+        and returns (new_key_id, new_public_key_pem) so clients can update
+        their pinned keys via AuthenticatedReplayClient.adopt_epoch.
+
+        Args:
+            signing_key: Optional explicit key material. If None, generates a new key.
+
+        Returns:
+            Tuple of (new_key_id, new_public_key_pem).
+        """
+        rotated_private_key = _load_private_key(signing_key) if signing_key is not None else Ed25519PrivateKey.generate()
+        rotated_public_key = rotated_private_key.public_key()
+        rotated_key_id = replay_key_id(rotated_public_key)
+        with self._lock:
+            database = self._connect()
+            try:
+                database.execute("BEGIN IMMEDIATE")
+                database.execute(
+                    """
+                    UPDATE replay_metadata
+                    SET server_key_id = ?
+                    WHERE singleton = 1
+                    """,
+                    (rotated_key_id,),
+                )
+                database.execute("COMMIT")
+            except sqlite3.Error as exc:
+                self._rollback(database)
+                raise ReplayStateError("replay key rotation failed closed") from exc
+            finally:
+                database.close()
+            self.private_key = rotated_private_key
+            self.public_key = rotated_public_key
+            self.server_key_id = rotated_key_id
+        return rotated_key_id, rotated_public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("ascii")
+
     def handle(self, request: Mapping[str, Any]) -> dict[str, Any]:
         authenticated, policy, request_digest = self._authenticate_request(request)
         operation = str(authenticated["operation"])
@@ -530,6 +575,16 @@ class ReferenceReplayService:
     def close(self) -> None:
         with self._lock:
             self._closed = True
+            # Perform WAL checkpoint to release locks on Windows
+            try:
+                database = self._connect()
+                try:
+                    database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    database.execute("PRAGMA journal_mode = DELETE")
+                finally:
+                    database.close()
+            except Exception:
+                pass
 
     def _authenticate_request(
         self,
@@ -1054,6 +1109,22 @@ class AuthenticatedReplayClient:
             self.checkpoint = promoted_checkpoint
             self.checkpoint_digest = promoted_digest
 
+    def rotate_key(self, server_public_key: str | Ed25519PublicKey) -> None:
+        """Rotate the pinned server public key without changing epoch or checkpoint.
+
+        This is used after the server calls ReferenceReplayService.rotate_key().
+        The caller must verify the new key through an out-of-band mechanism
+        (e.g., signed attestation, operator confirmation) before calling this.
+
+        Args:
+            server_public_key: New server public key (PEM string or Ed25519PublicKey).
+        """
+        with self._lock:
+            promoted_public_key = _load_public_key(server_public_key)
+            promoted_server_key_id = replay_key_id(promoted_public_key)
+            self.server_public_key = promoted_public_key
+            self.server_key_id = promoted_server_key_id
+
     def _verify_response(
         self,
         request: Mapping[str, Any],
@@ -1153,13 +1224,33 @@ class RemoteAuthorizationReplayStore:
 
 
 class HttpReplayTransport:
-    def __init__(self, url: str, *, timeout_seconds: float = 2.0) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        timeout_seconds: float = 2.0,
+        ca_cert_path: str | None = None,
+        client_cert_path: str | None = None,
+        client_key_path: str | None = None,
+        verify_hostname: bool = True,
+    ) -> None:
         if not isinstance(url, str) or not url.startswith(("http://", "https://")):
             raise ValueError("replay service URL is invalid")
         if not isinstance(timeout_seconds, (int, float)) or not 0 < timeout_seconds <= 30:
             raise ValueError("replay transport timeout is invalid")
+        if url.startswith("https://"):
+            if ca_cert_path is None:
+                raise ValueError("TLS requires CA certificate path")
+            if client_cert_path is None or client_key_path is None:
+                raise ValueError("mTLS requires client certificate and key paths")
         self.url = url
         self.timeout_seconds = float(timeout_seconds)
+        self._ssl_context: ssl.SSLContext | None = None
+        if url.startswith("https://"):
+            self._ssl_context = ssl.create_default_context(cafile=ca_cert_path)
+            self._ssl_context.load_cert_chain(certfile=client_cert_path, keyfile=client_key_path)
+            if not verify_hostname:
+                self._ssl_context.check_hostname = False
 
     def __call__(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         body = canonical_bytes(request)
@@ -1170,10 +1261,16 @@ class HttpReplayTransport:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(message, timeout=self.timeout_seconds) as response:
-                if response.status != 200:
-                    raise ReplayUnavailableError("replay service returned a non-success status")
-                content = response.read(MAX_HTTP_BODY_BYTES + 1)
+            if self._ssl_context is not None:
+                with urllib.request.urlopen(message, timeout=self.timeout_seconds, context=self._ssl_context) as response:
+                    if response.status != 200:
+                        raise ReplayUnavailableError("replay service returned a non-success status")
+                    content = response.read(MAX_HTTP_BODY_BYTES + 1)
+            else:
+                with urllib.request.urlopen(message, timeout=self.timeout_seconds) as response:
+                    if response.status != 200:
+                        raise ReplayUnavailableError("replay service returned a non-success status")
+                    content = response.read(MAX_HTTP_BODY_BYTES + 1)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise ReplayUnavailableError("replay service is unavailable") from exc
         if len(content) > MAX_HTTP_BODY_BYTES:
@@ -1185,7 +1282,10 @@ class HttpReplayTransport:
 
 
 class ReplayHttpServer:
-    """Small HTTP binding for protocol conformance and controlled deployments."""
+    """Small HTTP binding for protocol conformance and controlled deployments.
+    
+    Supports optional TLS/mTLS for production deployments.
+    """
 
     def __init__(
         self,
@@ -1193,19 +1293,45 @@ class ReplayHttpServer:
         *,
         host: str = "127.0.0.1",
         port: int = 0,
+        certfile: str | None = None,
+        keyfile: str | None = None,
+        cafile: str | None = None,
+        require_client_cert: bool = False,
     ) -> None:
         if not isinstance(host, str) or not host:
             raise ValueError("replay HTTP host is invalid")
         if type(port) is not int or not 0 <= port <= 65_535:
             raise ValueError("replay HTTP port is invalid")
+        tls_enabled = certfile is not None and keyfile is not None
+        has_tls_params = certfile is not None or keyfile is not None or cafile is not None
+        if has_tls_params and not tls_enabled:
+            raise ValueError("TLS requires certfile, keyfile, and cafile together")
+        if tls_enabled and cafile is None:
+            raise ValueError("TLS requires certfile, keyfile, and cafile together")
+        if tls_enabled:
+            for path in (certfile, keyfile, cafile):
+                if not Path(path).is_file():
+                    raise ValueError(f"TLS file not found: {path}")
+        if require_client_cert and not tls_enabled:
+            raise ValueError("mTLS requires TLS to be enabled")
         handler = self._handler(service)
         self._server = http.server.ThreadingHTTPServer((host, port), handler)
+        self._tls_enabled = tls_enabled
+        self._require_client_cert = require_client_cert
+        if tls_enabled:
+            import ssl
+            self._ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            self._ssl_context.load_cert_chain(certfile=certfile, keyfile=keyfile)
+            self._ssl_context.load_verify_locations(cafile=cafile)
+            self._ssl_context.verify_mode = ssl.CERT_REQUIRED if require_client_cert else ssl.CERT_OPTIONAL
+            self._server.socket = self._ssl_context.wrap_socket(self._server.socket, server_side=True)
         self._thread: threading.Thread | None = None
 
     @property
     def url(self) -> str:
         host, port = self._server.server_address[:2]
-        return f"http://{host}:{port}/v1/transition"
+        scheme = "https" if self._tls_enabled else "http"
+        return f"{scheme}://{host}:{port}/v1/transition"
 
     def start(self) -> None:
         if self._thread is not None:

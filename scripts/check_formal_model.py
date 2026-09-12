@@ -41,9 +41,19 @@ def structural_check() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the narrow Event Horizon TLA+ model")
     parser.add_argument("--require-tlc", action="store_true")
+    parser.add_argument("--java", help="Path to Java executable")
     args = parser.parse_args()
     structural_check()
-    java = shutil.which("java")
+    
+    # Try to find Java: explicit arg > JAVA_HOME > PATH
+    java = args.java
+    if not java:
+        java_home = os.environ.get("JAVA_HOME")
+        if java_home:
+            java = os.path.join(java_home, "bin", "java")
+    if not java:
+        java = shutil.which("java")
+    
     jar_value = os.environ.get("TLA2TOOLS_JAR", str(FORMAL / "tla2tools.jar"))
     jar = Path(jar_value)
     if java is None or not jar.is_file():

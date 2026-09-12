@@ -65,8 +65,17 @@ def main() -> int:
     revision = git("rev-parse", "HEAD")
     dirty = bool(git("status", "--short"))
     results = {name: run_suite(modules) for name, modules in SUITES.items()}
+    java_home = os.environ.get("JAVA_HOME")
+    print(f"DEBUG: JAVA_HOME from env = {repr(java_home)}")
+    java_exe = None
+    if java_home:
+        java_exe = os.path.join(java_home.strip(), "bin", "java")
+        print(f"DEBUG: java_exe = {repr(java_exe)}")
+    elif shutil.which("java"):
+        java_exe = shutil.which("java")
+        print(f"DEBUG: java from PATH = {repr(java_exe)}")
     formal = subprocess.run(
-        [sys.executable, "scripts/check_formal_model.py"],
+        [sys.executable, "scripts/check_formal_model.py", "--java", java_exe] if java_exe else [sys.executable, "scripts/check_formal_model.py"],
         cwd=ROOT,
         check=False,
         capture_output=True,

@@ -430,6 +430,47 @@ class RemoteReplayTests(unittest.TestCase):
         finally:
             server.close()
 
+    def test_server_key_rotation_updates_client_pinned_key(self) -> None:
+        """Server key rotation can be adopted by client."""
+        old_key_id = self.service.server_key_id
+        new_key_id, new_pem = self.service.rotate_key()
+        self.assertNotEqual(new_key_id, old_key_id)
+        client = self.client()
+        client.rotate_key(new_pem)
+        store = RemoteCapabilityConsumptionStore(client, partition=CAPABILITIES)
+        self.assertTrue(store.consume("cap_eeeeeeeeeeeeeeeeeeeeeeee", "a" * 64, 5000, 1000))
+        self.assertFalse(store.consume("cap_eeeeeeeeeeeeeeeeeeeeeeee", "a" * 64, 5000, 1001))
+
+    def test_server_key_rotation_with_explicit_key(self) -> None:
+        """Server key rotation with explicit key material."""
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        old_key_id = self.service.server_key_id
+        explicit_key = Ed25519PrivateKey.generate()
+        new_key_id, new_pem = self.service.rotate_key(signing_key=explicit_key)
+        self.assertNotEqual(new_key_id, old_key_id)
+        client = self.client()
+        client.rotate_key(new_pem)
+        store = RemoteCapabilityConsumptionStore(client, partition=CAPABILITIES)
+        self.assertTrue(store.consume("cap_ffffffffffffffffffffffff", "a" * 64, 5000, 1000))
+
+    def test_tls_transport_requires_certificates(self) -> None:
+        """TLS transport requires CA, client cert, and key."""
+        with self.assertRaises(ValueError):
+            HttpReplayTransport("https://example.com")
+        with self.assertRaises(ValueError):
+            HttpReplayTransport("https://example.com", ca_cert_path="/tmp/ca.pem")
+        with self.assertRaises(ValueError):
+            HttpReplayTransport("https://example.com", ca_cert_path="/tmp/ca.pem", client_cert_path="/tmp/cert.pem")
+
+    def test_tls_server_requires_cert_and_key(self) -> None:
+        """TLS server requires cert, key, and CA together."""
+        with self.assertRaises(ValueError):
+            ReplayHttpServer(self.service, certfile="/tmp/cert.pem")
+        with self.assertRaises(ValueError):
+            ReplayHttpServer(self.service, certfile="/tmp/cert.pem", keyfile="/tmp/key.pem")
+        with self.assertRaises(ValueError):
+            ReplayHttpServer(self.service, cafile="/tmp/ca.pem")
+
     def _service_for(self, path: Path, *, epoch: int) -> ReferenceReplayService:
         policy = ReplayClientPolicy.create(
             self.signer.public_key_pem,

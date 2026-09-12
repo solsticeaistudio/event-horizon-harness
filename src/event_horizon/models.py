@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from .canonical import CanonicalizationError, canonical_bytes, digest
 
@@ -302,3 +302,18 @@ class ExecutionResult:
     output: Any = None
     output_bytes: int = 0
     error: str | None = None
+    effect_state: Literal["not-started", "possibly-committed", "completed"] = "possibly-committed"
+
+    def __post_init__(self) -> None:
+        if type(self.success) is not bool or self.effect_state not in (
+            "not-started", "possibly-committed", "completed",
+        ):
+            raise ValidationError("invalid execution outcome")
+        if self.success and self.effect_state != "completed":
+            raise ValidationError("successful execution must be completed")
+
+    @property
+    def event_type(self) -> str:
+        if self.success:
+            return "execution.completed"
+        return "execution.denied" if self.effect_state == "not-started" else "execution.indeterminate"

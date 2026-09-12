@@ -9,7 +9,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -32,6 +32,9 @@ class ExternalRecorder:
         signing_key: bytes | Ed25519PrivateKey | None = None,
         *,
         max_event_bytes: int = 16_384,
+        metrics_callback: Optional[Callable[[str, Mapping[str, Any]], None]] = None,
+        prometheus_registry: Optional[object] = None,
+        otel_meter: Optional[object] = None,
     ):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +62,122 @@ class ExternalRecorder:
         self._count = 0
         self._source_sequences: dict[str, int] = {}
         self._recover()
+
+        # Metrics/observability hooks
+        self._metrics_callback = metrics_callback
+        self._prometheus_registry = prometheus_registry
+        self._otel_meter = otel_meter
+        self._prometheus_metrics: dict[str, object] = {}
+        self._otel_instruments: dict[str, object] = {}
+        self._init_prometheus_metrics()
+        self._init_otel_instruments()
+
+    def _init_prometheus_metrics(self) -> None:
+        """Initialize Prometheus metrics if registry provided."""
+        if self._prometheus_registry is None:
+            return
+        try:
+            from prometheus_client import Counter, Histogram, Gauge, REGISTRY
+            registry = self._prometheus_registry if self._prometheus_registry is not REGISTRY else REGISTRY
+            
+            self._prometheus_metrics["events_appended"] = Counter(
+                "event_horizon_events_appended_total",
+                "Total number of events appended to the recorder",
+                ["event_type", "source_id"],
+                registry=registry,
+            )
+            self._prometheus_metrics["append_duration"] = Histogram(
+                "event_horizon_append_duration_seconds",
+                "Time spent appending events",
+                ["event_type"],
+                registry=registry,
+            )
+            self._prometheus_metrics["event_size"] = Histogram(
+                "event_horizon_event_size_bytes",
+                "Size of appended events in bytes",
+                ["event_type"],
+                registry=registry,
+            )
+            self._prometheus_metrics["integrity_errors"] = Counter(
+                "event_horizon_integrity_errors_total",
+                "Total number of integrity errors",
+                ["error_type"],
+                registry=registry,
+            )
+            self._prometheus_metrics["event_count"] = Gauge(
+                "event_horizon_event_count",
+                "Current number of events in the recorder",
+                registry=registry,
+            )
+        except ImportError:
+            self._prometheus_metrics = {}
+            self._prometheus_registry = None
+
+    def _init_otel_instruments(self) -> None:
+        """Initialize OpenTelemetry instruments if meter provided."""
+        if self._otel_meter is None:
+            return
+        try:
+            from opentelemetry.metrics import Meter
+            meter = self._otel_meter if isinstance(self._otel_meter, Meter) else None
+            if meter is None:
+                return
+            
+            self._otel_instruments["events_appended"] = meter.create_counter(
+                "event_horizon.events_appended",
+                description="Total number of events appended",
+                unit="1",
+            )
+            self._otel_instruments["append_duration"] = meter.create_histogram(
+                "event_horizon.append_duration",
+                description="Time spent appending events",
+                unit="s",
+            )
+            self._otel_instruments["event_size"] = meter.create_histogram(
+                "event_horizon.event_size",
+                description="Size of appended events",
+                unit="By",
+            )
+            self._otel_instruments["integrity_errors"] = meter.create_counter(
+                "event_horizon.integrity_errors",
+                description="Total number of integrity errors",
+                unit="1",
+            )
+        except ImportError:
+            self._otel_instruments = {}
+            self._otel_meter = None
+
+    def _emit_metrics(self, event_type: str, source_id: str, duration: float, size: int) -> None:
+        """Emit metrics for an append operation."""
+        # Prometheus
+        if "events_appended" in self._prometheus_metrics:
+            self._prometheus_metrics["events_appended"].labels(
+                event_type=event_type, source_id=source_id
+            ).inc()
+            self._prometheus_metrics["append_duration"].labels(
+                event_type=event_type
+            ).observe(duration)
+            self._prometheus_metrics["event_size"].labels(
+                event_type=event_type
+            ).observe(size)
+            self._prometheus_metrics["event_count"].set(self._count)
+
+        # OpenTelemetry
+        if "events_appended" in self._otel_instruments:
+            attrs = {"event_type": event_type, "source_id": source_id}
+            self._otel_instruments["events_appended"].add(1, attributes=attrs)
+            self._otel_instruments["append_duration"].record(duration, attributes=attrs)
+            self._otel_instruments["event_size"].record(len, attributes=attrs)
+
+    def _emit_integrity_error(self, error_type: str) -> None:
+        """Emit metrics for an integrity error."""
+        if "integrity_errors" in self._prometheus_metrics:
+            self._prometheus_metrics["integrity_errors"].labels(error_type=error_type).inc()
+        if "integrity_errors" in self._otel_instruments:
+            self._otel_instruments["integrity_errors"].add(1, attributes={"error_type": error_type})
+
+        if self._metrics_callback:
+            self._metrics_callback("integrity_error", {"error_type": error_type})
 
     @property
     def public_key_pem(self) -> str:
@@ -123,6 +242,7 @@ class ExternalRecorder:
         source_id: str = "local",
         source_sequence: int | None = None,
     ) -> dict[str, Any]:
+        start_time = time.perf_counter()
         with self._lock:
             valid, reason, tip, count, source_sequences = self._scan()
             if not valid or tip != self._tip or count != self._count:
@@ -168,6 +288,19 @@ class ExternalRecorder:
             signature = base64.urlsafe_b64encode(
                 self._private_key.sign(canonical_bytes(receipt_payload))
             ).rstrip(b"=").decode("ascii")
+
+            # Emit metrics
+            duration = time.perf_counter() - start_time
+            size = len(encoded_event)
+            self._emit_metrics(event_type, source_id, duration, size)
+            if self._metrics_callback:
+                self._metrics_callback("event_appended", {
+                    "event_type": event_type,
+                    "source_id": source_id,
+                    "duration": duration,
+                    "size": size,
+                })
+
             return {
                 **event,
                 "receipt": {

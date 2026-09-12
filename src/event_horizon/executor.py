@@ -33,7 +33,7 @@ class SacrificialExecutor:
         capability: IssuedCapability | CanaryCapability,
         attestation: Mapping[str, Any],
     ) -> ExecutionResult:
-        effect_committed = False
+        effect_state = "not-started"
         evidence_recorded = False
         try:
             if self.fault_injector is not None:
@@ -59,46 +59,56 @@ class SacrificialExecutor:
             if request.operation == "object.read":
                 if request.resource_id not in self.objects:
                     raise KeyError("object not found")
+                effect_state = "possibly-committed"
                 output = self.objects[request.resource_id]
             elif request.operation == "compute.run":
                 fn = self.compute_profiles.get(request.resource_id)
                 if fn is None:
                     raise KeyError("compute profile not found")
-                output = fn(dict(request.arguments))
+                arguments = dict(request.arguments)
+                # A callback may commit an effect before returning or raising.
+                effect_state = "possibly-committed"
+                output = fn(arguments)
             else:
                 raise PermissionError("executor has no implementation for operation")
             encoded = json.dumps(output, sort_keys=True, default=str).encode("utf-8")
             if len(encoded) > claims.max_output_bytes:
                 raise PermissionError("result exceeds capability output envelope")
-            effect_committed = True
             if self.fault_injector is not None:
                 self.fault_injector.hit("executor.after-effect")
                 self.fault_injector.hit("executor.before-evidence-record")
-            result = ExecutionResult(True, request.operation, request.resource_id, output, len(encoded))
             self.recorder.append("execution.completed", {
                 "request_id": request.request_id,
                 "capability_id": claims.capability_id,
                 "success": True,
                 "output_bytes": len(encoded),
+                "effect_state": "completed",
             })
             evidence_recorded = True
+            effect_state = "completed"
             if self.fault_injector is not None:
                 self.fault_injector.hit("executor.after-evidence-record")
                 self.fault_injector.hit("executor.before-response")
-            return result
+            return ExecutionResult(
+                True, request.operation, request.resource_id, output, len(encoded),
+                effect_state=effect_state,
+            )
         except Exception as exc:
-            event_type = "execution.indeterminate" if effect_committed else "execution.denied"
+            event_type = "execution.denied" if effect_state == "not-started" else "execution.indeterminate"
             if not evidence_recorded:
                 try:
                     self.recorder.append(event_type, {
                         "request_id": request.request_id,
                         "error_type": type(exc).__name__,
                         "error": str(exc),
-                        "effect_state": "committed-or-ambiguous" if effect_committed else "not-committed",
+                        "effect_state": effect_state,
                     })
                 except Exception:
                     pass
             error = (
-                f"indeterminate effect state: {exc}" if effect_committed else str(exc)
+                f"indeterminate effect state: {exc}" if effect_state != "not-started" else str(exc)
             )
-            return ExecutionResult(False, request.operation, request.resource_id, error=error)
+            return ExecutionResult(
+                False, request.operation, request.resource_id, error=error,
+                effect_state=effect_state,
+            )

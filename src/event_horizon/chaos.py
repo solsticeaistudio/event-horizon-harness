@@ -58,6 +58,16 @@ FAULT_DISPOSITIONS: Mapping[str, FaultDisposition] = {
     "network.reordering": "deny",
     "network.delay": "deny",
     "network.partition": "deny",
+    "process.crash-during-effect": "indeterminate",
+    "process.crash-after-effect": "reconcile",
+    "process.crash-before-evidence": "indeterminate",
+    "process.crash-after-evidence": "reconcile",
+    "clock.change-during-execution": "deny",
+    "clock.change-during-redemption": "deny",
+    "policy.stale-at-issuance": "deny",
+    "policy.stale-at-redemption": "deny",
+    "storage.rollback-detected": "halt",
+    "storage.corruption-detected": "halt",
 }
 
 EFFECT_COMMITTED_POINTS = frozenset({
@@ -66,6 +76,8 @@ EFFECT_COMMITTED_POINTS = frozenset({
     "recorder.before-append", "recorder.during-append", "recorder.after-append",
     "recorder.before-flush", "recorder.after-flush",
     "network.dropped-response",
+    "process.crash-after-effect",
+    "process.crash-after-evidence",
 })
 
 

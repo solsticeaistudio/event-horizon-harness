@@ -58,6 +58,32 @@ class ContainmentCertificateBuilder:
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         ).decode("ascii")
 
+    def _collect_source_provenance(self, events: list[dict[str, Any]]) -> dict[str, Any]:
+        provenance: dict[str, dict[str, Any]] = {}
+        for event in events:
+            source_id = event.get("source_id")
+            if not source_id:
+                continue
+            if source_id not in provenance:
+                provenance[source_id] = {
+                    "event_count": 0,
+                    "first_sequence": event.get("sequence"),
+                    "last_sequence": event.get("sequence"),
+                    "event_types": set(),
+                }
+            p = provenance[source_id]
+            p["event_count"] += 1
+            p["last_sequence"] = event.get("sequence")
+            p["event_types"].add(event.get("event_type", "unknown"))
+        return {
+            sid: {
+                "event_count": p["event_count"],
+                "sequence_range": [p["first_sequence"], p["last_sequence"]],
+                "event_types": sorted(p["event_types"]),
+            }
+            for sid, p in sorted(provenance.items())
+        }
+
     def build(
         self,
         *,
@@ -65,11 +91,15 @@ class ContainmentCertificateBuilder:
         session_id: str,
         assertions: dict[str, bool],
         evidence: dict[str, Any] | None = None,
+        trust_assumptions: list[str] | None = None,
+        mode: str = "simulation",
+        unknown_outcomes: list[str] | None = None,
     ) -> dict[str, Any]:
         valid, tip = self.recorder.verify()
         events = self.recorder.events()
         denied = sum(1 for event in events if event["event_type"] in {"request.denied", "execution.denied", "request.rejected"})
         completed = sum(1 for event in events if event["event_type"] == "execution.completed")
+        indeterminate = sum(1 for event in events if event["event_type"] == "execution.indeterminate")
         attestation_decisions = [
             event for event in events
             if event["event_type"] == "guardian.decision"
@@ -111,6 +141,7 @@ class ContainmentCertificateBuilder:
                     "chain_tip": tip,
                     "chain_valid": valid,
                     "key_id": getattr(self.recorder, "key_id", "unavailable"),
+                    "source_provenance": self._collect_source_provenance(events),
                 },
                 "teardown": {"verified": bool(assertions.get("teardown_verified", False))},
                 "egress": {"unauthorized_egress": not assertions.get("no_unauthorized_egress", False)},
@@ -119,19 +150,42 @@ class ContainmentCertificateBuilder:
             raise ValueError("certificate evidence must contain every required evidence domain")
         if any(not isinstance(evidence[name], dict) for name in required_evidence):
             raise ValueError("certificate evidence domains must be objects")
+        if trust_assumptions is None:
+            trust_assumptions = [
+                "recorder_signing_key_integrity",
+                "capability_signer_key_integrity",
+                "attestation_provider_trustworthiness",
+                "policy_compiler_determinism",
+                "guardian_subtractive_only",
+                "decay_monotonicity",
+                "time_source_accuracy",
+            ]
+        if unknown_outcomes is None:
+            unknown_outcomes = []
+            if indeterminate > 0:
+                unknown_outcomes.append(f"{indeterminate} indeterminate execution outcome(s)")
+            if not valid:
+                unknown_outcomes.append("evidence chain integrity verification failed")
+        allowed_modes = {"simulation", "hardware", "synthetic"}
+        if mode not in allowed_modes:
+            raise ValueError(f"mode must be one of {sorted(allowed_modes)}")
         payload = {
-            "schema": "event-horizon.containment-certificate.v0.4",
+            "schema": "event-horizon.containment-certificate.v0.5",
             "run_id": run_id,
             "session_id": session_id,
             "created_at": time.time(),
+            "mode": mode,
             "event_count": len(events),
             "event_chain_valid": valid,
             "event_chain_tip": tip,
             "completed_actions": completed,
             "denied_transitions": denied,
+            "indeterminate_outcomes": indeterminate,
             "attestation_bundle_digests": attestation_digests,
             "attestation_result_digests": attestation_result_digests,
             "evidence": evidence,
+            "trust_assumptions": sorted(trust_assumptions),
+            "unknown_outcomes": sorted(unknown_outcomes),
             "assertions": dict(sorted(assertions.items())),
         }
         signature = base64.urlsafe_b64encode(
