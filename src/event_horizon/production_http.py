@@ -5,22 +5,16 @@ health/metrics endpoints, and production-grade security hardening.
 """
 from __future__ import annotations
 
-import abc
-import base64
-import hashlib
 import json
 import logging
 import ssl
 import threading
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
-from functools import wraps
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Type
 
 from event_horizon.canonical import canonical_bytes, strict_json_loads
 
@@ -444,7 +438,7 @@ class ProductionHTTPServer:
 
                     server._record_request(time.time() - start, True)
 
-                except Exception as e:
+                except Exception:
                     server._record_request(time.time() - start, False)
                     self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
 
@@ -552,7 +546,6 @@ def create_raft_server(
 ) -> ProductionHTTPServer:
     """Create a production-hardened Raft HTTP server."""
     from event_horizon.raft_replay import RaftConsensus
-    from event_horizon.canonical import canonical_bytes, strict_json_loads
 
     consensus_: RaftConsensus = consensus
 

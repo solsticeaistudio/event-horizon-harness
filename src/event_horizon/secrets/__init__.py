@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from .providers import (
-    SecretProvider,
     SecretProviderType,
     SecretBackendError,
     SecretNotFoundError,
@@ -17,7 +16,6 @@ from .providers import (
     GCPSecretManagerProvider,
     FileSecretProvider,
     EnvSecretProvider,
-    SecretManager,
     create_secret_provider,
     SecretManager,
 )

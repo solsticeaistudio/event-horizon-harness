@@ -3,22 +3,18 @@ from __future__ import annotations
 
 import json
 import threading
-import uuid
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
-from contextlib import contextmanager
 
 import redis
-from redis.lock import Lock as RedisLock
 
 from event_horizon.adapters.base import (
-    ExternalWriteAdapter,
     PrepareResult,
     CommitResult,
     AbortResult,
     TransactionState,
 )
-from event_horizon.canonical import canonical_bytes, digest
+from event_horizon.canonical import digest
 
 
 @dataclass(frozen=True)

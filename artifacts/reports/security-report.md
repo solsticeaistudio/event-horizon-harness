@@ -1,6 +1,6 @@
 # Event Horizon security evaluation report
 
-- Source revision: `0148b23d576757a4aa2ee0513c3b7c6f9b642600`
+- Source revision: `65ed350f1e185e9c59ab1998fa118159de0b750e`
 - Dirty tree at start: `true`
 - Deterministic available checks: `PASS`
 - Overall status: `PASS`
@@ -9,20 +9,20 @@
 
 | Evaluation | Result | Tests | Milliseconds |
 |---|---:|---:|---:|
-| policy ceiling evaluation | PASS | 16 | 132 |
-| trust tier | PASS | 8 | 175 |
-| protocol property | PASS | 6 | 5247 |
-| concurrent redemption | PASS | 3 | 1306 |
-| chaos recovery | PASS | 6 | 327 |
-| canary events | PASS | 11 | 359 |
-| denial certificates | PASS | 11 | 308 |
-| behavioral guardian | PASS | 10 | 154 |
-| trust decay | PASS | 12 | 147 |
-| adaptive adversary | PASS | 4 | 130 |
-| positive controls | PASS | 2 | 139 |
-| literature feed | PASS | 4 | 96 |
-| hardware simulator | PASS | 10 | 133 |
-| formal model structure | PASS | 1 | 84 |
+| policy ceiling evaluation | PASS | 16 | 125 |
+| trust tier | PASS | 8 | 176 |
+| protocol property | PASS | 6 | 5266 |
+| concurrent redemption | PASS | 3 | 1313 |
+| chaos recovery | PASS | 6 | 334 |
+| canary events | PASS | 11 | 345 |
+| denial certificates | PASS | 11 | 288 |
+| behavioral guardian | PASS | 10 | 156 |
+| trust decay | PASS | 12 | 149 |
+| adaptive adversary | PASS | 4 | 128 |
+| positive controls | PASS | 2 | 143 |
+| literature feed | PASS | 4 | 97 |
+| hardware simulator | PASS | 10 | 132 |
+| formal model structure | PASS | 1 | 87 |
 
 ## Policy sizing fixture
 

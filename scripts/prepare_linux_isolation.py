@@ -6,7 +6,6 @@ import gzip
 import hashlib
 import io
 import json
-import os
 import platform
 import shutil
 import subprocess
@@ -19,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Hermetic toolchain configuration
 MUSL_CROSS_VERSION = "1.2.4"
-MUSL_CROSS_URL = f"https://musl.cc/x86_64-linux-musl-cross.tgz"
+MUSL_CROSS_URL = "https://musl.cc/x86_64-linux-musl-cross.tgz"
 MUSL_CROSS_SHA256 = "sha256:PLACEHOLDER_NEEDS_ACTUAL_HASH"
 
 

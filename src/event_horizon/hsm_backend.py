@@ -1,18 +1,14 @@
 """PKCS#11 HSM backend for hardware-backed key management."""
 from __future__ import annotations
 
-import base64
 import hashlib
-import json
-import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Optional
 
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 
 class HSMError(RuntimeError):

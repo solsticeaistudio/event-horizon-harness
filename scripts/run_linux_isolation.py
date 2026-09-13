@@ -19,7 +19,7 @@ import sys
 import tempfile
 import threading
 import time
-from typing import Optional, Mapping, List
+from typing import List
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -96,7 +96,6 @@ def run_concurrent_tenants(
     Each tenant gets its own isolated VM, effect service, and resources.
     """
     import fcntl
-    import heapq
     
     scheduler = TenantScheduler({tc.tenant_id: tc.quota for tc in tenant_configs})
     tenant_configs_map = {tc.tenant_id: tc for tc in tenant_configs}
@@ -465,8 +464,6 @@ def _forensic_erase_file(path: Path) -> None:
     - Verify each pass
     - Issue TRIM/DISCARD if supported
     """
-    import mmap
-    import random
     
     file_size = path.stat().st_size
     if file_size == 0:

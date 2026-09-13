@@ -5,12 +5,11 @@ import json
 import logging
 import sys
 import threading
-import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Union
+from typing import Any, Dict, Iterator, Optional, Union
 
 try:
     from pythonjsonlogger import jsonlogger

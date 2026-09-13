@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Optional
 
 try:
     import docker
@@ -18,12 +17,10 @@ except ImportError:
     ContainerError = Exception
 
 from event_horizon.sandbox import (
-    SandboxBackend,
     SandboxType,
     ResourceLimits,
     ExecutionRequest,
     ExecutionResult,
-    SandboxBackend,
 )
 
 
@@ -101,7 +98,7 @@ class DockerSandbox:
                 result = container.wait(timeout=request.timeout_seconds)
                 exit_code = result["StatusCode"]
                 timed_out = False
-            except Exception as e:
+            except Exception:
                 # Timeout
                 try:
                     container.kill()

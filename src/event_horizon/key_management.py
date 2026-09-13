@@ -7,16 +7,15 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Mapping, Optional
 
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from .canonical import canonical_bytes
-from .hsm_backend import PKCS11Backend, HSMError, HSMUnavailableError, HSMKeyInfo
+from .hsm_backend import HSMKeyInfo
 from .recorder import ExternalRecorder
 
 
@@ -223,7 +222,7 @@ class KeyManager:
             try:
                 signature = self._hsm.sign_ed25519(self._hsm_key_info.key_id, data)
                 return base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii")
-            except Exception as e:
+            except Exception:
                 # Fall back to software key if HSM signing fails
                 pass
         # Software fallback

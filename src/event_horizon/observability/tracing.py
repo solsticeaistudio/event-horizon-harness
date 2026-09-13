@@ -1,12 +1,10 @@
 """OpenTelemetry tracing integration for Event Horizon."""
 from __future__ import annotations
 
-import contextlib
 import threading
-import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, Mapping, Optional, Union
+from typing import Any, Dict, Iterator, Mapping, Optional
 
 try:
     from opentelemetry import trace

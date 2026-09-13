@@ -1,12 +1,9 @@
 """S3-compatible object store adapter with two-phase commit."""
 from __future__ import annotations
 
-import hashlib
 import threading
-import uuid
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
-from contextlib import contextmanager
 
 import boto3
 from botocore.exceptions import ClientError
@@ -18,7 +15,6 @@ from event_horizon.adapters.base import (
     AbortResult,
     TransactionState,
 )
-from event_horizon.canonical import canonical_bytes, digest
 
 
 @dataclass(frozen=True)

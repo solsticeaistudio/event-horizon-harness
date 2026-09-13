@@ -3,14 +3,10 @@ from __future__ import annotations
 
 import abc
 import json
-import os
 import threading
-import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional
 
-from event_horizon.canonical import canonical_bytes
 
 
 class HardwareFailSafeError(RuntimeError):

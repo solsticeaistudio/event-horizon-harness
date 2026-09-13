@@ -5,9 +5,7 @@ import queue
 import re
 import threading
 import time
-import uuid
-from collections import defaultdict
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .canonical import canonical_bytes, digest

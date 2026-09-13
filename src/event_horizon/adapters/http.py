@@ -1,25 +1,20 @@
 """HTTP/REST adapter with two-phase commit using idempotency keys."""
 from __future__ import annotations
 
-import json
 import threading
-import uuid
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
-from contextlib import contextmanager
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from event_horizon.adapters.base import (
-    ExternalWriteAdapter,
     PrepareResult,
     CommitResult,
     AbortResult,
     TransactionState,
 )
-from event_horizon.canonical import canonical_bytes, digest
 
 
 @dataclass(frozen=True)

@@ -28,8 +28,6 @@ from event_horizon.remote_replay import (
     ReplayHttpServer,
 )
 from event_horizon.production_attestation import ProductionAttestationManager
-import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from event_horizon.models import ActionRequest
@@ -376,8 +374,6 @@ def benchmark_emergency_stop(iterations: int = 100) -> dict:
 
 def run_all_benchmarks() -> dict:
     """Run all benchmarks and return results."""
-    import tempfile
-    import importlib
 
     results = {}
 

@@ -10,7 +10,7 @@ from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from enum import Enum
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 try:
     import requests
@@ -391,9 +391,6 @@ class EmailNotifier:
         self.use_tls = use_tls
 
     def __call__(self, alert: Any) -> None:
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
 
         msg = MIMEMultipart()
         msg["From"] = self.from_addr

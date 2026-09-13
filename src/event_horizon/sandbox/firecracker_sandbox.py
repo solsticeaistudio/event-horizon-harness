@@ -2,18 +2,15 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import tempfile
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Optional
 
 from event_horizon.sandbox import (
-    SandboxBackend,
     SandboxType,
     ResourceLimits,
     ExecutionRequest,
@@ -172,7 +169,7 @@ class FirecrackerSandbox:
         import urllib.request
         import json
 
-        api_url = f"http://localhost:8080/execute"  # Would be vsock in reality
+        api_url = "http://localhost:8080/execute"  # Would be vsock in reality
 
         payload = {
             "command": request.command,

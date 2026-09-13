@@ -5,8 +5,7 @@ import os
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Optional
 
 try:
     import resource
@@ -15,7 +14,6 @@ except ImportError:
     RESOURCE_AVAILABLE = False
 
 from event_horizon.sandbox import (
-    SandboxBackend,
     SandboxType,
     ResourceLimits,
     ExecutionRequest,

@@ -2,18 +2,15 @@
 from __future__ import annotations
 
 import abc
-import hashlib
 import json
 import os
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
-from event_horizon.canonical import canonical_bytes, digest
-from event_horizon.protocol import encode_frame, read_frame
 from event_horizon.recorder import ExternalRecorder
 
 

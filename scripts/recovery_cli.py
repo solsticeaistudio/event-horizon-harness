@@ -10,26 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from event_horizon.canonical import canonical_bytes, digest
-from event_horizon.recorder import ExternalRecorder, RecorderIntegrityError
-from event_horizon.remote_replay import (
-    ReferenceReplayService,
-    AuthenticatedReplayClient,
-    ReplayRequestSigner,
-    ReplayClientPolicy,
-    ReplayProtocolError,
-    ReplayUnavailableError,
-    ReplayStateError,
-    ReplayHttpServer,
-    HttpReplayTransport,
-)
-from event_horizon.raft_replay import (
-    RaftConsensus,
-    RaftNode,
-    ReferenceReplayService,
-    SnapshotMetadata,
-)
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from event_horizon.recorder import ExternalRecorder
 
 
 def verify_checkpoint(artifact_path: Path) -> dict[str, Any]:
@@ -106,7 +87,6 @@ def verify_raft_snapshot(artifact_path: Path) -> dict[str, Any]:
                 return {"valid": True, "detail": "No snapshots found"}
             
             # Verify snapshot integrity
-            import json
             import hashlib
             snapshot_data = row[4]  # snapshot_data column
             stored_digest = row[3]

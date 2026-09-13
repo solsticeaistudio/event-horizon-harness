@@ -3,14 +3,13 @@ from __future__ import annotations
 import json
 import threading
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from .adaptive_adversary import (
     AdaptiveCampaignEvaluation,
     AdaptiveLLMAdversarialRunner,
-    AdversaryModelConfig,
     AdversaryModel,
 )
 from .adversarial_runner import (
@@ -22,7 +21,7 @@ from .adversarial_runner import (
     CampaignValidationError,
     HarmlessSyntheticAdapter,
 )
-from .canonical import canonical_bytes, digest
+from .canonical import digest
 
 
 @dataclass(frozen=True)
@@ -213,7 +212,6 @@ class AdaptiveCampaignSuiteRunner:
         if manifest.total_budget.maximum_concurrent_campaigns != 1:
             raise CampaignValidationError("only sequential execution supported (concurrency=1)")
 
-        import threading
         self._lock = threading.RLock()
 
         self._budget = manifest.total_budget
