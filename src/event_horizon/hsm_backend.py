@@ -54,6 +54,7 @@ class PKCS11Backend:
         self._session = None
         self._lock = threading.RLock()
         self._initialized = False
+        self._pkcs11 = None
 
     def initialize(self) -> None:
         """Initialize the PKCS#11 library and open a session."""
@@ -63,6 +64,7 @@ class PKCS11Backend:
 
             try:
                 import pkcs11
+                self._pkcs11 = pkcs11
             except ImportError:
                 raise HSMUnavailableError("python-pkcs11 not installed")
 
@@ -97,7 +99,7 @@ class PKCS11Backend:
 
             # Generate key pair
             pub, priv = self._session.generate_key_pair(
-                pkcs11.KeyType.ED25519,
+                self._pkcs11.KeyType.ED25519,
                 label=label,
                 id=key_id.encode(),
                 store=True,
@@ -131,8 +133,8 @@ class PKCS11Backend:
 
             # Find private key by ID
             priv_key = self._session.get_key(
-                object_class=pkcs11.ObjectClass.PRIVATE_KEY,
-                key_type=pkcs11.KeyType.ED25519,
+                object_class=self._pkcs11.ObjectClass.PRIVATE_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
                 label=key_id,
             )
 
@@ -143,26 +145,38 @@ class PKCS11Backend:
             signature = priv_key.sign(data)
             return signature
 
-    def get_public_key(self, key_id: str) -> Ed25519PublicKey:
-        """Get public key from HSM."""
+    def get_public_key(self, label: str) -> HSMKeyInfo:
+        """Look up public-key metadata for an enrolled PKCS#11 label.
+
+        Actual token enrollment and PKCS#11 mechanism compatibility remain
+        hardware-specific and require separate physical-device validation.
+        """
         with self._lock:
             if not self._initialized:
                 self.initialize()
-
-            pub_key = self._session.get_key(
-                object_class=pkcs11.ObjectClass.PUBLIC_KEY,
-                key_type=pkcs11.KeyType.ED25519,
-                label=key_id,
+            public_object = self._session.get_key(
+                object_class=self._pkcs11.ObjectClass.PUBLIC_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
+                label=label,
             )
-
-            if not pub_key:
-                raise HSMKeyNotFoundError(f"Public key not found: {key_id}")
-
-            pub_pem = pub_key.export_public_key()
-            return serialization.load_pem_public_key(pub_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo,
-            ))
+            if not public_object:
+                raise HSMKeyNotFoundError(f"Public key not found: {label}")
+            public_key = public_object.export_public_key()
+            if not isinstance(public_key, Ed25519PublicKey):
+                raise HSMError("HSM returned a non-Ed25519 public key")
+            raw = public_key.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw,
+            )
+            return HSMKeyInfo(
+                key_id=f"ed25519:{hashlib.sha256(raw).hexdigest()[:32]}",
+                label=label,
+                public_key_pem=public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+                ).decode("ascii"),
+                created_at="unknown",
+            )
 
     def list_keys(self) -> list[HSMKeyInfo]:
         """List all Ed25519 keys in the HSM."""
@@ -172,12 +186,12 @@ class PKCS11Backend:
 
             keys = []
             for pub_key in self._session.get_keys(
-                object_class=pkcs11.ObjectClass.PUBLIC_KEY,
-                key_type=pkcs11.KeyType.ED25519,
+                object_class=self._pkcs11.ObjectClass.PUBLIC_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
             ):
                 label = pub_key.label or "unknown"
                 pub_pem = pub_key.export_public_key()
-                raw_pub = pub_key.public_bytes(
+                raw_pub = pub_pem.public_bytes(
                     encoding=serialization.Encoding.Raw,
                     format=serialization.PublicFormat.Raw,
                 )
@@ -204,8 +218,8 @@ class PKCS11Backend:
             deleted = False
             # Delete private key
             for priv_key in self._session.get_keys(
-                object_class=pkcs11.ObjectClass.PRIVATE_KEY,
-                key_type=pkcs11.KeyType.ED25519,
+                object_class=self._pkcs11.ObjectClass.PRIVATE_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
                 label=key_id,
             ):
                 priv_key.destroy()
@@ -213,8 +227,8 @@ class PKCS11Backend:
 
             # Delete public key
             for pub_key in self._session.get_keys(
-                object_class=pkcs11.ObjectClass.PUBLIC_KEY,
-                key_type=pkcs11.KeyType.ED25519,
+                object_class=self._pkcs11.ObjectClass.PUBLIC_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
                 label=key_id,
             ):
                 pub_key.destroy()

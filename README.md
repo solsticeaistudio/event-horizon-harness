@@ -4,7 +4,7 @@
   <img src="assets/event-horizon-harness.png" alt="Event Horizon Harness black hole and accretion disk artwork" width="100%">
 </p>
 
-[![CI](https://github.com/Solasticeaistudio/event-horizon-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/Solasticeaistudio/event-horizon-harness/actions/workflows/ci.yml)
+[![CI](https://github.com/solsticeaistudio/event-horizon-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/solsticeaistudio/event-horizon-harness/actions/workflows/ci.yml)
 
 Event Horizon is a research harness for testing whether a fully compromised autonomous-agent execution environment can convert local control into transferable authority. It computes a task-specific least-authority ceiling and then enforces that ceiling through cryptographically bound, attestation-aware, subtract-only capabilities.
 

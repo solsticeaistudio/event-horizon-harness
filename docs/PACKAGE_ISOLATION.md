@@ -63,7 +63,8 @@ Use the selected Ubuntu 24.04 / x86_64 / cgroup-v2 / KVM environment and prepare
 ```powershell
 wsl -d Ubuntu -u root --exec /var/tmp/event-horizon-isolation-venv/bin/python /mnt/c/dev/event-horizon-harness/scripts/run_package_isolation.py --report /mnt/c/dev/event-horizon-harness/artifacts/reports/package-isolation.json
 python scripts/verify_package_isolation.py artifacts/reports/package-isolation.json
-python -m unittest discover -s tests -p test_package_isolation.py -v
+# This revision does not ship test_package_isolation.py; use the opt-in
+# KVM report and verifier above for this experimental topology.
 ```
 
 On Linux, invoke the same repository-relative scripts using the configured virtual environment, with root only for the runner. Reports/build assets remain ignored; per-run host evidence and vulnerable marker fixtures are retained under `/var/tmp/ehk-*` for inspection. VM scratch and the package worker's exact private scratch marker are invalidated and removed after their entire cgroups stop. Retained fixtures are not a secure-erasure claim.
