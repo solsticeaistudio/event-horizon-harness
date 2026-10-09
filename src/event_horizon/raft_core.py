@@ -57,7 +57,7 @@ class DurableRaftNode:
         self._lock = threading.RLock()
         self._path = Path(path).resolve()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(self._path, isolation_level=None, check_same_thread=False)
+        self._db = sqlite3.connect(self._path, isolation_level="DEFERRED", check_same_thread=False)
         self._db.execute("PRAGMA journal_mode = WAL")
         self._db.execute("PRAGMA synchronous = FULL")
         self._db.execute("PRAGMA trusted_schema = OFF")
@@ -81,7 +81,8 @@ class DurableRaftNode:
         old_membership = self._state("membership", None)
         if old_membership is not None and old_membership != expected_membership:
             raise RaftCoreError("durable Raft membership mismatch on restart")
-        self._set("membership", expected_membership)
+        with self._db:
+            self._set("membership", expected_membership)
         self.term = int(self._state("term", "0"))
         self.voted_for = self._state("voted_for", "")
         self.commit_index = int(self._state("commit_index", "0"))
@@ -93,7 +94,8 @@ class DurableRaftNode:
         self._match: dict[str, int] = {}
         if not (0 <= self.applied_index <= self.commit_index <= self.last_index):
             raise RaftCoreError("durable Raft checkpoint is invalid")
-        self._apply_committed()
+        with self._db:
+            self._apply_committed()
 
     def connect(self, peers: Mapping[str, "DurableRaftNode"]) -> None:
         with self._lock:
@@ -170,7 +172,8 @@ class DurableRaftNode:
             self._step_down(self.term + 1)
             self.role = "candidate"
             self.voted_for = self.node_id
-            self._set("voted_for", self.node_id)
+            with self._db:
+                self._set("voted_for", self.node_id)
             election_term = self.term
             last_idx, last_term = self.last_index, self._last_term()
         votes = 1
@@ -253,44 +256,43 @@ class DurableRaftNode:
 
     def _apply_committed(self) -> None:
         """Replay authoritative consumption and checkpoint in one DB transaction."""
-        with self._db:
-            while self.applied_index < self.commit_index:
-                idx = self.applied_index + 1
-                entry = self._entry(idx)
-                if entry is None:
-                    raise RaftCoreError("committed Raft entry missing")
-                _, command = entry
-                if command.get("op") == "noop":
-                    result = "noop"
-                elif command.get("op") == "consume":
-                    scope = command["scope"]
-                    token = command["capability_id"]
-                    binding = command["claims_digest"]
-                    expiry = command["expires_at"]
-                    _validate_transition(
-                        token, binding, expiry, command["consumed_at"]
-                    )
-                    inserted = self._db.execute(
-                        "INSERT INTO consumed(scope,token,binding,expiry) VALUES (?,?,?,?) "
-                        "ON CONFLICT(scope,token) DO NOTHING",
-                        (scope, token, binding, expiry),
-                    ).rowcount
-                    existing = self._db.execute(
-                        "SELECT binding, expiry FROM consumed WHERE scope=? AND token=?",
-                        (scope, token),
-                    ).fetchone()
-                    if existing != (binding, expiry):
-                        result = "collision"
-                    else:
-                        result = "fresh" if inserted == 1 else "duplicate"
-                else:
-                    raise RaftCoreError("unrecognized committed command")
-                self._db.execute(
-                    "INSERT OR IGNORE INTO replay_results(idx,result) VALUES (?,?)",
-                    (idx, result),
+        while self.applied_index < self.commit_index:
+            idx = self.applied_index + 1
+            entry = self._entry(idx)
+            if entry is None:
+                raise RaftCoreError("committed Raft entry missing")
+            _, command = entry
+            if command.get("op") == "noop":
+                result = "noop"
+            elif command.get("op") == "consume":
+                scope = command["scope"]
+                token = command["capability_id"]
+                binding = command["claims_digest"]
+                expiry = command["expires_at"]
+                _validate_transition(
+                    token, binding, expiry, command["consumed_at"]
                 )
-                self.applied_index = idx
-                self._set("applied_index", str(idx))
+                inserted = self._db.execute(
+                    "INSERT INTO consumed(scope,token,binding,expiry) VALUES (?,?,?,?) "
+                    "ON CONFLICT(scope,token) DO NOTHING",
+                    (scope, token, binding, expiry),
+                ).rowcount
+                existing = self._db.execute(
+                    "SELECT binding, expiry FROM consumed WHERE scope=? AND token=?",
+                    (scope, token),
+                ).fetchone()
+                if existing != (binding, expiry):
+                    result = "collision"
+                else:
+                    result = "fresh" if inserted == 1 else "duplicate"
+            else:
+                raise RaftCoreError("unrecognized committed command")
+            self._db.execute(
+                "INSERT OR IGNORE INTO replay_results(idx,result) VALUES (?,?)",
+                (idx, result),
+            )
+            self.applied_index = idx
+            self._set("applied_index", str(idx))
 
     def _replicate(self, peer_id: str) -> None:
         """Synchronous append with bounded conflicting-log backtracking."""
