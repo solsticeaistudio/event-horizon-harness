@@ -94,6 +94,13 @@ class EtcdGatewayConfig:
             raise ValueError("invalid etcd authentication token")
 
 
+class _RejectEtcdRedirects(urllib.request.HTTPRedirectHandler):
+    """Never forward credentials or authority writes across HTTP redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class EtcdV3TransactionTransport:
     def __init__(self, config: EtcdGatewayConfig):
         self.config = config
@@ -103,6 +110,10 @@ class EtcdV3TransactionTransport:
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             ctx.load_cert_chain(config.client_cert_file, config.client_key_file)
             self._context = ctx
+        handlers = [_RejectEtcdRedirects()]
+        if self._context is not None:
+            handlers.append(urllib.request.HTTPSHandler(context=self._context))
+        self._opener = urllib.request.build_opener(*handlers)
 
     def __call__(self, body: Mapping[str, Any]) -> Mapping[str, Any]:
         payload = canonical_bytes(body)
@@ -117,8 +128,8 @@ class EtcdV3TransactionTransport:
         )
         try:
             # Never automatically retry a request whose commit may be ambiguous.
-            with urllib.request.urlopen(
-                request, timeout=self.config.timeout_seconds, context=self._context
+            with self._opener.open(
+                request, timeout=self.config.timeout_seconds
             ) as response:
                 if response.status != 200:
                     raise CapabilityConsumptionError("etcd transaction did not succeed")
