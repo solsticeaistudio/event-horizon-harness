@@ -221,12 +221,16 @@ class EtcdV3CapabilityConsumptionStore:
             raise CapabilityConsumptionError("etcd cluster identity mismatch")
         _number(header.get("revision"), "revision")
         _number(header.get("raft_term"), "term")
-        if type(response.get("succeeded")) is not bool:
+        # Proto3 JSON omits scalar fields with default values. For an etcd
+        # Txn, absent 'succeeded' means false, but only the conflict branch
+        # below is accepted: it must contain the actual existing binding.
+        succeeded = response.get("succeeded", False)
+        if type(succeeded) is not bool:
             raise CapabilityConsumptionError("etcd transaction decision is invalid")
         branches = response.get("responses")
         if not isinstance(branches, list) or len(branches) != 1:
             raise CapabilityConsumptionError("etcd transaction branch is missing")
-        if response["succeeded"]:
+        if succeeded:
             if not isinstance(branches[0], Mapping) or not isinstance(
                 branches[0].get("response_put"), Mapping
             ):
