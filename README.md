@@ -1,5 +1,13 @@
 # Event Horizon
 
+## Watch the demo
+
+[![Watch the Event Horizon Harness demo](demo/event-horizon-preview.gif)](https://github.com/solsticeaistudio/event-horizon-harness/raw/refs/heads/main/demo/event-horizon-demo.mp4)
+
+**[▶ Watch the full 1-minute 36-second demo](https://github.com/solsticeaistudio/event-horizon-harness/raw/refs/heads/main/demo/event-horizon-demo.mp4)**
+
+---
+
 <p align="center">
   <img src="assets/event-horizon-harness.png" alt="Event Horizon Harness black hole and accretion disk artwork" width="100%">
 </p>
