@@ -15,6 +15,7 @@ class TransactionState(str, enum.Enum):
     COMMITTED = "committed"
     ABORTED = "aborted"
     FAILED = "failed"
+    INDETERMINATE = "indeterminate"  # Remote effect may have committed
 
 
 @dataclass(frozen=True)

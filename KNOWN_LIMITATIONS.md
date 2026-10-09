@@ -19,4 +19,7 @@ Event Horizon is a research harness, not a production containment system.
 - Live authority decay is redemption-time and keyed by each fresh one-use capability ID. It does not accumulate denial/risk/canary/environment/restart counters across a session or lineage; persistent session behavior is enforced separately by the Behavioral Transition Guardian. Its SQLite state is not a distributed monotonic clock, consensus protocol, or atomic transaction with arbitrary external side effects.
 - No independent hardware fail-safe switch or hardware-in-the-loop test has yet been implemented.
 
+- The optional HTTP adapter is preflight-plus-commit, not distributed two-phase commit. Its local prepare cannot prove a remote service will remain unchanged; remote effects require server-enforced idempotency, and ambiguous commits require reconciliation. The adapter never sends a compensating DELETE on abort.
+- Configuring an HSM makes signing and key generation fail closed if the HSM fails. The PKCS#11 key lifecycle and HSM rotation still require device-level validation; the HSM option is not a production trust claim.
+
 These limitations are security-relevant. Results should not be generalized beyond the tested topology and explicit trust assumptions.

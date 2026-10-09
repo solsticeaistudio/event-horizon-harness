@@ -145,7 +145,7 @@ class FailSafeHostClient:
 
 class HardwareFailSafeSimulator:
     """Independent-switch state machine. Restart always begins tripped.
-    
+
     Supports optional hardware backend for physical kill switch integration.
     """
 
@@ -183,7 +183,7 @@ class HardwareFailSafeSimulator:
         self.last_valid_heartbeat_ms: int | None = None
         self._challenge_counter = 0
         self._pending: HeartbeatChallenge | None = None
-        
+
         # Hardware backend for physical kill switch
         self._hardware_backend = hardware_backend or MockHardwareBackend()
 
@@ -199,7 +199,7 @@ class HardwareFailSafeSimulator:
     def _trip(self, reason: str) -> None:
         self.state = "tripped"
         self.trip_reason = reason
-        
+
         # Trigger hardware kill switch if available
         try:
             self._hardware_backend.trigger_kill(reason)

@@ -34,7 +34,7 @@ def verify_replay_service(artifact_path: Path, service_id: str) -> dict[str, Any
         db_path = artifact_path / "authority.sqlite3"
         if not db_path.exists():
             return {"valid": False, "detail": "Database not found"}
-        
+
         with sqlite3.connect(db_path) as conn:
             row = conn.execute(
                 "SELECT epoch, checkpoint, checkpoint_digest FROM replay_metadata WHERE singleton = 1"
@@ -78,20 +78,20 @@ def verify_raft_snapshot(artifact_path: Path) -> dict[str, Any]:
         db_path = artifact_path / "raft.sqlite3"
         if not db_path.exists():
             return {"valid": True, "detail": "No Raft database found (no snapshots to verify)"}
-        
+
         with sqlite3.connect(db_path) as conn:
             row = conn.execute(
                 "SELECT * FROM snapshots ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
             if not row:
                 return {"valid": True, "detail": "No snapshots found"}
-            
+
             # Verify snapshot integrity
             import hashlib
             snapshot_data = row[4]  # snapshot_data column
             stored_digest = row[3]
             actual_digest = hashlib.sha256(snapshot_data).hexdigest()
-            
+
             return {
                 "valid": stored_digest == actual_digest,
                 "detail": "Snapshot verified" if stored_digest == actual_digest else "Digest mismatch",
@@ -110,7 +110,7 @@ def export_checkpoint(artifact_path: Path, output_path: Path) -> dict[str, Any]:
         db_path = artifact_path / "authority.sqlite3"
         if not db_path.exists():
             return {"valid": False, "detail": "No database found"}
-        
+
         output = {}
         with sqlite3.connect(db_path) as conn:
             for table in ("replay_metadata", "replay_checkpoints", "replay_nonces"):
@@ -119,7 +119,7 @@ def export_checkpoint(artifact_path: Path, output_path: Path) -> dict[str, Any]:
                     output[table] = rows
                 except sqlite3.OperationalError:
                     pass
-        
+
         output_path.write_text(json.dumps(output, indent=2))
         return {"valid": True, "detail": f"Exported to {output_path}"}
     except Exception as e:
@@ -132,7 +132,7 @@ def import_checkpoint(artifact_path: Path, input_path: Path) -> dict[str, Any]:
         import sqlite3
         import json
         data = json.loads(input_path.read_text())
-        
+
         db_path = artifact_path / "authority.sqlite3"
         with sqlite3.connect(db_path) as conn:
             # Initialize schema first
@@ -178,7 +178,7 @@ def import_checkpoint(artifact_path: Path, input_path: Path) -> dict[str, Any]:
                     PRIMARY KEY (partition, operation, token)
                 ) WITHOUT ROWID
             """)
-            
+
             for table, rows in data.items():
                 if rows:
                     placeholders = ",".join(["?"] * len(rows[0]))
@@ -270,7 +270,7 @@ def main():
         result = verify_evidence_chain(artifact_path)
     elif args.command == "verify-all":
         results = {}
-        for check in ["verify-checkpoint", "verify-replay", "list-checkpoints", 
+        for check in ["verify-checkpoint", "verify-replay", "list-checkpoints",
                       "verify-raft-snapshot", "verify-evidence"]:
             if check == "verify-checkpoint":
                 results[check] = verify_checkpoint(artifact_path)

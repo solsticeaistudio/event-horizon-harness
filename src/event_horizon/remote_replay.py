@@ -1283,7 +1283,7 @@ class HttpReplayTransport:
 
 class ReplayHttpServer:
     """Small HTTP binding for protocol conformance and controlled deployments.
-    
+
     Supports optional TLS/mTLS for production deployments.
     """
 

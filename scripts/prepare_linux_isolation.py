@@ -53,28 +53,28 @@ def fetch_and_verify_toolchain(output: Path, lock: dict) -> Path:
     """Fetch and verify the musl-cross toolchain."""
     toolchain_dir = output / "toolchain"
     toolchain_dir.mkdir(exist_ok=True)
-    
+
     toolchain_archive = toolchain_dir / "musl-cross.tgz"
     expected_sha256 = lock.get("musl_cross_sha256", "").replace("sha256:", "")
     if not expected_sha256:
         raise ValueError("musl_cross_sha256 not found in lock file")
-    
+
     fetch(lock["musl_cross_url"], expected_sha256, toolchain_archive)
-    
+
     # Extract toolchain
     with tarfile.open(fileobj=io.BytesIO(toolchain_archive.read_bytes()), mode="r:gz") as package:
         package.extractall(toolchain_dir)
-    
+
     # Find the toolchain root (x86_64-linux-musl-cross)
     toolchain_root = None
     for item in toolchain_dir.iterdir():
         if item.is_dir() and item.name.startswith("x86_64-linux-musl"):
             toolchain_root = item
             break
-    
+
     if not toolchain_root:
         raise RuntimeError("Failed to locate musl-cross toolchain root")
-    
+
     return toolchain_root
 
 
@@ -96,7 +96,7 @@ def build_with_container(image: str, cmd: list, env: dict, workdir: Path) -> sub
     docker_cmd.extend(["-e", "SOURCE_DATE_EPOCH=0"])
     docker_cmd.append(image)
     docker_cmd.extend(cmd)
-    
+
     return subprocess.run(docker_cmd, check=True, capture_output=True, text=True)
 
 
@@ -109,10 +109,10 @@ def main() -> int:
     parser.add_argument("--container-image", type=str, default="debian:bookworm-slim",
                        help="Container image for containerized builds")
     args = parser.parse_args()
-    
+
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         parser.error("build requires Linux x86_64")
-    
+
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     lock = json.loads((ROOT / "firecracker/linux-kvm.lock.json").read_text())
@@ -128,7 +128,7 @@ def main() -> int:
             with package.extractfile(matches[0]) as source:
                 (output / binary).write_bytes(source.read())
             (output / binary).chmod(0o755)
-    
+
     # Determine toolchain
     if args.toolchain == "musl-cross":
         toolchain_root = fetch_and_verify_toolchain(output, lock)
@@ -143,7 +143,7 @@ def main() -> int:
         if compiler is None:
             raise RuntimeError("gcc is required")
         toolchain_info = "system-gcc"
-    
+
     # Check for TPM2 development libraries if requested
     tpm2_libs = []
     tpm2_defines = []
@@ -162,7 +162,7 @@ def main() -> int:
         tpm2_defines.append("-DEH_HAS_TPM2")
     else:
         tpm2_defines.append("-UEH_HAS_TPM2")
-    
+
     with tempfile.TemporaryDirectory(prefix="eh-init-build-") as staging:
         init = Path(staging) / "init"
         if args.toolchain == "container":
@@ -173,7 +173,7 @@ def main() -> int:
                 '-DEH_SCRATCH_DEVICE="/dev/vda"',
             ]
             cmd.extend(["-o", "/tmp/init", "/src/firecracker/guest/guest_agent.c"])
-            
+
             # For container build, we'd use docker run with volume mounts
             # This is a placeholder - full implementation would mount staging dir
             raise NotImplementedError("Containerized build not yet fully implemented")
@@ -187,7 +187,7 @@ def main() -> int:
             cmd.extend(["-o", str(init), str(ROOT / "firecracker/guest/guest_agent.c")])
             subprocess.run(cmd, check=True, env={"PATH": "/usr/bin:/bin", "SOURCE_DATE_EPOCH": "0"})
             image = initramfs(init.read_bytes())
-    
+
     (output / "initramfs.cpio.gz").write_bytes(image)
     manifest = {
         "schema": "event-horizon.isolation-build.v1", "asset_lock": lock,

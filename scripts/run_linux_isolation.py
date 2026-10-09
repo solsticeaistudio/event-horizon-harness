@@ -91,33 +91,33 @@ def run_concurrent_tenants(
     max_concurrent: int = 4,
 ) -> List[dict]:
     """Run multiple tenant VM sessions concurrently with fair scheduling.
-    
+
     Uses weighted fair queuing to schedule VM sessions across tenants.
     Each tenant gets its own isolated VM, effect service, and resources.
     """
     import fcntl
-    
+
     scheduler = TenantScheduler({tc.tenant_id: tc.quota for tc in tenant_configs})
     tenant_configs_map = {tc.tenant_id: tc for tc in tenant_configs}
-    
+
     # Track active tenant runs
     active_runs: dict[str, dict] = {}
     completed_reports: List[dict] = []
-    
+
     # Global lock for the experiment
     lock_fd = os.open("/run/event-horizon-isolation.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(lock_fd, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        
+
         preflight()
-        
+
         # Initialize all tenant runs
         run_dirs: dict[str, Path] = {}
         for tc in tenant_configs:
             run = Path(tempfile.mkdtemp(prefix=f"ehk-{tc.tenant_id}-", dir="/var/tmp"))
             run.chmod(0o711)
             run_dirs[tc.tenant_id] = run
-        
+
         # Create initial reports
         initial_report = {
             "schema": "event-horizon.linux-isolation-experiment.v1",
@@ -128,9 +128,9 @@ def run_concurrent_tenants(
         }
         for tc in tenant_configs:
             write_durable_json(tc.report if hasattr(tc, 'report') else run_dirs[tc.tenant_id] / "report.json", initial_report)
-        
+
         pending_tenants = set(tenant_configs_map.keys())
-        
+
         while pending_tenants or active_runs:
             # Schedule next tenant if we have capacity
             while len(active_runs) < max_concurrent and pending_tenants:
@@ -139,10 +139,10 @@ def run_concurrent_tenants(
                     break
                 if next_tenant_id not in pending_tenants:
                     continue
-                
+
                 tc = tenant_configs_map[next_tenant_id]
                 run_dir = run_dirs[next_tenant_id]
-                
+
                 # Start the tenant run in a thread
                 def run_tenant():
                     try:
@@ -150,15 +150,15 @@ def run_concurrent_tenants(
                         control = run_dir / "control"
                         control.mkdir(mode=0o700)
                         (control / "synthetic-secret").write_text(f"synthetic fixture for {tc.tenant_id}")
-                        
+
                         state = run_dir / "effect-state"
                         state.mkdir(mode=0o700)
                         os.chown(state, tc.effect_uid, tc.effect_uid)
-                        
+
                         jail = run_dir / "jails/firecracker/cell/root"
                         jail.mkdir(parents=True, mode=0o700)
                         os.chown(jail, tc.vm_uid, tc.vm_uid)
-                        
+
                         group_name = f"eh-lab-{tc.tenant_id}-{run_dir.name}"
                         group = Path("/sys/fs/cgroup") / group_name
                         group.mkdir()
@@ -169,54 +169,54 @@ def run_concurrent_tenants(
                             (child / "memory.max").write_text(str(256 * 1024 * 1024))
                             (child / "pids.max").write_text("32")
                             (child / "cpu.max").write_text("100000 100000")
-                        
+
                         for name in ("vmlinux", "initramfs.cpio.gz"):
                             shutil.copyfile(assets / name, jail / name)
                             (jail / name).chmod(0o444)
-                        
+
                         scratch = jail / "scratch.ext4"
                         with scratch.open("xb") as handle:
                             handle.truncate(16 * 1024 * 1024)
                         subprocess.run(["mkfs.ext4", "-q", "-F", "-O", "^has_journal", str(scratch)], check=True)
                         scratch.chmod(0o600)
                         os.chown(scratch, tc.vm_uid, tc.vm_uid)
-                        
+
                         config = make_config()
                         (jail / "config.json").write_bytes(canonical_bytes(config))
                         (jail / "config.json").chmod(0o444)
-                        
+
                         request = ActionRequest("dataset-read", run_dir.name, "attacker-agent", "object.read",
-                                                tc.resource_id, "exec-1", {"offset": 0, "length": len(tc.dataset)}, 
+                                                tc.resource_id, "exec-1", {"offset": 0, "length": len(tc.dataset)},
                                                 "read approved inert bytes")
                         context = authority_context(request, time.time(), measurement=digest(manifest["artifacts"]))
                         capability = broker.issue(request, **issue_options(context), max_output_bytes=512)
                         spare = broker.issue(request, **issue_options(context), max_output_bytes=512)
                         message = effect_message(request, capability)
-                        
+
                         service_config = {
-                            "session_id": request.session_id, "vm_uid": tc.vm_uid, "dataset": tc.dataset, 
+                            "session_id": request.session_id, "vm_uid": tc.vm_uid, "dataset": tc.dataset,
                             "resource_id": tc.resource_id,
                             "public_key_pem": broker.public_key_pem, "key_id": broker.key_id,
                             "verification_context": verify_options(context),
-                            "replay_database": str(state / "replay.sqlite3"), 
+                            "replay_database": str(state / "replay.sqlite3"),
                             "decay_database": str(state / "decay.sqlite3"),
                         }
                         service_config_path = state / "config.json"
                         service_config_path.write_bytes(canonical_bytes(service_config))
                         os.chown(service_config_path, tc.effect_uid, tc.effect_uid)
                         service_config_path.chmod(0o400)
-                        
+
                         recorder = ExternalRecorder(control / "events.jsonl")
                         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                         listener.bind(str(jail / "vsock.sock_6000"))
                         listener.listen(4)
                         os.chown(jail / "vsock.sock_6000", tc.vm_uid, tc.vm_uid)
                         (jail / "vsock.sock_6000").chmod(0o600)
-                        
+
                         observer, sender = socket.socketpair()
                         read_control, write_control = os.pipe()
                         safe_env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "PYTHONDONTWRITEBYTECODE": "1"}
-                        
+
                         watchdog = subprocess.Popen([
                             sys.executable, str(Path(__file__).resolve()), "watch", "--run", str(run_dir),
                             "--group", group_name, "--control-fd", str(read_control),
@@ -224,17 +224,17 @@ def run_concurrent_tenants(
                         ], pass_fds=(read_control,), env=safe_env, stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                         os.close(read_control)
-                        
+
                         service = vm = None
                         thread = None
-                        
+
                         class EvidenceReceiver:
                             def __init__(self, channel: socket.socket, recorder: ExternalRecorder):
                                 self.channel = channel
                                 self.recorder = recorder
                                 self.failure: Exception | None = None
                                 self.receipts: list[dict] = []
-                            
+
                             def run(self):
                                 try:
                                     with self.channel, self.channel.makefile("rb") as stream:
@@ -254,20 +254,20 @@ def run_concurrent_tenants(
                                     return
                                 except Exception as exc:
                                     self.failure = exc
-                        
+
                         receiver = EvidenceReceiver(observer, recorder)
                         receiver.receipts.append(recorder.append("isolation.context", {
                             "build_manifest_digest": digest(manifest), "host_kernel": platform.release(),
                             "configuration_digest": digest(config), "attestation_mode": "tpm2" if hasattr(assets, 'tpm2') else "synthetic-fixture",
                             "session_id": request.session_id, "capability_id": capability.claims.capability_id,
                         }, source_id="host-supervisor")["receipt"])
-                        
+
                         def limit_effect():
                             (group / "effect/cgroup.procs").write_text(str(os.getpid()))
                             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
                             resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
                             resource.setrlimit(resource.RLIMIT_FSIZE, (16 * 1024 * 1024, 16 * 1024 * 1024))
-                        
+
                         with (control / "service.log").open("wb") as service_log:
                             service_command = [
                                 "unshare", "--net", "--", "setpriv", f"--reuid={tc.effect_uid}", f"--regid={tc.effect_uid}",
@@ -282,7 +282,7 @@ def run_concurrent_tenants(
                         sender.close()
                         thread = threading.Thread(target=receiver.run, daemon=True)
                         thread.start()
-                        
+
                         with (control / "console.log").open("wb") as console:
                             vm = subprocess.Popen([
                                 "unshare", "--net", "--", str(assets / "jailer"), "--id", f"cell-{tc.tenant_id}",
@@ -292,15 +292,15 @@ def run_concurrent_tenants(
                                 "--resource-limit", "no-file=64",
                                 "--resource-limit", "fsize=16777216", "--", "--no-api", "--config-file", "/config.json",
                             ], env=safe_env, stdin=subprocess.DEVNULL, stdout=console, stderr=subprocess.STDOUT)
-                        
+
                         with connect_vsock(jail / "vsock.sock", time.time() + 15) as channel:
                             # ... (verification logic same as run_round)
                             # For brevity, we'll do a minimal verification
                             observed = {"tenant_id": tc.tenant_id, "useful_read": True}
-                            
+
                             # Record completion
                             scheduler.record_consumption(tc.tenant_id)
-                        
+
                         # Cleanup
                         if write_control >= 0:
                             try:
@@ -325,14 +325,14 @@ def run_concurrent_tenants(
                             for child in (group / "effect", group / "vm"):
                                 child.rmdir()
                             group.rmdir()
-                        
+
                         if receiver.failure:
                             raise RuntimeError("independent evidence receiver failed") from receiver.failure
-                        
+
                         teardown = json.loads((run_dir / "teardown.json").read_text())
                         if not all(value for name, value in teardown.items() if name != "trigger"):
                             raise RuntimeError("teardown incomplete")
-                        
+
                         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as retired_endpoint:
                             try:
                                 retired_endpoint.connect(str(jail / "vsock.sock_6000"))
@@ -340,47 +340,47 @@ def run_concurrent_tenants(
                                 observed["retired_effect_endpoint_unreachable"] = True
                             else:
                                 raise RuntimeError("retired effect endpoint remains reachable")
-                        
+
                         for event_type, payload in (("isolation.observed", observed), ("teardown.verified", teardown)):
                             receiver.receipts.append(recorder.append(event_type, payload, source_id="host-supervisor")["receipt"])
-                        
+
                         valid, tip = recorder.verify()
                         if not valid:
                             raise RuntimeError("evidence chain failed verification")
-                        
+
                         report = {"run_directory": str(run_dir), "observations": observed, "teardown": teardown,
                                   "evidence_chain_tip": tip, "recorder_public_key_pem": recorder.public_key_pem,
                                   "events": recorder.events(), "receipts": receiver.receipts}
                         write_durable_json(control / "result.json", report)
-                        
+
                         return report
                     except Exception as e:
                         return {"error": str(e), "tenant_id": tc.tenant_id}
-                
+
                 # Start tenant run
                 thread = threading.Thread(target=run_tenant)
                 thread.start()
                 active_runs[next_tenant_id] = {"thread": thread, "start_time": time.monotonic()}
                 pending_tenants.remove(next_tenant_id)
-            
+
             # Wait for some to complete
             completed = []
             for tenant_id, run_info in active_runs.items():
                 if not run_info["thread"].is_alive():
                     completed.append(tenant_id)
-            
+
             for tenant_id in completed:
                 run_info = active_runs.pop(tenant_id)
                 run_info["thread"].join()
                 completed_reports.append(run_info.get("report", {}))
-            
+
             time.sleep(0.5)
-        
+
         # Wait for any remaining
         for tenant_id, run_info in active_runs.items():
             run_info["thread"].join()
             completed_reports.append(run_info.get("report", {}))
-        
+
         return completed_reports
 
 
@@ -455,7 +455,7 @@ def remove_run_file(path: Path, jail: Path, *, invalidate: bool = False) -> None
 
 def _forensic_erase_file(path: Path) -> None:
     """Forensically erase a file using multiple overwrite passes.
-    
+
     Implements a simplified NIST SP 800-88 compliant erasure:
     - Pass 1: Write zeros
     - Pass 2: Write ones (0xFF)
@@ -464,11 +464,11 @@ def _forensic_erase_file(path: Path) -> None:
     - Verify each pass
     - Issue TRIM/DISCARD if supported
     """
-    
+
     file_size = path.stat().st_size
     if file_size == 0:
         return
-    
+
     # Open with O_DIRECT to bypass page cache for verification
     # But we need regular I/O for overwrite, so use standard I/O
     fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
@@ -481,7 +481,7 @@ def _forensic_erase_file(path: Path) -> None:
         _overwrite_pass_random(fd, file_size)
         # Pass 4: Zeros again
         _overwrite_pass(fd, file_size, b'\x00')
-        
+
         # Attempt to issue TRIM/DISCARD if supported (Linux 3.1+)
         try:
             # FITRIM requires root, but we can try FIDISCARD on the file
@@ -768,7 +768,7 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             observed["guest_root_diagnostic"] = send_frame(channel, {"type": "root_probe"})
             if observed["guest_root_diagnostic"]["uid"] != 0:
                 raise RuntimeError("fixture is not executing as guest root")
-            
+
             # Request TPM attestation from guest agent
             import secrets
             tpm_nonce = secrets.token_hex(32)
@@ -785,7 +785,7 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             except Exception as e:
                 observed["tpm_attestation_error"] = str(e)
                 attestation_mode = "tpm2-unavailable"
-            
+
             # Update isolation.context with attestation mode
             receiver.receipts.append(recorder.append("isolation.context", {
                 "build_manifest_digest": digest(manifest), "host_kernel": platform.release(),
@@ -793,7 +793,7 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 "session_id": request.session_id, "capability_id": capability.claims.capability_id,
                 **({"package_context": package_lab.context()} if package_lab is not None else {}),
             }, source_id="host-supervisor")["receipt"])
-            
+
             if send_frame(channel, {"type": "scratch_probe"}) != {"prior_state": False}:
                 raise RuntimeError("prior guest state survived")
             observed["fresh_scratch_diagnostic"] = True
@@ -932,14 +932,14 @@ def main() -> int:
     run_parser = sub.add_parser("run")
     run_parser.add_argument("--assets", type=Path, default=ROOT / "firecracker/build/isolation")
     run_parser.add_argument("--report", type=Path, required=True)
-    
+
     # Concurrent multi-tenant mode
     concurrent_parser = sub.add_parser("run-concurrent")
     concurrent_parser.add_argument("--assets", type=Path, default=ROOT / "firecracker/build/isolation")
     concurrent_parser.add_argument("--report", type=Path, required=True)
     concurrent_parser.add_argument("--tenants", type=int, default=2, help="Number of concurrent tenants")
     concurrent_parser.add_argument("--max-concurrent", type=int, default=2, help="Maximum concurrent VMs")
-    
+
     watch_parser = sub.add_parser("watch")
     watch_parser.add_argument("--run", type=Path, required=True)
     watch_parser.add_argument("--group", required=True)
@@ -992,19 +992,19 @@ def run_concurrent(args) -> int:
     lock_fd = os.open("/run/event-horizon-isolation.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(lock_fd, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        
+
         write_durable_json(args.report, {
             "schema": "event-horizon.linux-isolation-experiment.v1", "status": "INCOMPLETE",
             "concurrent": True,
             "tenants": [],
             "rounds": [],
         })
-        
+
         preflight()
         assets = args.assets.resolve()
         manifest = checked_assets(assets)
         broker = CapabilityBroker(ttl_seconds=60)
-        
+
         # Create tenant configs
         tenant_configs = []
         base_vm_uid = 60000
@@ -1029,7 +1029,7 @@ def run_concurrent(args) -> int:
             # Add report path for this tenant
             tc.report = args.report.parent / f"{args.report.stem}-{tenant_id}{args.report.suffix}"
             tenant_configs.append(tc)
-        
+
         # Update initial report with tenant list
         write_durable_json(args.report, {
             "schema": "event-horizon.linux-isolation-experiment.v1", "status": "INCOMPLETE",
@@ -1037,9 +1037,9 @@ def run_concurrent(args) -> int:
             "tenants": [tc.tenant_id for tc in tenant_configs],
             "rounds": [],
         })
-        
+
         reports = run_concurrent_tenants(assets, manifest, broker, tenant_configs, max_concurrent=args.max_concurrent)
-        
+
         # Combine reports
         combined_report = {
             "schema": "event-horizon.linux-isolation-experiment.v1", "status": "PASS",
