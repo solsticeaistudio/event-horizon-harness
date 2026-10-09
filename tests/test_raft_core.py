@@ -6,6 +6,7 @@ from pathlib import Path
 
 from event_horizon.raft_core import (
     DurableRaftNode, RaftCoreError, RaftCoreUnavailable,
+    ResearchRaftCapabilityConsumptionStore,
 )
 from event_horizon.replay_state import CapabilityConsumptionError
 
@@ -105,6 +106,35 @@ class RaftResearchCoreTests(unittest.TestCase):
             self.nodes["a"].propose(command(digest="b" * 64))
         for node in self.nodes.values():
             self.assertEqual(node.known_consumption("broker", TOKEN), (DIGEST, 5000))
+
+    def test_concurrent_research_adapter_only_consumes_once(self):
+        import concurrent.futures
+        self.assertTrue(self.nodes["a"].elect())
+        store = ResearchRaftCapabilityConsumptionStore(
+            self.nodes["a"], namespace="synthetic", domain="broker"
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(
+                lambda _: store.consume(TOKEN, DIGEST, 5000, 1000),
+                range(16),
+            ))
+        self.assertEqual(results.count(True), 1)
+        self.assertEqual(results.count(False), 15)
+        for node in self.nodes.values():
+            self.assertEqual(
+                node.known_consumption("synthetic:broker", TOKEN), (DIGEST, 5000)
+            )
+
+    def test_vote_requires_up_to_date_log_and_same_term_vote_is_sticky(self):
+        self.assertTrue(self.nodes["a"].elect())
+        self.assertTrue(self.nodes["a"].propose(command()))
+        term = self.nodes["a"].term + 1
+        vote_term, approved = self.nodes["b"].request_vote(term, "c", 0, 0)
+        self.assertFalse(approved)
+        self.assertEqual(vote_term, term)
+        vote_term, approved = self.nodes["b"].request_vote(term, "c", 1, 1)
+        self.assertTrue(approved)
+        self.assertFalse(self.nodes["b"].request_vote(term, "a", 1, 1)[1])
 
     def test_uncommitted_log_does_not_survive_as_authority(self):
         self.assertTrue(self.nodes["a"].elect())
