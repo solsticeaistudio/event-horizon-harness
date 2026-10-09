@@ -122,6 +122,10 @@ class ProcessHarnessTests(unittest.TestCase):
         self.assertIn('replay', replay.error)
 
     def test_durable_replay_state_survives_authority_service_restarts(self):
+        # Exercise persisted replay state, not the unrelated 1s expiry race.
+        # Multiple interpreter restarts in CI can exhaust the short default TTL.
+        self.harness.close()
+        self.harness = ProcessSeparatedHarness(self.tmp.name, ttl_seconds=30.0).start()
         request, capability, attestation = self.issue(request_id='durable-service-restart')
         self.assertTrue(self.harness.execute(request, capability, attestation).success)
         with closing(sqlite3.connect(self.harness.authority_replay_path)) as database:
