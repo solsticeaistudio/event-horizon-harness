@@ -55,6 +55,7 @@ class DurableRaftNode:
         self.node_id = node_id
         self.members = member_ids
         self._lock = threading.RLock()
+        self._proposal_lock = threading.RLock()
         self._path = Path(path).resolve()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self._path, isolation_level="DEFERRED", check_same_thread=False)
@@ -336,46 +337,47 @@ class DurableRaftNode:
 
     def propose(self, command: Mapping[str, Any]) -> bool:
         """Commit a one-use consume command through quorum before acknowledging."""
-        if (
-            command.get("op") != "consume"
-            or not isinstance(command.get("scope"), str)
-            or not command["scope"]
-        ):
-            raise ValueError("only scoped consumption commands are allowed")
-        _validate_transition(
-            command["capability_id"], command["claims_digest"],
-            command["expires_at"], command["consumed_at"],
-        )
-        with self._lock:
-            if self.role != "leader":
-                raise RaftCoreUnavailable("Raft node is not leader")
-            position = self.last_index + 1
-            with self._db:
-                self._db.execute(
-                    "INSERT INTO raft_log(idx,term,command) VALUES (?,?,?)",
-                    (position, self.term, canonical_bytes(dict(command))),
-                )
-        for peer_id in self.peers:
-            self._replicate(peer_id)
-        with self._lock:
-            if self.role != "leader":
-                raise RaftCoreUnavailable("Raft leader lost term during proposal")
-            matched = 1 + sum(int(idx >= position) for idx in self._match.values())
-            if matched <= len(self.members) // 2:
-                raise RaftCoreUnavailable("Raft proposal not durably acknowledged by quorum")
-            with self._db:
-                self.commit_index = position
-                self._set("commit_index", str(position))
-                self._apply_committed()
-            row = self._db.execute(
-                "SELECT result FROM replay_results WHERE idx = ?", (position,)
-            ).fetchone()
-        # Commit notifications do not affect the already quorum-backed decision.
-        for peer_id in self.peers:
-            self._replicate(peer_id)
-        if row[0] == "collision":
-            raise CapabilityConsumptionError("capability ID collided with different signed claims")
-        return row[0] == "fresh"
+        with self._proposal_lock:
+            if (
+                command.get("op") != "consume"
+                or not isinstance(command.get("scope"), str)
+                or not command["scope"]
+            ):
+                raise ValueError("only scoped consumption commands are allowed")
+            _validate_transition(
+                command["capability_id"], command["claims_digest"],
+                command["expires_at"], command["consumed_at"],
+            )
+            with self._lock:
+                if self.role != "leader":
+                    raise RaftCoreUnavailable("Raft node is not leader")
+                position = self.last_index + 1
+                with self._db:
+                    self._db.execute(
+                        "INSERT INTO raft_log(idx,term,command) VALUES (?,?,?)",
+                        (position, self.term, canonical_bytes(dict(command))),
+                    )
+            for peer_id in self.peers:
+                self._replicate(peer_id)
+            with self._lock:
+                if self.role != "leader":
+                    raise RaftCoreUnavailable("Raft leader lost term during proposal")
+                matched = 1 + sum(int(idx >= position) for idx in self._match.values())
+                if matched <= len(self.members) // 2:
+                    raise RaftCoreUnavailable("Raft proposal not durably acknowledged by quorum")
+                with self._db:
+                    self.commit_index = position
+                    self._set("commit_index", str(position))
+                    self._apply_committed()
+                row = self._db.execute(
+                    "SELECT result FROM replay_results WHERE idx = ?", (position,)
+                ).fetchone()
+            # Commit notifications do not affect the already quorum-backed decision.
+            for peer_id in self.peers:
+                self._replicate(peer_id)
+            if row[0] == "collision":
+                raise CapabilityConsumptionError("capability ID collided with different signed claims")
+            return row[0] == "fresh"
 
     def known_consumption(self, scope: str, capability_id: str) -> tuple[str, int] | None:
         """Local observation ONLY: not a linearizable quorum read."""
@@ -389,3 +391,25 @@ class DurableRaftNode:
     def close(self) -> None:
         with self._lock:
             self._db.close()
+
+
+class ResearchRaftCapabilityConsumptionStore:
+    """Optional simulator adapter for CapabilityVerifier; never deploy as authority."""
+
+    def __init__(self, node: DurableRaftNode, *, namespace: str, domain: str):
+        if not namespace or not domain or ":" in namespace or ":" in domain:
+            raise ValueError("research Raft namespace/domain are invalid")
+        self.node = node
+        self.scope = f"{namespace}:{domain}"
+
+    def consume(
+        self, capability_id: str, claims_digest: str,
+        expires_at: int, consumed_at: int,
+    ) -> bool:
+        return self.node.propose({
+            "op": "consume", "scope": self.scope,
+            "capability_id": capability_id,
+            "claims_digest": claims_digest,
+            "expires_at": expires_at,
+            "consumed_at": consumed_at,
+        })
