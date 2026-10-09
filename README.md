@@ -183,3 +183,13 @@ These are active limitations, not deployment footnotes. See [KNOWN_LIMITATIONS.m
 5. Commission independent parser, capability, attestation, evidence, and containment review.
 
 Contribution requirements are in [CONTRIBUTING.md](CONTRIBUTING.md). The repository retains its existing source-review license; see [LICENSE](LICENSE).
+
+
+## Replay authority backend development (October 2026)
+
+The reference backends and their security boundaries are described in
+[docs/AUTHORITY_BACKENDS.md](docs/AUTHORITY_BACKENDS.md). Option A uses the
+existing durable SQLite authority; Option B provides an optional etcd v3
+consensus-backed transaction adapter; `raft_core.py` is an isolated,
+fixed-membership research Raft fault lab, **not** a deployable consensus
+service. The legacy incomplete `raft_replay.py` remains fail-closed.

@@ -86,3 +86,49 @@ partition denial and pinned cluster validation. The Python CI suite also
 exercises native SQLite and signed remote replay. The fake transport proves
 the adapter's contract **under its simulated assumptions**, not real etcd
 cluster availability or linearizability.
+
+## Native Raft fault laboratory
+
+`event_horizon.raft_core.DurableRaftNode` is a newly implemented **research
+model**, separate from the quarantined legacy `raft_replay.py`. It implements:
+
+- Stable term, voted-for identity, and log entries in SQLite (synchronous FULL).
+- Fixed odd-sized member configuration pinned to the persisted database.
+- Explicit RequestVote election with up-to-date log and one vote per term.
+- AppendEntries prev-log checks and conflict truncation that cannot overwrite
+  an already committed entry.
+- Replication tracking, a majority requirement for acknowledging a proposal,
+  old-leader stepdown on higher terms, and replay state applied atomically with
+  the durable applied index.
+- Local restart/recovery, a research-only `CapabilityConsumptionStore` adapter,
+  and deterministic tests of partition denial, stale leader, competing terms,
+  persisted votes/logs, replay, conflict, and parallel consumption.
+
+To run the lab tests:
+
+```bash
+python -m unittest discover -s tests -p 'test_raft_core.py' -v
+```
+
+To use the research-only adapter in an in-process test:
+
+```python
+from event_horizon.raft_core import (
+    DurableRaftNode, ResearchRaftCapabilityConsumptionStore
+)
+# Provision three nodes using DIFFERENT SQLite paths, each with the same
+# member_ids tuple; connect() each node with its two other local peers.
+# leader.elect() explicitly starts a deterministic election.
+store = ResearchRaftCapabilityConsumptionStore(
+    leader, namespace="synthetic", domain="broker"
+)
+```
+
+**Not full production Raft:** this is a fixed-membership deterministic RPC
+laboratory without a mutually authenticated network transport, automatic
+election timers, joint consensus member changes, InstallSnapshot/log
+compaction, leadership transfer, linearizable read-index, or exhaustive crash
+and packet-scheduling validation. It is deliberately not wired as the default
+production authority. Implementing all of those features and having them
+independently verified is additional work. The deployed etcd-backed Option B
+is the recommended route when actual production-grade Raft is required.

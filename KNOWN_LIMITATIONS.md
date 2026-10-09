@@ -25,3 +25,6 @@ Event Horizon is a research harness, not a production containment system.
 - Configuring an HSM makes signing and key generation fail closed if the HSM fails. The PKCS#11 key lifecycle and HSM rotation still require device-level validation; the HSM option is not a production trust claim.
 
 These limitations are security-relevant. Results should not be generalized beyond the tested topology and explicit trust assumptions.
+
+- `authority_backends.py` adds a direct etcd v3 transactional capability-consumption adapter. Its fake-transport tests do not verify a live etcd quorum. The adapter must be configured with a pinned cluster ID and a secured/authorized etcd gateway, and only covers the capability-consumption interface so far. Nonce creation/consumption and protected-request authorization have separate existing mechanisms that are **not yet migrated** to this adapter.
+- `raft_core.py` introduces a durable fixed-membership Raft fault laboratory and optional research-only consumption adapter. It lacks authenticated inter-process network transports, election timers, joint consensus, InstallSnapshot, linearizable reads, and exhaustive interleaving proofs; it is not a production authority or a complete implementation of production Raft.
