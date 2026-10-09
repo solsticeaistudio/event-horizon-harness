@@ -67,6 +67,7 @@ class HSMFailClosedTests(unittest.TestCase):
 
     def test_public_key_comes_from_configured_hsm(self):
         self.assertEqual(self.manager.public_key_pem, self.backend.info.public_key_pem)
+        self.assertEqual(self.manager.key_id, self.backend.info.key_id)
 
 
 if __name__ == "__main__":

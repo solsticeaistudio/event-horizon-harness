@@ -119,6 +119,7 @@ class KeyManager:
         # Record HSM key info if available
         if self._hsm_key_info:
             self._record_hsm_key_info()
+            self.key_id = self._hsm_key_info.key_id
 
     def _record_hsm_key_info(self) -> None:
         """Record HSM key information in the database."""
@@ -266,6 +267,7 @@ class KeyManager:
                 hsm_key_info = self._hsm.generate_ed25519_key(self._hsm_key_label, f"{purpose}-{int(time.time())}")
                 self._hsm_key_info = hsm_key_info
                 self._record_hsm_key_info()
+                self.key_id = hsm_key_info.key_id
                 return self._row_to_metadata((
                     hsm_key_info.key_id,
                     hsm_key_info.public_key_pem,
