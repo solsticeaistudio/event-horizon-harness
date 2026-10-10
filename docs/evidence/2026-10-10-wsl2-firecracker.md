@@ -42,7 +42,7 @@ cd ~/event-horizon-harness
 git rev-parse HEAD
 /var/tmp/event-horizon-isolation-venv/bin/python scripts/verify_linux_isolation.py \
   artifacts/reports/linux-isolation.json
-sha256sum artifacts/reports/linux-isolation.json | tee artifacts/reports/linux-isolation.json.sha256
+(cd artifacts/reports && sha256sum linux-isolation.json | tee linux-isolation.json.sha256)
 ```
 
 Make an immutable backup of the **unmodified** JSON and checksum outside the checkout. Inspect the full report before making it public, including `rounds[*].observations`, `rounds[*].events[*].payload`, `rounds[*].receipts`, and build/host metadata. Never publish a private signing key, real credential, unexpected hostname/user directory, or non-synthetic dataset. If the report needs redaction, preserve the original privately and produce a **separately labelled summary**; do not silently edit the signed report or present a redacted copy as signature-equivalent.
