@@ -119,6 +119,30 @@ class LiveSignedReplayTests(unittest.TestCase):
                     self.assertGreaterEqual(checkpoint, 10)
                     self.assertRegex(checkpoint_hash, r"^[0-9a-f]{64}$")
                     self.assertTrue(harness.call("recorder", "verify", {})["valid"])
+                    pending = {**request, "request_id": "during-authority-outage"}
+                    waiting_req, waiting_cap, waiting_att = harness.request_capability(pending)
+                    normal_transport = service.transport
+                    def deny_consensus(_body):
+                        raise OSError("synthetic quorum outage at trusted authority boundary")
+                    service.transport = deny_consensus
+                    try:
+                        unavailable = harness.execute(
+                            waiting_req, waiting_cap, waiting_att,
+                        )
+                        self.assertFalse(unavailable.success)
+                        self.assertEqual(unavailable.effect_state, "not-started")
+                    finally:
+                        service.transport = normal_transport
+                    # Failed quorum consumption did not grant permission or
+                    # dispatch, so the previously pending capability can
+                    # still be used once on recovery.
+                    recovered = harness.execute(
+                        waiting_req, waiting_cap, waiting_att,
+                    )
+                    self.assertTrue(recovered.success, recovered.error)
+                    self.assertFalse(harness.execute(
+                        waiting_req, waiting_cap, waiting_att,
+                    ).success)
                     harness.stop_role("signer")
                     harness.restart_role("signer")
                     self.assertFalse(harness.execute(action, capability, attestation).success)
