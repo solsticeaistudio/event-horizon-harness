@@ -32,7 +32,9 @@ def payload(**overrides):
 class ProcessHarnessTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.harness = ProcessSeparatedHarness(self.tmp.name, ttl_seconds=1.0).start()
+        # Normal process-integration tests do not test expiry; use enough TTL
+        # for loaded CI workers and multiple verifier/Node bridge transitions.
+        self.harness = ProcessSeparatedHarness(self.tmp.name, ttl_seconds=10.0).start()
 
     def tearDown(self):
         self.harness.close()
