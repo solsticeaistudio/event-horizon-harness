@@ -36,7 +36,7 @@ class FirecrackerGuestBuildTests(unittest.TestCase):
             subprocess.run(args, check=True, capture_output=True, text=True)
             self.assertTrue(binary.exists())
             self.assertGreater(binary.stat().st_size, 0)
-            self.assertEqual(binary.read_bytes()[:4], b"\\x7fELF")
+            self.assertEqual(binary.read_bytes()[:4], b"\x7fELF")
 
 
 if __name__ == "__main__":
