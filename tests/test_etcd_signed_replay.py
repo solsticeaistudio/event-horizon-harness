@@ -14,7 +14,8 @@ from event_horizon.canonical import canonical_bytes, digest, strict_json_loads
 from event_horizon.etcd_signed_replay import EtcdSignedReplayService
 from event_horizon.remote_replay import (
     AuthenticatedReplayClient, ReplayClientPolicy, ReplayRequestSigner,
-    ReplayProtocolError, ReplayStateError, ReplayUnavailableError, RemoteCapabilityConsumptionStore,
+    HttpReplayTransport, ReplayHttpServer, ReplayProtocolError, ReplayStateError,
+    ReplayUnavailableError, RemoteCapabilityConsumptionStore,
     RemoteAuthorizationReplayStore,
 )
 
@@ -237,6 +238,21 @@ class SignedEtcdTests(unittest.TestCase):
         self.etcd.data = head_snapshot
         with self.assertRaises(ReplayProtocolError):
             s.consume("cap_222222222222222222222222", "a"*64, 5000, 1000)
+
+    def test_existing_signed_http_rpc_serves_atomic_etcd_authority(self):
+        # EHH's external replay HTTP binding accepts the new backend with
+        # no new unauthenticated protocol or client capability.
+        server = ReplayHttpServer(self.service)
+        server.start()
+        try:
+            client = self.client(HttpReplayTransport(server.url))
+            store = RemoteCapabilityConsumptionStore(client, partition="broker")
+            self.assertTrue(store.consume(CAP, "e"*64, 5000, 1000))
+            self.assertFalse(store.consume(CAP, "e"*64, 5000, 1001))
+            self.assertEqual(client.checkpoint, 2)
+            self.assertEqual(self.service.checkpoint()[1], 2)
+        finally:
+            server.close()
 
     def test_bootstrap_explicit_wrong_signer_and_unauthorized_raft_op_fail(self):
         with self.assertRaises(ReplayStateError):
