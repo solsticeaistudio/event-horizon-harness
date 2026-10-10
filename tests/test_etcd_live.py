@@ -103,11 +103,16 @@ class LiveEtcdCapabilityTests(unittest.TestCase):
     def test_real_signed_gateway_replicas_enforce_quorum_consumption(self):
         # Host-side parser, Ed25519 verifier, etcd CAS, trusted effect handler.
         with tempfile.TemporaryDirectory() as root:
-            replicas = [
-                signed_effect_gateway_fixture(
-                    self.endpoint, self.pinned, self.namespace, root, replica=n
-                ) for n in range(8)
-            ]
+            first, message = signed_effect_gateway_fixture(
+                self.endpoint, self.pinned, self.namespace, root, replica=0
+            )
+            replicas = [(first, message)]
+            for n in range(1, 8):
+                # All replicas verify the *same* exact signed capability and
+                # share the consensus keyspace, with independent local files.
+                config = dict(first.config)
+                config["decay_database"] = str(Path(root) / f"decay-{n}.sqlite")
+                replicas.append((DatasetEffectBoundary(config, Mock()), message))
             try:
                 def attempt(n):
                     gateway, message = replicas[n % len(replicas)]
