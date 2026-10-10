@@ -46,8 +46,12 @@ its trusted host-side capability gateway to a **pinned disposable etcd
 quorum** and uses a separate supervisor-initiated linearizable read to verify
 the exact committed capability consumption. CI covers gateway + real etcd
 without KVM; a full Firecracker + etcd operator-run evidence report has
-**not yet been produced**. A model-driven, adaptive compromised agent and an
-independently operated evidence witness remain future experimental milestones.
+**not yet been produced**. The package lab can optionally use a
+[bounded model-selected controller](docs/PACKAGE_ISOLATION.md#bounded-adaptive-model-selected-guest-probes-opt-in)
+to choose fixed synthetic requests through the real guest and compromised
+worker, recording each chosen action and external decision as signed
+evidence. It **does not** yet execute an unrestricted autonomous model
+inside the microVM or use an independently operated evidence witness.
 
 ## What it does not demonstrate
 
