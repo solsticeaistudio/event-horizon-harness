@@ -622,6 +622,44 @@ def preflight() -> None:
             continue
 
 
+def stage_effect_service(run: Path) -> Path:
+    """Copy trusted host service code into a root-owned, traversable run path.
+
+    The service runs as UID 60001, while a normal Ubuntu user's home is
+    mode 0700/0750. An editable venv also links imports back to that home.
+    Only the code (no repository secrets, fixture state or credentials) is
+    snapshotted, and the unprivileged service cannot mutate it.
+    """
+    source_package = ROOT / "src/event_horizon"
+    source_entry = ROOT / "scripts/linux_effect_service.py"
+    staging = run / "trusted-service"
+    entry = staging / "scripts/linux_effect_service.py"
+    files = [(source_entry, entry)]
+    for item in source_package.rglob("*"):
+        if item.is_symlink():
+            raise RuntimeError("source tree contains an unexpected symlink")
+        if item.is_file() and item.suffix == ".py":
+            files.append((item, staging / "src/event_horizon" / item.relative_to(source_package)))
+
+    # The caller is the privileged supervisor. Do not follow source symlinks
+    # or copy unrelated checkout files. Read-only root-owned copies are safe
+    # for the dropped-privilege effect service to import.
+    staging.mkdir(mode=0o755)
+    for source, target in files:
+        if source.is_symlink() or not source.is_file():
+            raise RuntimeError("unexpected effect-service source file")
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+        shutil.copyfile(source, target)
+        target.chmod(0o444)
+    # `mkdir(mode=...)` is still masked by the caller's umask. This stage
+    # must be traversable by UID 60001 even for a root shell using 077.
+    staging.chmod(0o755)
+    for directory in staging.rglob("*"):
+        if directory.is_dir():
+            directory.chmod(0o755)
+    return entry
+
+
 def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, *, stop_mode="requested",
               package_lab=None) -> tuple[dict, dict, str]:
     import resource
@@ -630,6 +668,9 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     control = run / "control"
     control.mkdir(mode=0o700)
     (control / "synthetic-secret").write_text("synthetic fixture, never an infrastructure credential")
+    # Stage only public service code while still privileged; never relax
+    # permissions on the operator's home directory.
+    service_entry = stage_effect_service(run) if package_lab is None else None
     state = run / "effect-state"
     state.mkdir(mode=0o700)
     os.chown(state, EFFECT_UID, EFFECT_UID)
@@ -723,8 +764,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         with (control / "service.log").open("wb") as service_log:
             service_command = [
                 "unshare", "--net", "--", "setpriv", f"--reuid={EFFECT_UID}", f"--regid={EFFECT_UID}",
-                "--clear-groups", "--bounding-set=-all", "--no-new-privs", sys.executable,
-                str(ROOT / "scripts/linux_effect_service.py"), "--listener-fd", str(listener.fileno()),
+                "--clear-groups", "--bounding-set=-all", "--no-new-privs", sys.executable, "-I",
+                str(service_entry), "--listener-fd", str(listener.fileno()),
                 "--recorder-fd", str(sender.fileno()), "--config", str(service_config_path),
             ]
             if package_lab is not None:
@@ -756,13 +797,27 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 raise RuntimeError("Firecracker seccomp is not active")
             if "CapEff:\t0000000000000000" not in status or "CapPrm:\t0000000000000000" not in status:
                 raise RuntimeError("VM retained host capabilities")
+            if service.poll() is not None:
+                service_log = (control / "service.log").read_text(errors="replace")[-2048:]
+                raise RuntimeError(
+                    f"effect service exited before host namespace verification "
+                    f"(status {service.returncode}); service.log tail: {service_log}"
+                )
             for process, role in ((vm, "vm"), (service, "effect")):
                 membership = Path(f"/proc/{process.pid}/cgroup").read_text().strip()
                 if membership != f"0::/{group_name}/{role}":
                     raise RuntimeError(f"{role} is not in its bounded cgroup: {membership}")
             if os.readlink(f"/proc/{vm.pid}/ns/net") == os.readlink("/proc/self/ns/net"):
                 raise RuntimeError("VM shares supervisor network namespace")
-            if os.readlink(f"/proc/{service.pid}/ns/net") == os.readlink("/proc/self/ns/net"):
+            try:
+                effect_namespace = os.readlink(f"/proc/{service.pid}/ns/net")
+            except FileNotFoundError as exc:
+                service_log = (control / "service.log").read_text(errors="replace")[-2048:]
+                raise RuntimeError(
+                    f"effect service disappeared before host namespace verification; "
+                    f"service.log tail: {service_log}"
+                ) from exc
+            if effect_namespace == os.readlink("/proc/self/ns/net"):
                 raise RuntimeError("effect service shares supervisor network namespace")
             observed["host_vm_uid"] = VM_UID
             observed["host_effect_uid"] = EFFECT_UID
