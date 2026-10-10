@@ -577,7 +577,8 @@ class EvidenceReceiver:
                 while True:
                     event = read_frame(stream)
                     if set(event) != {"event_type", "payload"} or event["event_type"] not in {
-                        "execution.completed", "execution.denied", "execution.indeterminate", "transport.rejected",
+                        "execution.authorized", "execution.completed", "execution.denied",
+                        "execution.indeterminate", "transport.rejected",
                     }:
                         raise ValueError("effect source attempted an unauthorized evidence domain")
                     recorded = self.recorder.append(
