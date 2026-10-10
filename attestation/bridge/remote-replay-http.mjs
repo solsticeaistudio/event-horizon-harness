@@ -1,6 +1,6 @@
 // Trusted Node bridge to the existing signed replay HTTP authority.
 // No etcd credentials and no local nonce fallback in remote mode.
-import { readFileSync, writeFileSync, renameSync, unlinkSync, openSync, fsyncSync, closeSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, unlinkSync, openSync, fsyncSync, closeSync, lstatSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { basename, dirname, join } from 'node:path';
@@ -22,8 +22,8 @@ function exactKeys(obj, fields) {
   }
 }
 function strictFile(path) {
-  const stat = statSync(path, { throwIfNoEntry: false });
-  if (!stat || !stat.isFile() || stat.isSymbolicLink()) throw new Error('remote nonce file missing or unsafe');
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('remote nonce file missing or unsafe');
   if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) {
     throw new Error('remote nonce key or checkpoint file permissions are unsafe');
   }
