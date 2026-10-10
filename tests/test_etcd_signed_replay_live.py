@@ -78,8 +78,8 @@ class LiveSignedReplayTests(unittest.TestCase):
             "nonce": nonce, "context_digest": digest(context), "now": 3001,
         })["accepted"])
         auth = RemoteAuthorizationReplayStore(client, partition="authorizations")
-        self.assertTrue(auth.consume("B" * 43, "b" * 64, 5000, 1000))
-        self.assertFalse(auth.consume("B" * 43, "b" * 64, 5000, 1001))
+        self.assertTrue(auth.consume("A" * 43, "b" * 64, 5000, 1000))
+        self.assertFalse(auth.consume("A" * 43, "b" * 64, 5000, 1001))
         # Real transport and second independently initialized replica use
         # one global ordering and token keyspace.
         replica = EtcdSignedReplayService.connect(config, **params, bootstrap=False)
