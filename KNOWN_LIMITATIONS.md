@@ -19,9 +19,9 @@ actually executed.
   In-process per-client admission budgets and avoiding no-op checkpoint
   writes reduce, but do not eliminate, denial-of-service risks. Limits reset
   with a service restart and are not distributed across replicas.
-- Distributed evidence format v2 derives seven execution outcomes from
-  signed individual coordinator execution records, requires four signed
-  structured coordinator probes, and binds an etcd ID/checkpoint snapshot to
+- Distributed evidence format v2 checks six attempted outcomes against
+  signed coordinator execution records and requires five signed structured
+  coordinator probes (including the post-recovery outage report), and binds an etcd ID/checkpoint snapshot to
   its evidence chain. It **does not** establish that the coordinator's
   observations were truthful or independently observed, nor cryptographically
   attest an actual etcd cluster. Historical v1 reports only authenticate
