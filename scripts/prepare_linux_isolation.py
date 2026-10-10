@@ -126,7 +126,13 @@ def main() -> int:
             if len(matches) != 1:
                 raise ValueError(f"release must contain exactly one {name}")
             with package.extractfile(matches[0]) as source:
-                (output / binary).write_bytes(source.read())
+                binary_data = source.read()
+            actual_sha256 = hashlib.sha256(binary_data).hexdigest()
+            if actual_sha256 != lock[f"{binary}_sha256"]:
+                raise ValueError(
+                    f"{binary} digest mismatch: expected pinned binary hash"
+                )
+            (output / binary).write_bytes(binary_data)
             (output / binary).chmod(0o755)
 
     # Determine toolchain
