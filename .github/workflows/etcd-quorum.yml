@@ -99,6 +99,8 @@ jobs:
       - name: Verify full signed nonce/capability/authorization/checkpoint authority
         env:
           EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
+          EHH_DISTRIBUTED_EVIDENCE_DIR: ${{ runner.temp }}/eh-live-distributed
+          EHH_DISTRIBUTED_TRIAL: quorum-3
         run: python -m unittest tests.test_etcd_signed_replay_live -v
       - name: Stop one etcd node and verify majority still works
         shell: bash
@@ -119,7 +121,22 @@ jobs:
               raise SystemExit("two-node majority could not serve requests")
           PY
           python -m unittest tests.test_etcd_live -v
+          EHH_DISTRIBUTED_EVIDENCE_DIR="$RUNNER_TEMP/eh-live-distributed" \
+          EHH_DISTRIBUTED_TRIAL=quorum-2 \
           python -m unittest tests.test_etcd_signed_replay_live -v
+      - name: Independently verify seven-process distributed evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          for report in "$RUNNER_TEMP"/eh-live-distributed/report-*.json; do
+            python scripts/verify_distributed_adversarial.py "$report"
+          done
+      - name: Publish signed distributed seven-process evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: eh-seven-process-distributed-evidence
+          path: ${{ runner.temp }}/eh-live-distributed/report-*.json
+          retention-days: 7
       - name: Stop second node and verify minority cannot issue authority
         shell: bash
         run: |
