@@ -103,11 +103,18 @@ test_real_seven_process_harness_shares_signed_authority`:
 8. Restarts the signer, reloads its pinned high-water witness, and rejects
    the previously consumed capability again.
 
-The disposable real three-node etcd workflow also tests signing and
-authorization under a one-member failure, and refusal under quorum loss.
-The process-harness scenario currently runs under healthy quorums (including
-a two-node majority); the explicit minority test targets the signed replay
-authority directly rather than a hardware-isolated seven-role experiment.
+The disposable real three-node etcd workflow tests the same
+end-to-end seven-process experiment with all three members, and again after
+one member is stopped. It also checks actual etcd record keys for every
+authorized replay partition, exercises a protected certificate creation,
+and induces a temporary trusted-authority transport outage **inside the
+seven-process workflow**, verifying no action is dispatched without a signed
+replay authorization, followed by recovery and once-only consumption.
+
+The majority-loss case physically stops a second etcd member and verifies
+that the signed replay service refuses new nonce transitions. That
+explicit two-member failure case is a trusted-authority test; the entire
+seven-process/Firecracker experiment is not executed with a lost quorum.
 
 Run the relevant CI workflow on the branch:
 
@@ -117,6 +124,40 @@ The workflow provisions disposable local Docker etcd nodes, builds the
 attestation Node bridge, and runs the new full-system integration. The
 regular CI workflow still checks the existing SQLite-based baseline for
 regression and exports the existing synthetic signed evidence bundle.
+
+## Signed distributed adversarial evidence artifact
+
+The disposable etcd quorum workflow exports **two downloadable signed
+evidence reports**, one for a healthy three-member cluster and one with
+two members forming the remaining majority:
+
+- `report-quorum-3.json`
+- `report-quorum-2.json`
+
+Each report embeds the recorder's hash-chained event stream with independent
+Ed25519 receipt signatures, eight explicit adversarial acceptance outcomes,
+two real signed capability issuances, and two permitted synthetic effect
+completions. The CI workflow independently checks the signature and chain
+consistency before publishing the `eh-seven-process-distributed-evidence`
+artifact. Tampering, record removal and overstated hardware claims are
+regression-tested.
+
+Re-verify an extracted artifact without running EHH or etcd:
+
+```bash
+python scripts/verify_distributed_adversarial.py report-quorum-3.json
+
+# Optional: authenticate the recorder identity with a public key acquired
+# out of band, not copied from the report under inspection.
+python scripts/verify_distributed_adversarial.py report-quorum-3.json \
+  --pin-recorder-key independently-pinned-recorder.pem
+```
+
+The embedded public key alone establishes *internal consistency* only.
+The report's signed observations remain assertions recorded by the trusted
+coordinator; they are **not** independent kernel or host-side effect oracles.
+The etcd quorum workflow logs and raw consensus state provide separate
+integration evidence.
 
 ## What this does NOT demonstrate
 
