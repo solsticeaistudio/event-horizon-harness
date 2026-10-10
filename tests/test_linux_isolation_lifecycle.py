@@ -8,9 +8,13 @@ from __future__ import annotations
 import ast
 import inspect
 import os
+import stat
+import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from scripts.run_linux_isolation import (
@@ -18,6 +22,7 @@ from scripts.run_linux_isolation import (
     _overwrite_pass,
     _overwrite_pass_random,
     run_round,
+    stage_effect_service,
 )
 
 
@@ -44,6 +49,46 @@ class LinuxRoundLifecycleTests(unittest.TestCase):
             and n.value == "attestation.assessed"
         ]
         self.assertEqual(len(assessments), 1)
+
+    def test_effect_service_staged_outside_private_checkout(self):
+        # The real Ubuntu host's /home/<user> is not traversable by UID 60001.
+        # The trusted service must import from a separate root-owned snapshot.
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            run.chmod(0o711)
+            entry = stage_effect_service(run)
+            stage = run / "trusted-service"
+            self.assertEqual(entry, stage / "scripts/linux_effect_service.py")
+            self.assertTrue(entry.is_file())
+            self.assertTrue((stage / "src/event_horizon/effect_boundary.py").is_file())
+            self.assertEqual(stat.S_IMODE(entry.stat().st_mode), 0o444)
+            for directory in [stage, *[p for p in stage.rglob("*") if p.is_dir()]]:
+                self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o755)
+            for file in (p for p in stage.rglob("*.py") if p.is_file()):
+                self.assertEqual(stat.S_IMODE(file.stat().st_mode), 0o444)
+
+            # Isolated Python ignores PYTHONPATH and does not need to traverse
+            # the user's private source checkout. Running --help imports the
+            # full effect-boundary dependency graph without opening a socket.
+            result = subprocess.run(
+                [sys.executable, "-I", str(entry), "--help"],
+                env={"PATH": "/usr/bin:/bin", "PYTHONPATH": "/nonexistent",
+                     "PYTHONDONTWRITEBYTECODE": "1"},
+                cwd="/",
+                capture_output=True, text=True, check=True, timeout=15,
+            )
+            self.assertIn("--listener-fd", result.stdout)
+            self.assertIn("--config", result.stdout)
+
+    def test_service_snapshot_rejects_source_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "checkout"
+            (source / "scripts").mkdir(parents=True)
+            (source / "src/event_horizon").mkdir(parents=True)
+            (source / "scripts/linux_effect_service.py").symlink_to("/etc/passwd")
+            with patch("scripts.run_linux_isolation.ROOT", source):
+                with self.assertRaisesRegex(RuntimeError, "unexpected effect-service source file"):
+                    stage_effect_service(Path(tmp) / "run")
 
     def test_scratch_overwrite_stays_within_original_file(self):
         with tempfile.TemporaryDirectory() as tmp:
