@@ -82,6 +82,7 @@ class FirecrackerAssetLockTests(unittest.TestCase):
                 self.assertEqual(checked_assets(directory), manifest)
                 corrupted = json.loads(json.dumps(manifest))
                 corrupted["artifacts"]["firecracker"] = "b" * 64
+                observed["firecracker"] = "b" * 64
                 (directory / "manifest.json").write_text(json.dumps(corrupted))
                 with self.assertRaisesRegex(ValueError, "firecracker is not pinned"):
                     checked_assets(directory)
