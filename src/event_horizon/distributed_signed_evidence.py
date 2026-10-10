@@ -17,6 +17,7 @@ REQUIRED_CASES = frozenset({
     "valid_effect", "capability_replay", "executor_credential_probe",
     "authority_outage", "recovery_once", "recovery_replay",
     "signer_restart_replay", "signed_certificate",
+    "tampered_arguments", "unsigned_signer_mutation", "guardian_veto",
 })
 
 
