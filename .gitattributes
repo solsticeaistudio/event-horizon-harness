@@ -1,0 +1,2 @@
+# Keep signed evidence byte-exact across platform checkouts; never normalize its line endings.
+docs/evidence/artifacts/** -text
