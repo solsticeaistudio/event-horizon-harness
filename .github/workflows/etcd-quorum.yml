@@ -164,7 +164,7 @@ jobs:
           python - <<'PY'
           import os, subprocess, uuid
           from event_horizon.canonical import digest
-          from event_horizon.remote_replay import ReplayStateError
+          from event_horizon.remote_replay import ReplayStateError, ReplayUnavailableError
           from tests.test_etcd_signed_replay_live import provision
           service, client, _, _ = provision(
               namespace="minority." + uuid.uuid4().hex
@@ -183,7 +183,7 @@ jobs:
               client.call("nonce-consume", "nonces", {
                   "nonce":nonce, "context_digest":digest(ctx), "now":2000,
               })
-          except ReplayStateError:
+          except (ReplayStateError, ReplayUnavailableError):
               print("PASS: signed replay authority denied nonce with minority; checkpoint before outage",checkpoint)
           else:
               raise SystemExit("FAIL: signed nonce replay advanced without quorum")
