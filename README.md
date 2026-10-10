@@ -37,6 +37,18 @@ The tested claim is narrower than general containment: compromise inside the hos
 
 **[See the experiment record, source commit and reproduction instructions](docs/evidence/2026-10-10-wsl2-firecracker.md).** [Independent security evaluation pack](docs/INDEPENDENT_EVALUATION.md) includes reproduction steps, a findings template, and safe disclosure instructions. The [original JSON report](docs/evidence/artifacts/2026-10-10/linux-isolation.json) and [SHA-256 checksum](docs/evidence/artifacts/2026-10-10/linux-isolation.json.sha256) are public. Verification uses public keys embedded in the report and does **not** independently attest the machine, signer identity, or production containment. A separately witnessed result remains future work.
 
+## Compromised package-worker containment experiment
+
+The [owned package-service experiment](docs/PACKAGE_ISOLATION.md) uses the
+**same deliberately compromised worker** in vulnerable and protected fixture
+modes, with real Firecracker guest-root sessions. A new opt-in path connects
+its trusted host-side capability gateway to a **pinned disposable etcd
+quorum** and uses a separate supervisor-initiated linearizable read to verify
+the exact committed capability consumption. CI covers gateway + real etcd
+without KVM; a full Firecracker + etcd operator-run evidence report has
+**not yet been produced**. A model-driven, adaptive compromised agent and an
+independently operated evidence witness remain future experimental milestones.
+
 ## What it does not demonstrate
 
 This repository does not demonstrate containment of a frontier model, production Firecracker isolation, production TPM enrollment or hardware provenance, resistance to host-kernel compromise, separately administered or hardware-backed signing, physically one-way evidence storage, a deployed multi-host replay backend, a physical fail-safe installation, a model-checked proof of distributed partitions/rollback, or an independent security audit. The default adversary is scripted and synthetic; a real model endpoint is optional and its self-report is never trusted.
