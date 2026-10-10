@@ -797,18 +797,18 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 raise RuntimeError("Firecracker seccomp is not active")
             if "CapEff:\t0000000000000000" not in status or "CapPrm:\t0000000000000000" not in status:
                 raise RuntimeError("VM retained host capabilities")
-            for process, role in ((vm, "vm"), (service, "effect")):
-                membership = Path(f"/proc/{process.pid}/cgroup").read_text().strip()
-                if membership != f"0::/{group_name}/{role}":
-                    raise RuntimeError(f"{role} is not in its bounded cgroup: {membership}")
-            if os.readlink(f"/proc/{vm.pid}/ns/net") == os.readlink("/proc/self/ns/net"):
-                raise RuntimeError("VM shares supervisor network namespace")
             if service.poll() is not None:
                 service_log = (control / "service.log").read_text(errors="replace")[-2048:]
                 raise RuntimeError(
                     f"effect service exited before host namespace verification "
                     f"(status {service.returncode}); service.log tail: {service_log}"
                 )
+            for process, role in ((vm, "vm"), (service, "effect")):
+                membership = Path(f"/proc/{process.pid}/cgroup").read_text().strip()
+                if membership != f"0::/{group_name}/{role}":
+                    raise RuntimeError(f"{role} is not in its bounded cgroup: {membership}")
+            if os.readlink(f"/proc/{vm.pid}/ns/net") == os.readlink("/proc/self/ns/net"):
+                raise RuntimeError("VM shares supervisor network namespace")
             try:
                 effect_namespace = os.readlink(f"/proc/{service.pid}/ns/net")
             except FileNotFoundError as exc:
