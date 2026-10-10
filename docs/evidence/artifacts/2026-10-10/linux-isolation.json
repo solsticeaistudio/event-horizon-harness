@@ -997,7 +997,8 @@
             "guest_root_diagnostic": {
               "authority_environment": 0,
               "authority_files": 0,
-              "package_manager": false,              "uid": 0
+              "package_manager": false,
+              "uid": 0
             },
             "host_consumption_count": 1,
             "host_effect_uid": 60001,
