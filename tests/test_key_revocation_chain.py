@@ -42,8 +42,10 @@ class SignedRevocationChainTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        self.key = Ed25519PrivateKey.generate()
         self.manager = KeyManager(
             recorder=Mock(), db_path=Path(self.temp.name) / "crl.sqlite3",
+            signing_key=self.key,
         )
         self.addCleanup(self.manager.close)
 
@@ -68,6 +70,7 @@ class SignedRevocationChainTests(unittest.TestCase):
         self.manager.close()
         self.manager = KeyManager(
             recorder=Mock(), db_path=Path(self.temp.name) / "crl.sqlite3",
+            signing_key=self.key,
         )
         self.assertTrue(self.manager.check_revocation_chain())
 
