@@ -1,13 +1,19 @@
-"""DEPRECATED / UNSAFE Raft prototype retained only for source review.
+"""Preserved legacy Raft interface with a separately gated research backend.
 
-DO NOT USE FOR AUTHORITY. This incomplete implementation lacks safe durable
-quorum commits, verified old-leader fencing, functional snapshot SQL, and a
-proof of crash/restart safety. Both `propose` and the cluster factory fail
-closed. Use `etcd_signed_replay.py` for the tested consensus-backed service.
+The original HTTP/RPC authority design is incomplete and remains FAIL-CLOSED.
+`create_raft_cluster` never starts unsafe network authority. To exercise the
+legacy API in an owned deterministic crash-fault lab, explicitly use
+`create_research_raft_cluster`: it delegates to the separately validated
+SQLite-backed `DurableRaftNode`, not the old unauthenticated HTTP transport.
+
+DO NOT USE THIS AS PRODUCTION AUTHORITY. No real authenticated network,
+joint membership, secure snapshot restore, or multi-host failure model is
+established here. The production-suitable tested consensus path is etcd.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import sqlite3
@@ -23,6 +29,7 @@ from typing import Any, Optional
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .canonical import canonical_bytes, digest, strict_json_loads
+from .raft_core import DurableRaftNode, RaftCoreUnavailable
 from .remote_replay import (
     ReferenceReplayService,
     ReplayRequestSigner,
@@ -100,6 +107,7 @@ class RaftConsensus:
         self.local_node = local_node
         self.cluster = cluster
         self.service = service
+        self._durable_core: DurableRaftNode | None = None
         self.election_timeout_ms = election_timeout_ms
         self.heartbeat_interval_ms = heartbeat_interval_ms
         self.request_timeout_ms = request_timeout_ms
@@ -151,7 +159,7 @@ class RaftConsensus:
             CREATE TABLE IF NOT EXISTS snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 term INTEGER NOT NULL,
-                index INTEGER NOT NULL,
+                last_included_index INTEGER NOT NULL,
                 digest TEXT NOT NULL,
                 data BLOB NOT NULL,
                 created_at REAL NOT NULL,
@@ -166,6 +174,12 @@ class RaftConsensus:
         return time.monotonic() + random.uniform(min_ms, max_ms + extra_ms) / 1000.0
 
     def start(self) -> None:
+        if self._durable_core is not None:
+            # Deliberate, deterministic election only. No implicit network.
+            return
+        raise RaftUnavailableError(
+            "legacy HTTP Raft transport is unauthenticated/unsafe; use research factory"
+        )
         with self._lock:
             if self._running:
                 return
@@ -183,6 +197,8 @@ class RaftConsensus:
             self._thread.join(timeout=5)
 
     def get_leader(self) -> str | None:
+        if self._durable_core is not None:
+            return self._durable_core.leader_id
         with self._lock:
             return self._leader_id
 
@@ -377,7 +393,7 @@ class RaftConsensus:
             if self._snapshot is not None:
                 return
 
-            if len(self._log) < self.snapshot_threshold:
+            if self._commit_index < max(1, self.snapshot_threshold):
                 return
 
             if time.monotonic() - self._last_snapshot_time < self.snapshot_interval_ms / 1000.0:
@@ -404,13 +420,14 @@ class RaftConsensus:
             }
 
             snapshot_bytes = canonical_bytes(snapshot_data)
-            snapshot_digest = digest(snapshot_bytes)
+            # Hash the actual bytes; canonical.digest expects JSON values.
+            snapshot_digest = hashlib.sha256(snapshot_bytes).hexdigest()
 
             # Store in database
             self._initialize_snapshot_db()
             self._snapshot_db.execute(
                 """
-                INSERT INTO snapshots (term, index, digest, data, created_at, membership)
+                INSERT INTO snapshots (term, last_included_index, digest, data, created_at, membership)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -442,19 +459,108 @@ class RaftConsensus:
         checkpoint: int,
         checkpoint_digest: str,
     ) -> bool:
-        """Refuse to acknowledge writes without durable quorum commit.
+        """Guard a deterministic research transition with a prior checkpoint.
 
-        This experimental implementation has no validated persistent
-        replicated log or old-leader fencing. It cannot safely serve as
-        authority for capability, nonce, or authorization consumption.
+        `checkpoint` and `checkpoint_digest` must equal the currently
+        COMMITTED local prefix returned by committed_checkpoint(). This is
+        a lab concurrency guard, NOT a quorum-linearizable query, signer,
+        network service, or externally witnessed proof.
         """
-        raise RaftUnavailableError(
-            "experimental Raft backend has no durable quorum commit; fail closed"
-        )
+        core = self._durable_core
+        if core is None:
+            raise RaftUnavailableError(
+                "experimental Raft backend has no durable quorum commit; fail closed"
+            )
+        with core._proposal_lock:
+            expected_index, expected_digest = core.committed_checkpoint()
+            if (
+                type(checkpoint) is not int
+                or checkpoint != expected_index
+                or checkpoint_digest != expected_digest
+            ):
+                raise RaftUnavailableError(
+                    "research Raft committed checkpoint changed; deny stale proposal"
+                )
+            try:
+                return core.propose(command)
+            except RaftCoreUnavailable as exc:
+                raise RaftUnavailableError(
+                    "research Raft proposal lacked durable quorum or leadership"
+                ) from exc
+
+    @classmethod
+    def from_durable_core(
+        cls, core: DurableRaftNode, nodes: list[RaftNode],
+    ) -> RaftConsensus:
+        """Explicitly opt into in-process research, never the HTTP backend."""
+        if tuple(node.node_id for node in nodes) != core.members:
+            raise ValueError("research Raft members must match the durable cluster")
+        node = next(item for item in nodes if item.node_id == core.node_id)
+        consensus = cls(node, nodes, service=None)
+        consensus._durable_core = core
+        return consensus
+
+    def committed_checkpoint(self) -> tuple[int, str]:
+        if self._durable_core is None:
+            raise RaftUnavailableError("legacy Raft has no trusted committed checkpoint")
+        return self._durable_core.committed_checkpoint()
+
+    def elect(self) -> bool:
+        if self._durable_core is None:
+            raise RaftUnavailableError("legacy Raft election is not an authority")
+        return self._durable_core.elect()
+
+    def close(self) -> None:
+        """Close only the research node managed by this wrapper."""
+        self.stop()
+        if self._durable_core is not None:
+            self._durable_core.close()
+        if self._snapshot_db is not None:
+            self._snapshot_db.close()
+            self._snapshot_db = None
 
     def is_leader(self) -> bool:
+        if self._durable_core is not None:
+            return self._durable_core.role == "leader"
         with self._lock:
             return self._state == "leader"
+
+
+def create_research_raft_cluster(
+    nodes: list[RaftNode],
+    database_paths: list[str | Path],
+) -> list[RaftConsensus]:
+    """Build a deterministic fixed-membership LAB with durable SQLite nodes.
+
+    No ReferenceReplayService or RPC ports are exposed. Each instance must
+    have its own database; network addresses are inert descriptive labels.
+    Call elect() explicitly, then committed_checkpoint()/propose(). Use
+    only owned synthetic tests, never operational replay authority.
+    """
+    if (len(nodes) < 3 or len(nodes) % 2 != 1
+            or len(database_paths) != len(nodes)
+            or len({n.node_id for n in nodes}) != len(nodes)
+            or any(n.is_learner for n in nodes)):
+        raise ValueError("research Raft requires an odd fixed voting membership >=3")
+    paths = [Path(p).resolve() for p in database_paths]
+    if len(set(paths)) != len(paths):
+        raise ValueError("research Raft databases must be distinct")
+    cores: dict[str, DurableRaftNode] = {}
+    try:
+        members = tuple(node.node_id for node in nodes)
+        for node, path in zip(nodes, paths):
+            cores[node.node_id] = DurableRaftNode(
+                path, node_id=node.node_id, member_ids=members,
+            )
+        for name, core in cores.items():
+            core.connect({key: peer for key, peer in cores.items() if key != name})
+        return [RaftConsensus.from_durable_core(cores[node.node_id], nodes)
+                for node in nodes]
+    except Exception:
+        for core in cores.values():
+            core.close()
+        raise
+
 
 def create_raft_cluster(
     nodes: list[RaftNode],
@@ -473,27 +579,3 @@ def create_raft_cluster(
     )
 
 
-    services = []
-    for i, node in enumerate(nodes):
-        service = ReferenceReplayService(
-            database_paths[i],
-            service_id=service_id,
-            epoch=epoch,
-            signing_key=signing_key,
-            clients=clients,
-        )
-        services.append(service)
-
-    consensuses = []
-    for i, node in enumerate(nodes):
-        consensus = RaftConsensus(
-            local_node=node,
-            cluster=nodes,
-            service=services[i],
-        )
-        consensuses.append(consensus)
-
-    for consensus in consensuses:
-        consensus.start()
-
-    return list(zip(services, consensuses))
