@@ -27,6 +27,7 @@ from event_horizon.remote_replay import (
 )
 from tests.test_etcd_live import cluster_id
 from event_horizon.process_harness import ProcessSeparatedHarness
+from event_horizon.distributed_signed_evidence import verify_distributed_report
 from event_horizon.intent_canonicalizer import AuthorizationDenied
 from event_horizon.remote_replay import ReplayHttpServer
 from event_horizon.trusted_replay_client import (
@@ -91,6 +92,13 @@ class LiveSignedReplayTests(unittest.TestCase):
                 with ProcessSeparatedHarness(
                     scope, ttl_seconds=30.0, remote_authority=remote,
                 ) as harness:
+                    signed_events = []
+                    authoritative_record = harness.record
+                    def capture_record(*args, **kwargs):
+                        signed = authoritative_record(*args, **kwargs)
+                        signed_events.append(signed)
+                        return signed
+                    harness.record = capture_record
                     request = {
                         "request_id": "distributed-7-process",
                         "session_id": "signed-replay-session",
@@ -108,7 +116,8 @@ class LiveSignedReplayTests(unittest.TestCase):
                     self.assertFalse(replay.success)
                     self.assertEqual(replay.effect_state, "not-started")
                     self.assertIn("replay", replay.error.lower())
-                    self.assertFalse(harness.root_probe()["private_key_material_present"])
+                    probe = harness.root_probe()
+                    self.assertFalse(probe["private_key_material_present"])
                     config = json.loads(harness.config_paths["executor"].read_text())
                     self.assertNotIn("remote_replay", config)
                     self.assertNotIn("client_seed_path", str(config))
@@ -140,12 +149,14 @@ class LiveSignedReplayTests(unittest.TestCase):
                         waiting_req, waiting_cap, waiting_att,
                     )
                     self.assertTrue(recovered.success, recovered.error)
-                    self.assertFalse(harness.execute(
+                    recovery_replay = harness.execute(
                         waiting_req, waiting_cap, waiting_att,
-                    ).success)
+                    )
+                    self.assertFalse(recovery_replay.success)
                     harness.stop_role("signer")
                     harness.restart_role("signer")
-                    self.assertFalse(harness.execute(action, capability, attestation).success)
+                    restarted_replay = harness.execute(action, capability, attestation)
+                    self.assertFalse(restarted_replay.success)
                     # Exercise the certificate's *protected* mutation endpoint,
                     # not only its unauthenticated info/verify operations.
                     teardown = harness.teardown_executor()
@@ -161,6 +172,66 @@ class LiveSignedReplayTests(unittest.TestCase):
                         "event-horizon.containment-certificate.v0.5",
                     )
                     self._assert_trusted_partitions_committed(service)
+                    # Signed observation entries bind the assertion set to the
+                    # recorder key and immutable event hash chain, independently
+                    # of untrusted executor output or CI log formatting.
+                    cases = {
+                        "valid_effect": first.success and first.effect_state == "completed",
+                        "capability_replay": not replay.success and replay.effect_state == "not-started",
+                        "executor_credential_probe": (
+                            not probe["private_key_material_present"]
+                            and not probe["ambient_authority_environment_hits"]
+                        ),
+                        "authority_outage": (
+                            not unavailable.success and unavailable.effect_state == "not-started"
+                        ),
+                        "recovery_once": recovered.success and recovered.effect_state == "completed",
+                        "recovery_replay": (
+                            not recovery_replay.success
+                            and recovery_replay.effect_state == "not-started"
+                        ),
+                        "signer_restart_replay": (
+                            not restarted_replay.success
+                            and restarted_replay.effect_state == "not-started"
+                        ),
+                        "signed_certificate": (
+                            certificate["certificate"]["schema"]
+                            == "event-horizon.containment-certificate.v0.5"
+                        ),
+                    }
+                    for case, passed in sorted(cases.items()):
+                        harness.record("adversarial.observation", {
+                            "case": case, "passed": passed,
+                        })
+                    recorder = harness.call("recorder", "verify", {})
+                    self.assertTrue(recorder["valid"])
+                    self.assertEqual(recorder["count"], len(signed_events))
+                    report = {
+                        "schema": "event-horizon.distributed-adversarial-evidence.v1",
+                        "topology": "same-host-seven-process-live-etcd",
+                        "hardware_isolation_tested": False,
+                        "etcd_backend_tested": True,
+                        "observations": cases,
+                        "passed": all(cases.values()),
+                        "signed_evidence": {
+                            "recorder_public_key_pem": harness.service_info["recorder"]["public_key_pem"],
+                            "chain_tip": recorder["detail"],
+                            "event_count": recorder["count"],
+                            "events": signed_events,
+                        },
+                    }
+                    verified = verify_distributed_report(report)
+                    self.assertTrue(verified["verified"], verified)
+                    self.assertTrue(verified["passed"], verified)
+                    artifact_dir = os.environ.get("EHH_DISTRIBUTED_EVIDENCE_DIR")
+                    if artifact_dir:
+                        output = Path(artifact_dir)
+                        output.mkdir(parents=True, exist_ok=True)
+                        trial = os.environ.get("EHH_DISTRIBUTED_TRIAL", "local")
+                        (output / f"report-{trial}.json").write_text(
+                            json.dumps(report, sort_keys=True, allow_nan=False),
+                            encoding="utf-8",
+                        )
                     # No silent local fallback, even after trusted restart.
             finally:
                 server.close()
