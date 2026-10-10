@@ -86,9 +86,11 @@ class LinuxRoundLifecycleTests(unittest.TestCase):
             (source / "scripts").mkdir(parents=True)
             (source / "src/event_horizon").mkdir(parents=True)
             (source / "scripts/linux_effect_service.py").symlink_to("/etc/passwd")
+            run = Path(tmp) / "run"
+            run.mkdir()
             with patch("scripts.run_linux_isolation.ROOT", source):
                 with self.assertRaisesRegex(RuntimeError, "unexpected effect-service source file"):
-                    stage_effect_service(Path(tmp) / "run")
+                    stage_effect_service(run)
 
     def test_scratch_overwrite_stays_within_original_file(self):
         with tempfile.TemporaryDirectory() as tmp:
