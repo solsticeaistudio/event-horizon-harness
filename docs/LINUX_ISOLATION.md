@@ -52,6 +52,16 @@ For a fresh Ubuntu 24.04 WSL2 installation, do setup in the **Linux home
 filesystem** (not `/mnt/c`) to avoid jailer, file ownership and Unix-socket
 permission semantics varying across NTFS mounts:
 
+Ubuntu normally gives the user's home directory mode `0750` or `0700`. The
+trusted effect service deliberately drops to UID 60001, so it **cannot** run
+Python code by referencing a source file under `/home/<user>`. The runner
+copies its entrypoint and `src/event_horizon/*.py` module tree into a
+root-owned, unprivileged-read-only `/var/tmp/ehk-*/trusted-service` snapshot
+before the service launches. Python runs with `-I` and explicitly imports
+that snapshot, not the operator's editable checkout. **Do not change home
+permissions** to make the lab work. A killed or prematurely exited service
+is reported with a bounded tail of `control/service.log` for diagnosis.
+
 ```bash
 sudo apt-get update
 sudo apt-get install -y git python3-venv python3-pip build-essential libc6-dev \
