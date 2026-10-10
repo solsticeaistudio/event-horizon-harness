@@ -34,6 +34,15 @@ Firecracker uses the matching upstream jailer, a private mount root, default sec
 
 The effect service exposes only `object.read` of `synthetic-dataset`, with integer offset/length, at most 512 bytes, and exact signed arguments. It accepts no URL, filesystem path, attestation override, callback, mint, reset, refresh, or evidence-domain selection. Replay and decay mutation occur only as part of validated redemption. Frames use the existing strict 64 KiB protocol with duplicate-key rejection; the single-threaded service limits connections, uses a two-second request alarm and bounded listener backlog, and is subject to the independent watchdog. The capability itself expires. Exhaustion sacrifices availability.
 
+The service must receive a signed recorder acknowledgement for
+`execution.authorized` **before** the host performs the authorized effect.
+The same external recorder then accepts `execution.completed`, denial,
+indeterminate-outcome, or transport-rejection events. Its allowlist rejects
+guest attempts to forge supervisory evidence such as `isolation.context`.
+If an authorization event cannot be durably recorded and acknowledged, the
+gateway returns `evidence-unavailable` with `effect_state=not-started`
+instead of dispatching the dataset read.
+
 The recorder runs outside both service principals. Only the inherited effect-service channel can append effect/transport events; the supervisor appends host observations and teardown under its own source identity. Neither client chooses an arbitrary evidence domain. The report exports events and Ed25519 receipts, including signatures over the host observations and build-manifest digest. Embedded verification keys prove internal integrity, not independent issuer trust or completeness of observation. The effect service is a trusted evidence source; compromising it is a separate roadmap experiment.
 
 The requested report is marked `INCOMPLETE` at the start of a run and becomes `PASS` only after all three sessions finish. An interrupted run must not be interpreted as either successful containment or proof that no effect occurred; its per-run host records may still exist for investigation.
