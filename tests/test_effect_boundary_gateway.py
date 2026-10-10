@@ -121,7 +121,7 @@ class HostEffectBoundaryTests(unittest.TestCase):
         })
         backend = Mock()
         backend.consume.side_effect = CapabilityConsumptionError("quorum unavailable")
-        with patch("event_horizon.trusted_effect_gateway.etcd_authority", return_value=backend) as factory:
+        with patch("event_horizon.authority_backends.etcd_authority", return_value=backend) as factory:
             boundary = DatasetEffectBoundary(self.config, self.recorder)
             try:
                 decision = boundary.execute(self.message(), peer_uid=60000)
