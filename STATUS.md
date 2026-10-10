@@ -49,10 +49,13 @@ reuse historical test counts as current verification.
 - HSM-backed key-manager signing is configured to fail closed on HSM
   outages. Actual PKCS#11 device interoperability and key rotation need
   independent hardware validation.
-- The **legacy** `raft_replay.py` is disabled for production proposals;
-  `raft_core.py` is a separately labeled research-only fixed-membership
-  laboratory. Real quorum-backed authority testing uses etcd, not custom
-  Raft.
+- **Custom Raft:** the legacy HTTP/RPC authority remains disabled and
+  fail-closed. A new opt-in, deterministic research bridge in
+  `raft_replay.py` delegates to durable `raft_core.py` for tested
+  fixed-membership quorum simulation, with stale-checkpoint fencing,
+  snapshot metadata repair and SQLite failure rollback tests.
+  No custom-Raft multi-host authority is enabled. Real quorum-backed
+  authority testing uses etcd. See [Raft repair](docs/RAFT_RESEARCH_REPAIR.md).
 - `production_attestation.py` validates enrolled Ed25519-signed claims;
   its `tpm2` identifier **does not establish a TPM quote or PCR
   verification**. The TypeScript TPM verifier is distinct and does not
