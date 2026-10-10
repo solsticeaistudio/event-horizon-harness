@@ -1,0 +1,122 @@
+name: etcd authority quorum integration (disposable)
+on:
+  push:
+    branches:
+      - feature/multi-authority-backends-raft-20261009
+    paths:
+      - "src/event_horizon/authority_backends.py"
+      - "tests/test_etcd_live.py"
+      - ".github/workflows/etcd-quorum.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  etcd-quorum:
+    name: Three-node etcd Raft / replay fault lab
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check -e .
+      - name: Start disposable three-member etcd cluster on loopback
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker network create eh-etcd-ci
+          CLUSTER="eh-etcd-1=http://eh-etcd-1:2380,eh-etcd-2=http://eh-etcd-2:2380,eh-etcd-3=http://eh-etcd-3:2380"
+          for i in 1 2 3; do
+            port=$((1379 + i * 1000))
+            docker run -d --name "eh-etcd-$i" --network eh-etcd-ci \
+              -p "127.0.0.1:${port}:2379" \
+              quay.io/coreos/etcd:v3.6.0 /usr/local/bin/etcd \
+              --name "eh-etcd-$i" --data-dir /etcd-data \
+              --listen-client-urls http://0.0.0.0:2379 \
+              --advertise-client-urls "http://eh-etcd-$i:2379" \
+              --listen-peer-urls http://0.0.0.0:2380 \
+              --initial-advertise-peer-urls "http://eh-etcd-$i:2380" \
+              --initial-cluster "${CLUSTER}" --initial-cluster-state new \
+              --initial-cluster-token event-horizon-ci-raft
+          done
+      - name: Discover pinned cluster ID after majority becomes healthy
+        shell: bash
+        env:
+          EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
+        run: |
+          python - <<'PY'
+          import os,time
+          from tests.test_etcd_live import cluster_id
+          for _ in range(90):
+              try:
+                  value=cluster_id(os.environ["EHH_ETCD_ENDPOINT"])
+                  if value and value.isdigit():
+                      with open(os.environ["GITHUB_ENV"],"a") as f:
+                          f.write("EHH_ETCD_CLUSTER_ID="+value+"\n")
+                      print("etcd three-node cluster is healthy:",value)
+                      break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit("etcd cluster did not start healthy")
+          PY
+      - name: Test real quorum linearizable compare-and-put
+        env:
+          EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
+        run: python -m unittest tests.test_etcd_live -v
+      - name: Stop one etcd node and verify majority still works
+        shell: bash
+        env:
+          EHH_ETCD_ENDPOINT: http://127.0.0.1:3379
+        run: |
+          docker stop eh-etcd-1
+          python - <<'PY'
+          import os,time
+          from tests.test_etcd_live import cluster_id
+          for _ in range(30):
+              try:
+                  if cluster_id(os.environ["EHH_ETCD_ENDPOINT"]) == os.environ["EHH_ETCD_CLUSTER_ID"]:
+                      break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit("two-node majority could not serve requests")
+          PY
+          python -m unittest tests.test_etcd_live -v
+      - name: Stop second node and verify minority cannot issue authority
+        shell: bash
+        run: |
+          docker stop eh-etcd-3
+          python - <<'PY'
+          from event_horizon.authority_backends import EtcdGatewayConfig, etcd_authority
+          from event_horizon.replay_state import CapabilityConsumptionError
+          import os,uuid
+          config=EtcdGatewayConfig(
+              endpoint="http://127.0.0.1:3379",
+              allow_insecure_loopback=True, timeout_seconds=1.0,
+          )
+          authority=etcd_authority(
+              config, expected_cluster_id=os.environ["EHH_ETCD_CLUSTER_ID"],
+              namespace="minority."+uuid.uuid4().hex,
+          )
+          try:
+              authority.consume("cap_0123456789abcdef01234567", "a"*64, 5000, 1000)
+          except CapabilityConsumptionError:
+              print("PASS: isolated minority refused capability consumption")
+          else:
+              raise SystemExit("FAIL: minority acknowledged authority without quorum")
+          PY
+      - name: Disposable cluster logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          for i in 1 2 3; do docker logs "eh-etcd-$i" 2>&1 | tail -70 || true; done
+      - name: Cleanup disposable etcd
+        if: always()
+        shell: bash
+        run: |
+          docker rm -f eh-etcd-1 eh-etcd-2 eh-etcd-3 || true
+          docker network rm eh-etcd-ci || true
