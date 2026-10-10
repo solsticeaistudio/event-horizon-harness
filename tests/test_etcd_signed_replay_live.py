@@ -6,10 +6,12 @@ plaintext endpoints.
 """
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
 import uuid
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -22,6 +24,12 @@ from event_horizon.remote_replay import (
     RemoteAuthorizationReplayStore, RemoteCapabilityConsumptionStore,
 )
 from tests.test_etcd_live import cluster_id
+from event_horizon.process_harness import ProcessSeparatedHarness
+from event_horizon.intent_canonicalizer import AuthorizationDenied
+from event_horizon.remote_replay import ReplayHttpServer
+from event_horizon.trusted_replay_client import (
+    provision_replay_client_policies, role_client_seed_path,
+)
 
 SID = "etcd-live-signed-replay"
 
@@ -58,6 +66,88 @@ def provision(endpoint: str | None = None, namespace: str | None = None, *, boot
 
 @unittest.skipUnless(os.environ.get("EHH_ETCD_ENDPOINT"), "requires disposable etcd")
 class LiveSignedReplayTests(unittest.TestCase):
+    def test_real_seven_process_harness_shares_signed_authority(self):
+        """Exercise Node verifier + trusted signer + protected recorder/cert.
+
+        All protected services hit the same live etcd authority via signed
+        HTTP RPC, not an in-memory reference mock. The executor receives
+        neither authority key nor etcd transport configuration.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            scope = Path(directory)
+            policies = provision_replay_client_policies(scope, SID)
+            endpoint = self._seven_process_authority(scope, policies)
+            service, server = endpoint
+            server.start()
+            remote = {
+                "url": server.url, "service_id": SID, "epoch": 1,
+                "server_public_key_pem": service.public_key_pem,
+                "ca_cert_path": None, "client_cert_path": None,
+                "client_key_path": None,
+            }
+            try:
+                with ProcessSeparatedHarness(
+                    scope, ttl_seconds=30.0, remote_authority=remote,
+                ) as harness:
+                    request = {
+                        "request_id": "distributed-7-process",
+                        "session_id": "signed-replay-session",
+                        "agent_id": "attacker-agent",
+                        "operation": "object.read",
+                        "resource_id": "target-source",
+                        "executor_id": "exec-1",
+                        "arguments": {"offset": 0, "length": 64},
+                        "purpose": "distributed signed authority end-to-end",
+                    }
+                    action, capability, attestation = harness.request_capability(request)
+                    first = harness.execute(action, capability, attestation)
+                    self.assertTrue(first.success, first.error)
+                    replay = harness.execute(action, capability, attestation)
+                    self.assertFalse(replay.success)
+                    self.assertEqual(replay.effect_state, "not-started")
+                    self.assertIn("replay", replay.error.lower())
+                    self.assertFalse(harness.root_probe()["private_key_material_present"])
+                    config = json.loads(harness.config_paths["executor"].read_text())
+                    self.assertNotIn("remote_replay", config)
+                    self.assertNotIn("client_seed_path", str(config))
+                    self.assertNotIn("etcd", str(config))
+                    # Node nonce transitions and 4 protected-role operations
+                    # advance the same etcd checkpoint chain.
+                    _, checkpoint, checkpoint_hash = service.checkpoint()
+                    self.assertGreaterEqual(checkpoint, 10)
+                    self.assertRegex(checkpoint_hash, r"^[0-9a-f]{64}$")
+                    self.assertTrue(harness.call("recorder", "verify", {})["valid"])
+                    harness.stop_role("signer")
+                    harness.restart_role("signer")
+                    self.assertFalse(harness.execute(action, capability, attestation).success)
+                    # No silent local fallback, even after trusted restart.
+            finally:
+                server.close()
+
+    def _seven_process_authority(self, scope, policies):
+        from event_horizon.authority_backends import EtcdV3TransactionTransport
+        from pathlib import Path
+        from event_horizon.remote_replay import ReplayHttpServer
+        endpoint = os.environ["EHH_ETCD_ENDPOINT"]
+        config = EtcdGatewayConfig(
+            endpoint=endpoint, allow_insecure_loopback=True, timeout_seconds=2.0,
+        )
+        authority = EtcdSignedReplayService(
+            EtcdV3TransactionTransport(config),
+            expected_cluster_id=self.pinned_or_discover(endpoint),
+            namespace="seven." + uuid.uuid4().hex,
+            service_id=SID,
+            epoch=1,
+            signing_key=Ed25519PrivateKey.from_private_bytes(bytes(range(32))),
+            clients={p.key_id: p for p in policies.values()},
+            bootstrap=True,
+        )
+        return authority, ReplayHttpServer(authority)
+
+    @staticmethod
+    def pinned_or_discover(endpoint):
+        return os.environ.get("EHH_ETCD_CLUSTER_ID") or cluster_id(endpoint)
+
     def test_signed_capability_nonce_and_authorization_under_real_quorum(self):
         service, client, config, params = provision()
         nonce = "A" * 43
