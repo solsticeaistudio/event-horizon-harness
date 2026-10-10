@@ -6,11 +6,13 @@ plaintext endpoints.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import tempfile
 import unittest
 import uuid
+import urllib.request
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
@@ -120,9 +122,57 @@ class LiveSignedReplayTests(unittest.TestCase):
                     harness.stop_role("signer")
                     harness.restart_role("signer")
                     self.assertFalse(harness.execute(action, capability, attestation).success)
+                    # Exercise the certificate's *protected* mutation endpoint,
+                    # not only its unauthenticated info/verify operations.
+                    teardown = harness.teardown_executor()
+                    self.assertTrue(teardown["verified"])
+                    certificate = harness.build_certificate(
+                        run_id="distributed-quorum-harness",
+                        session_id=action.session_id,
+                        assertions={"teardown_verified": True},
+                        mode="simulation",
+                    )
+                    self.assertEqual(
+                        certificate["certificate"]["schema"],
+                        "event-horizon.containment-certificate.v0.5",
+                    )
+                    self._assert_trusted_partitions_committed(service)
                     # No silent local fallback, even after trusted restart.
             finally:
                 server.close()
+
+    def _assert_trusted_partitions_committed(self, service):
+        """Read actual quorum-backed record keys as an independent oracle."""
+        raw = f"{service.prefix}/record/".encode("utf-8")
+        end = raw[:-1] + bytes([raw[-1] + 1])
+        request = urllib.request.Request(
+            os.environ["EHH_ETCD_ENDPOINT"] + "/v3/kv/range",
+            data=json.dumps({
+                "key": base64.b64encode(raw).decode("ascii"),
+                "range_end": base64.b64encode(end).decode("ascii"),
+                "serializable": False,
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            stored = json.loads(response.read())
+        paths = {
+            base64.b64decode(entry["key"]).decode("utf-8")
+            for entry in stored.get("kvs", [])
+        }
+        required = {
+            "/record/nonce/attestation.nonces/",
+            "/record/capability-consume/capability.authority/",
+            "/record/authorization-consume/protected.signer/",
+            "/record/authorization-consume/protected.recorder/",
+            "/record/authorization-consume/protected.certificate/",
+        }
+        for fragment in required:
+            self.assertTrue(
+                any(fragment in key for key in paths),
+                f"missing real etcd authority state: {fragment}",
+            )
 
     def _seven_process_authority(self, scope, policies):
         from event_horizon.authority_backends import EtcdV3TransactionTransport
