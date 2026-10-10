@@ -2,7 +2,7 @@
 
 ## Private reporting
 
-Please report a suspected containment bypass through [GitHub private vulnerability reporting](https://github.com/Solasticeaistudio/event-horizon-harness/security/advisories/new). Do not open a public issue until the maintainer confirms that coordinated disclosure is appropriate. If GitHub does not offer the private form, email [solsticestudioai@gmail.com](mailto:solsticestudioai@gmail.com) with the subject `Event Horizon security report` and include only enough information to establish a secure follow-up channel.
+Please report a suspected containment bypass through [GitHub private vulnerability reporting](https://github.com/solsticeaistudio/event-horizon-harness/security/advisories/new). Do not open a public issue until the maintainer confirms that coordinated disclosure is appropriate. If GitHub does not offer the private form, email [solsticestudioai@gmail.com](mailto:solsticestudioai@gmail.com) with the subject `Event Horizon security report` and include only enough information to establish a secure follow-up channel.
 
 Include the affected commit, environment, exact reproduction steps, the expected invariant, the observed result, and minimal synthetic evidence. Remove credentials, personal information, production identifiers, and unrelated data. Maintainers will acknowledge a usable report when practical; this research project does not promise a commercial response SLA or bounty.
 
@@ -34,6 +34,27 @@ Containment-certificate authenticity requires a signer public key or key ID supp
 Test only environments, accounts, data, and synthetic ranges you own or are explicitly authorized to use. Real-world targets and public infrastructure are out of scope. Destructive actions, denial of service, credential abuse, persistence on systems outside the synthetic fixture, unauthorized access, social engineering, and attempts to hide activity are prohibited.
 
 The repository contains no authorization to test third parties. Use the bounded scripted adversary and declared `synthetic-range/...` fixtures for public reproductions.
+
+## Limited good-faith research safe harbor
+
+We welcome good-faith review, reproduction, and non-destructive adversarial
+testing of **your own or explicitly authorized synthetic EHH deployments**,
+using the public repository's test fixtures. For research performed within
+that scope, the maintainers do not intend to initiate a legal complaint
+solely because you tested an EHH security boundary and privately disclosed
+a potential weakness. This statement applies only to rights controlled by
+this repository's maintainers: it does not grant third-party authorization,
+override applicable law, permit persistence/credential abuse/production
+testing, or guarantee protection from third-party claims. Stop and report
+privately if unexpected access to non-synthetic data occurs.
+
+Out of scope: attacks on GitHub, cloud providers, upstream Firecracker or
+etcd deployments, third-party services, or infrastructure you do not own.
+Service disruption, destructive tests, exfiltration, and social engineering
+are not authorized. There is no payment, bug-bounty, or response-time
+commitment. Coordinate any public exploit details before disclosure.
+
+Start with the [independent evaluation pack](docs/INDEPENDENT_EVALUATION.md).
 
 ## Supported versions
 
