@@ -60,7 +60,7 @@ class KeyRotationPolicy:
 
 class KeyManager:
     """Unified key management across all services with rotation, provenance, and HSM support."""
-    
+
     def __init__(
         self,
         recorder: ExternalRecorder,
@@ -78,7 +78,7 @@ class KeyManager:
         self._hsm = hsm_backend
         self._hsm_key_label = hsm_key_label
         self._hsm_key_info: Optional[HSMKeyInfo] = None
-        
+
         # Initialize HSM if provided
         if self._hsm is not None:
             try:
@@ -92,7 +92,7 @@ class KeyManager:
                         pass
             except Exception as e:
                 raise KeyManagementError(f"Failed to initialize HSM: {e}")
-        
+
         # Software fallback key (used if no HSM or HSM unavailable)
         if isinstance(signing_key, Ed25519PrivateKey):
             self._private_key = signing_key
@@ -111,15 +111,16 @@ class KeyManager:
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
         self.key_id = f"ed25519:{hashlib.sha256(raw_public).hexdigest()[:32]}"
-        
+
         self._db = sqlite3.connect(self.db_path, check_same_thread=False)
         self._db.execute("PRAGMA journal_mode = WAL")
         self._initialize_db()
-        
+
         # Record HSM key info if available
         if self._hsm_key_info:
             self._record_hsm_key_info()
-    
+            self.key_id = self._hsm_key_info.key_id
+
     def _record_hsm_key_info(self) -> None:
         """Record HSM key information in the database."""
         if not self._hsm_key_info:
@@ -203,6 +204,10 @@ class KeyManager:
 
     @property
     def public_key_pem(self) -> str:
+        if self._hsm is not None:
+            if self._hsm_key_info is None:
+                raise KeyManagementError("HSM public key not enrolled")
+            return self._hsm_key_info.public_key_pem
         return self._public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -220,12 +225,12 @@ class KeyManager:
         if self._hsm is not None and self._hsm_key_info is not None:
             # Use HSM for signing
             try:
-                signature = self._hsm.sign_ed25519(self._hsm_key_info.key_id, data)
+                signature = self._hsm.sign_ed25519(self._hsm_key_info.label, data)
                 return base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii")
-            except Exception:
-                # Fall back to software key if HSM signing fails
-                pass
-        # Software fallback
+            except Exception as exc:
+                raise KeyManagementError("HSM signing unavailable; refusing software fallback") from exc
+        if self._hsm is not None:
+            raise KeyManagementError("HSM key not enrolled; refusing software fallback")
         return base64.urlsafe_b64encode(
             self._private_key.sign(data)
         ).rstrip(b"=").decode("ascii")
@@ -262,6 +267,7 @@ class KeyManager:
                 hsm_key_info = self._hsm.generate_ed25519_key(self._hsm_key_label, f"{purpose}-{int(time.time())}")
                 self._hsm_key_info = hsm_key_info
                 self._record_hsm_key_info()
+                self.key_id = hsm_key_info.key_id
                 return self._row_to_metadata((
                     hsm_key_info.key_id,
                     hsm_key_info.public_key_pem,
@@ -273,10 +279,11 @@ class KeyManager:
                     None,
                     json.dumps({"hsm_backed": True, "hsm_label": self._hsm_key_label})
                 ))
-            except Exception:
-                # Fall through to software generation
-                pass
-        
+            except Exception as exc:
+                raise KeyManagementError("HSM key generation failed; refusing software fallback") from exc
+        if self._hsm is not None:
+            raise KeyManagementError("HSM key label required; refusing software generation")
+
         private_key = Ed25519PrivateKey.generate()
         public_key = private_key.public_key()
         key_id_str = key_id(public_key)
@@ -323,6 +330,8 @@ class KeyManager:
         explicit_key: Ed25519PrivateKey | None = None,
     ) -> KeyMetadata:
         """Rotate an existing key."""
+        if self._hsm is not None:
+            raise KeyManagementError("HSM rotation is not yet verified; refusing software rotation")
         with self._lock:
             row = self._db.execute(
                 "SELECT * FROM keys WHERE key_id = ?", (key_id_str,)
@@ -406,7 +415,7 @@ class KeyManager:
 
     def revoke_key_with_crl(self, key_id_str: str, *, actor: str = "operator", reason: str = "revoked") -> KeyRevocation:
         """Revoke a key and create a signed revocation entry for CRL distribution.
-        
+
         This creates a cryptographically signed revocation entry that can be
         distributed to all system components for revocation checking.
         """
@@ -422,13 +431,13 @@ class KeyManager:
                 "UPDATE keys SET status = 'revoked', rotated_at = ? WHERE key_id = ?",
                 (revoked_at, key_id_str),
             )
-            
+
             # Get previous revocation for chain
             prev_row = self._db.execute(
                 "SELECT * FROM revocations ORDER BY revoked_at DESC LIMIT 1"
             ).fetchone()
             prev_digest = prev_row[5] if prev_row else None  # signature column as chain link
-            
+
             # Create revocation entry
             revocation = KeyRevocation(
                 key_id=key_id_str,
@@ -438,7 +447,7 @@ class KeyManager:
                 signature="",  # Will be filled after signing
                 previous_revocation_digest=prev_digest,
             )
-            
+
             # Sign the revocation
             payload = {
                 "key_id": revocation.key_id,
@@ -448,7 +457,7 @@ class KeyManager:
                 "previous_revocation_digest": revocation.previous_revocation_digest,
             }
             signature = self._sign(payload)
-            
+
             revocation = KeyRevocation(
                 key_id=revocation.key_id,
                 revoked_at=revocation.revoked_at,
@@ -457,7 +466,7 @@ class KeyManager:
                 signature=signature,
                 previous_revocation_digest=revocation.previous_revocation_digest,
             )
-            
+
             # Store revocation
             self._db.execute(
                 """
@@ -479,7 +488,7 @@ class KeyManager:
             self._db.commit()
 
         self._record_provenance(key_id_str, "revoke", actor, {"reason": reason})
-        
+
         return revocation
 
     def verify_revocation(self, revocation: KeyRevocation) -> bool:
@@ -529,7 +538,7 @@ class KeyManager:
         rows = self._db.execute("SELECT * FROM revocations ORDER BY revoked_at").fetchall()
         if not rows:
             return True
-        
+
         prev_digest = None
         for row in rows:
             if row[5] != prev_digest:  # previous_revocation_digest
@@ -544,7 +553,7 @@ class KeyManager:
             # Compute digest for next link
             import hashlib
             prev_digest = hashlib.sha256(row[4].encode()).hexdigest()[:32]
-        
+
         return True
 
     def get_key(self, key_id_str: str) -> KeyMetadata | None:

@@ -38,7 +38,7 @@ class HSMKeyInfo:
 
 class PKCS11Backend:
     """PKCS#11 HSM backend for hardware-backed key operations."""
-    
+
     def __init__(
         self,
         library_path: str,
@@ -54,33 +54,35 @@ class PKCS11Backend:
         self._session = None
         self._lock = threading.RLock()
         self._initialized = False
-    
+        self._pkcs11 = None
+
     def initialize(self) -> None:
         """Initialize the PKCS#11 library and open a session."""
         with self._lock:
             if self._initialized:
                 return
-            
+
             try:
                 import pkcs11
+                self._pkcs11 = pkcs11
             except ImportError:
                 raise HSMUnavailableError("python-pkcs11 not installed")
-            
+
             self._lib = pkcs11.lib(self.library_path)
-            
+
             # Find token
             token = None
             for t in self._lib.get_tokens():
                 if self.token_label is None or t.label == self.token_label:
                     token = t
                     break
-            
+
             if token is None:
                 raise HSMUnavailableError(f"Token not found: {self.token_label}")
-            
+
             self._session = token.open(user_pin=self.pin, rw=True)
             self._initialized = True
-    
+
     def close(self) -> None:
         """Close the HSM session."""
         with self._lock:
@@ -88,31 +90,31 @@ class PKCS11Backend:
                 self._session.close()
                 self._session = None
             self._initialized = False
-    
+
     def generate_ed25519_key(self, label: str, key_id: str) -> HSMKeyInfo:
         """Generate an Ed25519 key pair in the HSM."""
         with self._lock:
             if not self._initialized:
                 self.initialize()
-            
+
             # Generate key pair
             pub, priv = self._session.generate_key_pair(
-                pkcs11.KeyType.ED25519,
+                self._pkcs11.KeyType.ED25519,
                 label=label,
                 id=key_id.encode(),
                 store=True,
             )
-            
+
             # Export public key
             pub_pem = pub.export_public_key()
-            
+
             # Compute key ID from public key
             raw_pub = pub_pem.public_bytes(
                 encoding=serialization.Encoding.Raw,
                 format=serialization.PublicFormat.Raw,
             )
             derived_key_id = f"ed25519:{hashlib.sha256(raw_pub).hexdigest()[:32]}"
-            
+
             return HSMKeyInfo(
                 key_id=derived_key_id,
                 label=label,
@@ -122,67 +124,79 @@ class PKCS11Backend:
                 ).decode("ascii"),
                 created_at=__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
             )
-    
+
     def sign_ed25519(self, key_id: str, data: bytes) -> bytes:
         """Sign data with an Ed25519 key in the HSM."""
         with self._lock:
             if not self._initialized:
                 self.initialize()
-            
+
             # Find private key by ID
             priv_key = self._session.get_key(
-                object_class=pkcs11.ObjectClass.PRIVATE_KEY,
-                key_type=pkcs11.KeyType.ED25519,
+                object_class=self._pkcs11.ObjectClass.PRIVATE_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
                 label=key_id,
             )
-            
+
             if not priv_key:
                 raise HSMKeyNotFoundError(f"Private key not found: {key_id}")
-            
+
             # Sign the data
             signature = priv_key.sign(data)
             return signature
-    
-    def get_public_key(self, key_id: str) -> Ed25519PublicKey:
-        """Get public key from HSM."""
+
+    def get_public_key(self, label: str) -> HSMKeyInfo:
+        """Look up public-key metadata for an enrolled PKCS#11 label.
+
+        Actual token enrollment and PKCS#11 mechanism compatibility remain
+        hardware-specific and require separate physical-device validation.
+        """
         with self._lock:
             if not self._initialized:
                 self.initialize()
-            
-            pub_key = self._session.get_key(
-                object_class=pkcs11.ObjectClass.PUBLIC_KEY,
-                key_type=pkcs11.KeyType.ED25519,
-                label=key_id,
+            public_object = self._session.get_key(
+                object_class=self._pkcs11.ObjectClass.PUBLIC_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
+                label=label,
             )
-            
-            if not pub_key:
-                raise HSMKeyNotFoundError(f"Public key not found: {key_id}")
-            
-            pub_pem = pub_key.export_public_key()
-            return serialization.load_pem_public_key(pub_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo,
-            ))
-    
+            if not public_object:
+                raise HSMKeyNotFoundError(f"Public key not found: {label}")
+            public_key = public_object.export_public_key()
+            if not isinstance(public_key, Ed25519PublicKey):
+                raise HSMError("HSM returned a non-Ed25519 public key")
+            raw = public_key.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw,
+            )
+            return HSMKeyInfo(
+                key_id=f"ed25519:{hashlib.sha256(raw).hexdigest()[:32]}",
+                label=label,
+                public_key_pem=public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+                ).decode("ascii"),
+                created_at="unknown",
+            )
+
     def list_keys(self) -> list[HSMKeyInfo]:
         """List all Ed25519 keys in the HSM."""
         with self._lock:
             if not self._initialized:
                 self.initialize()
-            
+
             keys = []
             for pub_key in self._session.get_keys(
-                object_class=pkcs11.ObjectClass.PUBLIC_KEY,
-                key_type=pkcs11.KeyType.ED25519,
+                object_class=self._pkcs11.ObjectClass.PUBLIC_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
             ):
                 label = pub_key.label or "unknown"
                 pub_pem = pub_key.export_public_key()
-                raw_pub = pub_key.public_bytes(
+                raw_pub = pub_pem.public_bytes(
                     encoding=serialization.Encoding.Raw,
                     format=serialization.PublicFormat.Raw,
                 )
                 key_id = f"ed25519:{hashlib.sha256(raw_pub).hexdigest()[:32]}"
-                
+
                 keys.append(HSMKeyInfo(
                     key_id=key_id,
                     label=label,
@@ -192,40 +206,40 @@ class PKCS11Backend:
                     ).decode("ascii"),
                     created_at="unknown",  # PKCS#11 doesn't standardize creation time
                 ))
-            
+
             return keys
-    
+
     def delete_key(self, key_id: str) -> bool:
         """Delete a key pair from the HSM."""
         with self._lock:
             if not self._initialized:
                 self.initialize()
-            
+
             deleted = False
             # Delete private key
             for priv_key in self._session.get_keys(
-                object_class=pkcs11.ObjectClass.PRIVATE_KEY,
-                key_type=pkcs11.KeyType.ED25519,
+                object_class=self._pkcs11.ObjectClass.PRIVATE_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
                 label=key_id,
             ):
                 priv_key.destroy()
                 deleted = True
-            
+
             # Delete public key
             for pub_key in self._session.get_keys(
-                object_class=pkcs11.ObjectClass.PUBLIC_KEY,
-                key_type=pkcs11.KeyType.ED25519,
+                object_class=self._pkcs11.ObjectClass.PUBLIC_KEY,
+                key_type=self._pkcs11.KeyType.ED25519,
                 label=key_id,
             ):
                 pub_key.destroy()
                 deleted = True
-            
+
             return deleted
 
 
 class SoftHSM2Backend:
     """SoftHSM2 backend for development/testing without hardware HSM."""
-    
+
     def __init__(
         self,
         token_dir: Path,
@@ -239,11 +253,11 @@ class SoftHSM2Backend:
         self.so_pin = so_pin
         self._backend = None
         self._init_softhsm()
-    
+
     def _init_softhsm(self) -> None:
         """Initialize SoftHSM2 token if needed."""
         self.token_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Check if token already exists
         import subprocess
         try:
@@ -255,7 +269,7 @@ class SoftHSM2Backend:
                 return  # Token already exists
         except FileNotFoundError:
             pass  # softhsm2-util not available
-        
+
         # Initialize new token
         try:
             subprocess.run([
@@ -267,7 +281,7 @@ class SoftHSM2Backend:
             ], check=True, capture_output=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass  # SoftHSM2 not available, will fail at runtime
-    
+
     def get_backend(self) -> PKCS11Backend:
         """Get PKCS#11 backend for SoftHSM2."""
         if self._backend is None:
@@ -282,17 +296,17 @@ class SoftHSM2Backend:
                 if Path(path).exists():
                     lib_path = path
                     break
-            
+
             if not lib_path:
                 raise HSMUnavailableError("SoftHSM2 library not found")
-            
+
             self._backend = PKCS11Backend(
                 library_path=lib_path,
                 slot=0,
                 pin="1234",
                 token_label="event-horizon",
             )
-        
+
         return self._backend
 
 

@@ -172,7 +172,7 @@ class StructuredLogger:
             handler.setFormatter(JsonFormatter())
             self.logger.addHandler(handler)
 
-    def log_request(self, method: str, path: str, client_ip: str, 
+    def log_request(self, method: str, path: str, client_ip: str,
                     status: int, duration_ms: float, **extra) -> None:
         self.logger.info("http_request", extra={
             "method": method, "path": path, "client_ip": client_ip,
@@ -200,7 +200,7 @@ class JsonFormatter(logging.Formatter):
         }
         # Add extra fields
         for key, value in record.__dict__.items():
-            if key not in {"name", "msg", "args", "levelname", "levelno", 
+            if key not in {"name", "msg", "args", "levelname", "levelno",
                           "pathname", "filename", "module", "lineno",
                           "funcName", "created", "msecs", "relativeCreated",
                           "thread", "threadName", "processName", "process",

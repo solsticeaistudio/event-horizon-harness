@@ -1,12 +1,13 @@
 """HTTP/REST adapter with two-phase commit using idempotency keys."""
 from __future__ import annotations
 
+import hashlib
 import threading
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 import requests
-from requests.adapters import HTTPAdapter
+from requests.adapters import HTTPAdapter as RequestsHTTPAdapter
 from urllib3.util.retry import Retry
 
 from event_horizon.adapters.base import (
@@ -38,12 +39,11 @@ class HTTPConfig:
 
 
 class HTTPAdapter:
-    """HTTP/REST adapter with two-phase commit using idempotency keys.
+    """Preflight/commit HTTP adapter for trusted, explicitly idempotent APIs.
 
-    Uses idempotency keys for safe retries and exactly-once semantics:
-    - Prepare: POST with idempotency key, store response
-    - Commit: Confirm with same idempotency key (idempotent)
-    - Abort: DELETE with idempotency key (if supported by API)
+    This is not distributed two-phase commit and cannot guarantee exactly-once
+    effects. The remote service must independently enforce idempotency keys.
+    Ambiguous commits are never retried automatically.
     """
 
     adapter_type = "http"
@@ -52,6 +52,7 @@ class HTTPAdapter:
         self.config = config
         self._lock = threading.Lock()
         self._pending: dict[str, Mapping[str, Any]] = {}
+        self._states: dict[str, TransactionState] = {}
 
         # Create session with retries
         self._session = requests.Session()
@@ -59,9 +60,9 @@ class HTTPAdapter:
             total=config.max_retries,
             backoff_factor=config.backoff_factor,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "OPTIONS", "POST", "PUT", "DELETE"],
+            allowed_methods=["HEAD", "GET", "OPTIONS"],
         )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        adapter = RequestsHTTPAdapter(max_retries=retry_strategy)
         self._session.mount("http://", adapter)
         self._session.mount("https://", adapter)
 
@@ -77,7 +78,7 @@ class HTTPAdapter:
 
     def _generate_idempotency_key(self, transaction_id: str) -> str:
         """Generate an idempotency key for the transaction."""
-        return f"eh-{transaction_id[:32]}"
+        return "eh-" + hashlib.sha256(transaction_id.encode("utf-8")).hexdigest()
 
     def _get_base_headers(self) -> Mapping[str, str]:
         """Get base headers including idempotency key."""
@@ -89,15 +90,26 @@ class HTTPAdapter:
         operation: Mapping[str, Any],
     ) -> PrepareResult:
         """Prepare phase: validate the request WITHOUT causing external effects.
-        
+
         Uses dry-run parameter or HEAD/OPTIONS request for validation.
         The actual write occurs only in commit().
         """
         try:
+            if not isinstance(transaction_id, str) or not transaction_id:
+                raise ValueError("transaction ID is required")
+            with self._lock:
+                if transaction_id in self._states:
+                    raise ValueError("transaction ID has already been used")
             op_type = operation.get("type", "POST")
             op_data = operation.get("data", {})
             endpoint = operation.get("endpoint", "")
+            if not isinstance(op_type, str):
+                raise ValueError("HTTP method must be text")
             method = op_type.upper()
+            if method not in ("POST", "PUT", "PATCH"):
+                raise ValueError("only POST, PUT, and PATCH commits are supported")
+            if not isinstance(endpoint, str) or endpoint.startswith("/") or ".." in endpoint.split("/"):
+                raise ValueError("endpoint must be a relative path without traversal")
 
             idempotency_key = self._generate_idempotency_key(transaction_id)
 
@@ -114,7 +126,7 @@ class HTTPAdapter:
             prepare_method = self.config.prepare_method
             prepare_headers = dict(headers)
             prepare_json = None
-            
+
             if self.config.dry_run_param:
                 # Add dry-run parameter to URL or body
                 separator = "&" if "?" in url else "?"
@@ -131,9 +143,10 @@ class HTTPAdapter:
                 json=prepare_json,
                 headers=prepare_headers,
                 timeout=self.config.timeout,
+                allow_redirects=False,
             )
 
-            if response.status_code >= 400:
+            if response.status_code >= 400 or response.status_code in (301, 302, 303, 307, 308):
                 return PrepareResult(
                     transaction_id=transaction_id,
                     success=False,
@@ -142,6 +155,9 @@ class HTTPAdapter:
 
             # Store pending transaction for commit/abort
             with self._lock:
+                if transaction_id in self._states:
+                    raise ValueError("transaction ID has already been used")
+                self._states[transaction_id] = TransactionState.PREPARED
                 self._pending[transaction_id] = {
                     "url": url,
                     "method": method,
@@ -173,12 +189,15 @@ class HTTPAdapter:
         prepare_metadata: Mapping[str, Any],
     ) -> CommitResult:
         """Commit phase: execute the ACTUAL write with idempotency key.
-        
+
         This is where the external effect occurs. The prepare phase only validated.
         """
         try:
             with self._lock:
                 pending = self._pending.pop(transaction_id, None)
+                if pending is not None:
+                    # An effect may occur after this point; never auto-retry it.
+                    self._states[transaction_id] = TransactionState.INDETERMINATE
 
             if not pending:
                 return CommitResult(
@@ -199,15 +218,18 @@ class HTTPAdapter:
                 json=pending["data"],
                 headers=headers,
                 timeout=self.config.timeout,
+                allow_redirects=False,
             )
 
-            if response.status_code >= 400:
+            if response.status_code >= 400 or response.status_code in (301, 302, 303, 307, 308):
                 return CommitResult(
                     transaction_id=transaction_id,
                     success=False,
                     error=f"HTTP {response.status_code}: {response.text}",
                 )
 
+            with self._lock:
+                self._states[transaction_id] = TransactionState.COMMITTED
             return CommitResult(
                 transaction_id=transaction_id,
                 success=True,
@@ -226,53 +248,26 @@ class HTTPAdapter:
         transaction_id: str,
         prepare_metadata: Mapping[str, Any],
     ) -> AbortResult:
-        """Abort phase: attempt to cancel/delete the resource."""
-        try:
-            with self._lock:
-                pending = self._pending.pop(transaction_id, None)
+        """Cancel a prepared local operation without sending DELETE.
 
-            if not pending:
+        Once commit dispatch begins, the result may be indeterminate and abort
+        cannot claim that a remote effect was reversed.
+        """
+        with self._lock:
+            pending = self._pending.pop(transaction_id, None)
+            if pending is None:
                 return AbortResult(
                     transaction_id=transaction_id,
-                    success=True,
-                    error="No pending transaction (already completed)",
+                    success=False,
+                    error="not prepared; a remote effect may have occurred",
                 )
-
-            # Attempt to DELETE with idempotency key
-            idempotency_key = pending["idempotency_key"]
-            headers = {"Idempotency-Key": idempotency_key}
-
-            response = self._session.delete(
-                pending["url"],
-                headers=headers,
-                timeout=self.config.timeout,
-            )
-
-            if response.status_code in (200, 202, 204, 404, 409):
-                return AbortResult(
-                    transaction_id=transaction_id,
-                    success=True,
-                )
-
-            return AbortResult(
-                transaction_id=transaction_id,
-                success=False,
-                error=f"HTTP {response.status_code}: {response.text}",
-            )
-
-        except Exception as e:
-            return AbortResult(
-                transaction_id=transaction_id,
-                success=False,
-                error=str(e),
-            )
+            self._states[transaction_id] = TransactionState.ABORTED
+        return AbortResult(transaction_id=transaction_id, success=True)
 
     def get_status(self, transaction_id: str) -> TransactionState:
-        """Get the current state of a transaction."""
+        """Return local status; indeterminate requires remote reconciliation."""
         with self._lock:
-            if transaction_id in self._pending:
-                return TransactionState.PREPARED
-            return TransactionState.FAILED
+            return self._states.get(transaction_id, TransactionState.FAILED)
 
     def close(self) -> None:
         """Close the HTTP session."""

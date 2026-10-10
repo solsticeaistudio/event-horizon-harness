@@ -26,38 +26,38 @@ class TransactionError(RuntimeError):
 
 class ExternalWriteAdapter(abc.ABC):
     """Abstract base class for external write adapters.
-    
+
     Provides atomic, durable external write operations with:
     - Two-phase commit (prepare/commit/abort)
     - Idempotency via operation IDs
     - Durable transaction log
     - Reconciliation support
     """
-    
+
     @abc.abstractmethod
     def prepare(self, operation_id: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         """Prepare phase: validate and reserve resources.
-        
+
         Returns prepared result or raises ExternalWriteError.
         """
         ...
-    
+
     @abc.abstractmethod
     def commit(self, operation_id: str) -> Mapping[str, Any]:
         """Commit phase: make the write permanent.
-        
+
         Returns committed result or raises TransactionError.
         """
         ...
-    
+
     @abc.abstractmethod
     def abort(self, operation_id: str) -> Mapping[str, Any]:
         """Abort phase: rollback any prepared changes.
-        
+
         Returns abort confirmation or raises TransactionError.
         """
         ...
-    
+
     @abc.abstractmethod
     def get_status(self, operation_id: str) -> Mapping[str, Any]:
         """Get transaction status for reconciliation."""
@@ -78,13 +78,13 @@ class TransactionRecord:
 
 class SQLiteTransactionLog:
     """Durable transaction log using SQLite."""
-    
+
     def __init__(self, db_path: Path) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._init_db()
-    
+
     def _init_db(self) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("PRAGMA journal_mode = WAL")
@@ -105,7 +105,7 @@ class SQLiteTransactionLog:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_transactions_state ON transactions(state)
             """)
-    
+
     def create_pending(self, operation_id: str, payload: Mapping[str, Any]) -> None:
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
@@ -114,37 +114,37 @@ class SQLiteTransactionLog:
                     INSERT INTO transactions (operation_id, state, payload_json, created_at, updated_at)
                     VALUES (?, 'pending', ?, ?, ?)
                 """, (operation_id, json.dumps(payload), now, now))
-    
+
     def mark_prepared(self, operation_id: str, result: Mapping[str, Any]) -> None:
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
                 now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 conn.execute("""
-                    UPDATE transactions 
+                    UPDATE transactions
                     SET state = 'prepared', result_json = ?, prepared_at = ?, updated_at = ?
                     WHERE operation_id = ? AND state = 'pending'
                 """, (json.dumps(result), now, now, operation_id))
-    
+
     def mark_committed(self, operation_id: str, result: Mapping[str, Any]) -> None:
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
                 now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 conn.execute("""
-                    UPDATE transactions 
+                    UPDATE transactions
                     SET state = 'committed', result_json = ?, committed_at = ?, updated_at = ?
                     WHERE operation_id = ? AND state = 'prepared'
                 """, (json.dumps(result), now, now, operation_id))
-    
+
     def mark_aborted(self, operation_id: str, reason: str) -> None:
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
                 now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 conn.execute("""
-                    UPDATE transactions 
+                    UPDATE transactions
                     SET state = 'aborted', result_json = ?, aborted_at = ?, updated_at = ?
                     WHERE operation_id = ? AND state IN ('pending', 'prepared')
                 """, (json.dumps({"reason": reason}), now, now, operation_id))
-    
+
     def get_status(self, operation_id: str) -> Optional[TransactionRecord]:
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
@@ -163,7 +163,7 @@ class SQLiteTransactionLog:
                     aborted_at=row[5],
                     result=json.loads(row[6]) if row[6] else None,
                 )
-    
+
     def get_pending_transactions(self) -> Sequence[TransactionRecord]:
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
@@ -187,14 +187,14 @@ class SQLiteTransactionLog:
 
 class FilesystemWriteAdapter(ExternalWriteAdapter):
     """Filesystem write adapter with atomic writes and transaction support.
-    
+
     Provides atomic file writes with:
     - Write to temporary file + atomic rename
     - Two-phase commit via transaction log
     - Idempotency via operation IDs
     - Recovery of incomplete transactions
     """
-    
+
     def __init__(
         self,
         base_path: Path,
@@ -207,7 +207,7 @@ class FilesystemWriteAdapter(ExternalWriteAdapter):
         self.max_file_size = max_file_size
         self.transaction_log = SQLiteTransactionLog(self.base_path / "transactions.sqlite3")
         self._lock = threading.RLock()
-    
+
     def prepare(self, operation_id: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         """Validate and prepare the write operation."""
         with self._lock:
@@ -221,16 +221,16 @@ class FilesystemWriteAdapter(ExternalWriteAdapter):
                 if existing.state == "aborted":
                     # Allow retry after abort
                     pass
-            
+
             # Validate payload
             if "path" not in payload:
                 raise ExternalWriteError("missing path in payload")
             if "content" not in payload:
                 raise ExternalWriteError("missing content in payload")
-            
+
             path = payload["path"]
             content = payload["content"]
-            
+
             # Security checks
             if not isinstance(path, str) or not path:
                 raise ExternalWriteError("invalid path")
@@ -238,11 +238,11 @@ class FilesystemWriteAdapter(ExternalWriteAdapter):
                 raise ExternalWriteError("path traversal not allowed")
             if not isinstance(content, (str, bytes)):
                 raise ExternalWriteError("content must be string or bytes")
-            
+
             content_bytes = content.encode("utf-8") if isinstance(content, str) else content
             if len(content_bytes) > self.max_file_size:
                 raise ExternalWriteError(f"content exceeds max size: {self.max_file_size}")
-            
+
             # Write to temporary file
             temp_path = self.base_path / f".tmp.{operation_id}"
             try:
@@ -252,13 +252,13 @@ class FilesystemWriteAdapter(ExternalWriteAdapter):
                     os.fsync(f.fileno())
             except OSError as e:
                 raise ExternalWriteError(f"failed to write temp file: {e}")
-            
+
             # Record in transaction log
             self.transaction_log.create_pending(operation_id, payload)
             self.transaction_log.mark_prepared(operation_id, {"temp_path": str(temp_path), "size": len(content_bytes)})
-            
+
             return {"status": "prepared", "operation_id": operation_id}
-    
+
     def commit(self, operation_id: str) -> Mapping[str, Any]:
         """Commit the prepared write."""
         with self._lock:
@@ -267,67 +267,67 @@ class FilesystemWriteAdapter(ExternalWriteAdapter):
                 raise TransactionError(f"transaction not found: {operation_id}")
             if status.state != "prepared":
                 raise TransactionError(f"transaction not in prepared state: {status.state}")
-            
+
             temp_path_str = status.result.get("temp_path") if status.result else None
             if not temp_path_str:
                 raise TransactionError("missing temp path in prepared transaction")
-            
+
             temp_path = Path(temp_path_str)
             payload = status.payload
             final_path = self.base_path / payload["path"]
-            
+
             # Ensure parent directory exists
             final_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # Atomic rename
             try:
                 temp_path.rename(final_path)
             except OSError as e:
                 raise TransactionError(f"atomic rename failed: {e}")
-            
+
             # Verify
             if not final_path.exists():
                 raise TransactionError("file not found after commit")
-            
+
             # Record commit
             result = {"path": str(final_path), "size": final_path.stat().st_size}
             self.transaction_log.mark_committed(operation_id, result)
-            
+
             # Record in evidence
             self.recorder.append("external.write.committed", {
                 "operation_id": operation_id,
                 "path": payload["path"],
                 "size": result["size"],
             }, source_id="external-write-adapter")
-            
+
             return {"status": "committed", "result": result}
-    
+
     def abort(self, operation_id: str) -> Mapping[str, Any]:
         """Abort a prepared or pending transaction."""
         with self._lock:
             status = self.transaction_log.get_status(operation_id)
             if not status:
                 return {"status": "not_found", "operation_id": operation_id}
-            
+
             if status.state == "committed":
                 return {"status": "already_committed", "result": status.result}
-            
+
             # Clean up temp file if exists
             if status.result and "temp_path" in status.result:
                 try:
                     Path(status.result["temp_path"]).unlink(missing_ok=True)
                 except OSError:
                     pass
-            
+
             self.transaction_log.mark_aborted(operation_id, "aborted by request")
-            
+
             self.recorder.append("external.write.aborted", {
                 "operation_id": operation_id,
                 "reason": "aborted by request",
             }, source_id="external-write-adapter")
-            
+
             return {"status": "aborted", "operation_id": operation_id}
-    
+
     def get_status(self, operation_id: str) -> Mapping[str, Any]:
         """Get transaction status for reconciliation."""
         status = self.transaction_log.get_status(operation_id)
@@ -341,12 +341,12 @@ class FilesystemWriteAdapter(ExternalWriteAdapter):
             "committed_at": status.committed_at,
             "aborted_at": status.aborted_at,
         }
-    
+
     def reconcile(self) -> Mapping[str, Any]:
         """Recover incomplete transactions after crash/restart."""
         pending = self.transaction_log.get_pending_transactions()
         results = {"recovered": 0, "aborted": 0, "errors": []}
-        
+
         for txn in pending:
             try:
                 if txn.state == "prepared":
@@ -359,5 +359,5 @@ class FilesystemWriteAdapter(ExternalWriteAdapter):
                     results["aborted"] += 1
             except Exception as e:
                 results["errors"].append({"operation_id": txn.operation_id, "error": str(e)})
-        
+
         return results

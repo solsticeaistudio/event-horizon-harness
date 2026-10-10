@@ -79,7 +79,7 @@ class ExternalRecorder:
         try:
             from prometheus_client import Counter, Histogram, Gauge, REGISTRY
             registry = self._prometheus_registry if self._prometheus_registry is not REGISTRY else REGISTRY
-            
+
             self._prometheus_metrics["events_appended"] = Counter(
                 "event_horizon_events_appended_total",
                 "Total number of events appended to the recorder",
@@ -122,7 +122,7 @@ class ExternalRecorder:
             meter = self._otel_meter if isinstance(self._otel_meter, Meter) else None
             if meter is None:
                 return
-            
+
             self._otel_instruments["events_appended"] = meter.create_counter(
                 "event_horizon.events_appended",
                 description="Total number of events appended",

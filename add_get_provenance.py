@@ -10,10 +10,10 @@ if match:
     next_method = content.find('\n    def ', method_start + 1)
     if next_method == -1:
         next_method = content.find('\nclass ', method_start)
-    
+
     print(f'Inserting at position {next_method}')
     print(f'Next method starts: {content[next_method:next_method+50]}')
-    
+
     get_provenance_code = '''    def get_provenance(self, key_id_str: str) -> list[dict]:
         """Get provenance records for a key."""
         rows = self._db.execute(
@@ -34,10 +34,10 @@ if match:
 
 '''
     content = content[:next_method] + get_provenance_code + content[next_method:]
-    
+
     with open('src/event_horizon/key_management.py', 'w') as f:
         f.write(content)
-    
+
     print('get_provenance inserted successfully!')
 else:
     print('Could not find get_key method')

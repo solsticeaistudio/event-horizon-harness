@@ -444,18 +444,15 @@ class RaftConsensus:
         checkpoint: int,
         checkpoint_digest: str,
     ) -> bool:
-        with self._lock:
-            if self._state != "leader":
-                raise RaftUnavailableError("not leader")
-            entry = RaftLogEntry(
-                index=len(self._log) + 1,
-                term=self._current_term,
-                command=command,
-                checkpoint=checkpoint,
-                checkpoint_digest=checkpoint_digest,
-            )
-            self._log.append(entry)
-            return True
+        """Refuse to acknowledge writes without durable quorum commit.
+
+        This experimental implementation has no validated persistent
+        replicated log or old-leader fencing. It cannot safely serve as
+        authority for capability, nonce, or authorization consumption.
+        """
+        raise RaftUnavailableError(
+            "experimental Raft backend has no durable quorum commit; fail closed"
+        )
 
     def is_leader(self) -> bool:
         with self._lock:
@@ -473,6 +470,10 @@ def create_raft_cluster(
     http_port: int = 0,
 ) -> list[tuple[ReferenceReplayService, RaftConsensus]]:
     """Create a replicated Raft cluster of replay services."""
+    raise RaftUnavailableError(
+        "experimental Raft cluster lacks durable quorum commit and old-leader fencing"
+    )
+
 
     services = []
     for i, node in enumerate(nodes):
