@@ -19,6 +19,59 @@ Firecracker report used etcd, nor that etcd itself has been independently
 audited. Only a new operator-run v2 report can substantiate a real KVM +
 etcd run.
 
+### One-command disposable operator run (recommended)
+
+Once the original Ubuntu KVM environment and pinned Firecracker assets
+have been prepared, a purpose-built launcher now spins up three *temporary*
+etcd v3.6.0 Docker nodes and automatically discovers the running cluster's
+real ID via three linearizable queries. It then runs the existing paired
+Firecracker package compromise experiment, verifies the signed evidence,
+writes a portable SHA-256 sidecar, and tears down **only its own containers
+and network** (also on failure).
+
+As an ordinary user with permission to access the Docker daemon, on the
+**same Ubuntu KVM host** (or WSL2 Ubuntu with Docker Desktop's WSL
+integration enabled):
+
+```bash
+cd ~/event-horizon-harness
+git pull --ff-only
+docker info >/dev/null  # must succeed before starting
+bash scripts/run_package_etcd_lab.sh
+```
+
+The launcher invokes `sudo` for the existing privileged Firecracker
+runner, not for Docker setup. The script refuses unsupported OS/VM
+prerequisites, missing pinned assets, unavailable Docker, and occupied
+loopback ports 2379, 3379 or 4379 **before creating a cluster**. It
+never installs or restarts Docker, stops unrelated containers, or connects
+to a production etcd endpoint. It uses an isolated named Docker network,
+new per-node data directories and a unique experiment cluster token.
+The etcd cluster is **disposable**: its state is deleted with the owned
+containers; only the verified JSON and `.sha256` are retained under
+`artifacts/reports/`. They are not automatically published or attested.
+This script does not create a multi-host physically isolated trust domain.
+
+If your non-root operator cannot talk to Docker, enable trusted Docker
+Desktop WSL integration or a locally administered Docker daemon first;
+do **not** blindly chmod the Docker socket or change WSL/home directory
+permissions.
+
+When the deterministic run is verified, the same launcher can select a
+bounded model controller:
+
+```bash
+export EH_ADVERSARY_BASE_URL="http://127.0.0.1:11434/v1"
+export EH_ADVERSARY_MODEL="YOUR_LOCAL_MODEL_ID"
+bash scripts/run_package_etcd_lab.sh --adaptive-steps 2
+```
+
+Replace the model identifier with a model available at an
+OpenAI-compatible endpoint you control. The host requests a separate
+model response for each adaptive step in each session. If the endpoint is
+not available or fails its response budget, the experiment fails closed
+and retains the `INCOMPLETE` report rather than claiming success.
+
 ### Run on an owned Ubuntu 24.04 x86_64/KVM host
 
 First follow [Linux/KVM isolation preparation](LINUX_ISOLATION.md), including
