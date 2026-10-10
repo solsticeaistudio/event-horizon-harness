@@ -32,7 +32,9 @@ actually executed.
   consumed record and signed event correlation. CI runs its real etcd
   gateway/oracle tests without KVM; **no completed combined operator-run
   Firecracker+etcd report is currently published**. The worker is a fixed
-  synthetic already-compromised fixture, not an adaptive AI agent. Host
+  synthetic already-compromised fixture; an optional external-to-guest
+  trusted-controller model chooses up to four fixed synthetic probes per
+  session. This is not arbitrary agent code running inside the VM. Host
   supervisor, host-side oracle, recorder and underlying etcd remain trusted.
 - The recent seven-process CI runs use a real three-member etcd Raft cluster
   and a same-host signed HTTP authority. Real consensus is tested for

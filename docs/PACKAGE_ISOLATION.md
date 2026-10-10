@@ -79,6 +79,65 @@ and independent oracle against an actual three-node quorum *without KVM*.
 The ordinary Python CI tests use an in-memory deterministic etcd simulator.
 Neither is misrepresented as a completed KVM+etcd operator run.
 
+## Bounded adaptive model-selected guest probes (opt-in)
+
+With the pinned-distributed mode above, you may optionally enable an
+OpenAI-compatible adversarial **controller** using
+`--adaptive-steps 1` through `--adaptive-steps 4`. Supply
+`EH_ADVERSARY_BASE_URL`, `EH_ADVERSARY_MODEL` and (if needed)
+`EH_ADVERSARY_API_KEY` in the **trusted host supervisor** environment,
+not in the guest or worker environment.
+
+```bash
+sudo --preserve-env=EH_ADVERSARY_BASE_URL,EH_ADVERSARY_MODEL,EH_ADVERSARY_API_KEY \\
+  /var/tmp/event-horizon-isolation-venv/bin/python \\
+  scripts/run_package_isolation.py \\
+  --etcd-endpoint http://127.0.0.1:2379 \\
+  --etcd-cluster-id "$EHH_ETCD_CLUSTER_ID" \\
+  --adaptive-steps 4 \\
+  --report artifacts/reports/package-etcd-adaptive.json
+
+/var/tmp/event-horizon-isolation-venv/bin/python \\
+  scripts/verify_package_isolation.py \\
+  artifacts/reports/package-etcd-adaptive.json
+```
+
+For this command, `EHH_ETCD_CLUSTER_ID` must already be exported as the
+actual cluster ID as described above. Run only on an owned test host and
+using a model endpoint you explicitly control and trust. With `sudo`,
+only the named model environment variables are forwarded; the runner
+does **not** pass them on to the worker or VM. A live model endpoint is
+optional and never called by ordinary CI.
+
+The model chooses from **five predeclared synthetic actions**: probe a
+forbidden credential resource, reuse an already consumed capability,
+attempt cross-executor transfer, attempt a prohibited network operation,
+or request an unauthorized evidence-envelope field. It sees previous
+host-validated denials and selects the next probe adaptively. Its
+proposal must contain the exact fixed range/target and **empty**
+parameters. The trusted controller builds the actual immutable test
+frame, sends it through the existing Firecracker guest → compromised
+worker → trusted host gate, and checks the returned effect state. It
+never forwards model-written executable code, URLs, raw tool calls or
+arbitrary structured arguments.
+
+The v3 report includes an exact signed `adversarial.action-proposal`
+and `adversarial.observation` pair for every turn; the verifier checks
+ordering, hashes, approved action kinds and conclusive no-effect denials.
+Any possible commit, unexpectedly successful effect, malformed proposal,
+missing event, or timeout causes the experiment to fail.
+
+**Scope matters:** the model is hosted on the trusted supervisor and
+does not have arbitrary execution rights inside the microVM. This is
+**model-selected fixed guest probing**, not a demonstration that an
+unrestricted autonomous guest-root model was contained. It complements
+the separate static compromised-worker positive/negative controls and
+does not replace them. A genuinely guest-hosted adaptive agent, trusted
+external evidence witness, safe multi-tenant concurrency, and real
+red-team reproduction remain future experiments. The model API
+may be networked from the trusted host; it is not an outbound network
+route exposed to the compromised process.
+
 ## Authority inventory and maximum damage
 
 | Component | Reachable interface and authority | Treatment if compromised |
