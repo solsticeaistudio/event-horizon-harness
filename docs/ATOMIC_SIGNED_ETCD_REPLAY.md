@@ -93,6 +93,61 @@ Normal startup **refuses to create** missing etcd authority data.
 `bootstrap=True` is only for intentional first provisioning. A missing
 head after startup is an error rather than implicit reset.
 
+## Launch as an independently trusted replay service
+
+`scripts/serve_etcd_signed_replay.py` is the operator entrypoint: it
+loads a root-owned (or otherwise protected) 32-byte Ed25519 signing seed,
+explicit per-client key policies, a pinned cluster ID, etcd mTLS transport,
+and a replay HTTP listener. It refuses unauthenticated non-loopback HTTP
+listeners and requires server-side mutual TLS there.
+
+The configuration has exactly these fields:
+
+```json
+{
+  "etcd": {
+    "endpoint": "https://etcd.internal.example:2379",
+    "ca_file": "/trusted/etcd-ca.pem",
+    "client_cert_file": "/trusted/replay-etcd-client.pem",
+    "client_key_file": "/trusted/replay-etcd-client.key"
+  },
+  "cluster_id": "REPLACE_WITH_PINNED_NUMERIC_CLUSTER_ID",
+  "namespace": "production",
+  "service_id": "eh-distributed",
+  "epoch": 1,
+  "signing_seed_path": "/trusted/replay-signing.seed",
+  "client_policies": [
+    {
+      "public_key_pem": "REPLACE_WITH_TRUSTED_CLIENT_ED25519_PEM",
+      "operations": ["capability-consume"],
+      "partitions": ["broker"]
+    }
+  ],
+  "listen_host": "127.0.0.1",
+  "listen_port": 8443,
+  "server_tls": null
+}
+```
+
+The placeholder PEM and numeric cluster ID in this example must be replaced.
+For a remote listener, configure `server_tls` as
+`{"certfile": "...", "keyfile": "...", "cafile": "..."}`; the listener
+will require client certificates. Run in a distinct trusted process and
+administrative account from any executor:
+
+```bash
+# Intentional one-time initialization only:
+python scripts/serve_etcd_signed_replay.py --config /trusted/replay.json --bootstrap
+# Normal restart does NOT implicitly reinitialize:
+python scripts/serve_etcd_signed_replay.py --config /trusted/replay.json
+```
+
+Use `AuthenticatedReplayClient` and `HttpReplayTransport` with pinned
+server key, mTLS credentials and persisted checkpoint on client side. Do not
+expose any of these credentials to the compromised guest. The existing
+`ReplayHttpServer` binding speaks the same signed protocol with the new
+etcd authority; no new unverified input format is required.
+
 ## Tests and evidence
 
 - `tests/test_etcd_signed_replay.py` models serializable transactions
