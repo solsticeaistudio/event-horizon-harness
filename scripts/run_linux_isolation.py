@@ -651,6 +651,12 @@ def stage_effect_service(run: Path) -> Path:
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
         shutil.copyfile(source, target)
         target.chmod(0o444)
+    # `mkdir(mode=...)` is still masked by the caller's umask. This stage
+    # must be traversable by UID 60001 even for a root shell using 077.
+    staging.chmod(0o755)
+    for directory in staging.rglob("*"):
+        if directory.is_dir():
+            directory.chmod(0o755)
     return entry
 
 
