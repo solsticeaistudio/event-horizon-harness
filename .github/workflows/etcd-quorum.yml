@@ -4,11 +4,15 @@ on:
     branches:
       - feature/multi-authority-backends-raft-20261009
       - feature/host-gateway-and-signed-adversarial-evidence-20261009
+      - feature/atomic-etcd-replay-checkpoints-20261009
     paths:
       - "src/event_horizon/authority_backends.py"
       - "src/event_horizon/trusted_effect_gateway.py"
       - "src/event_horizon/effect_boundary.py"
+      - "src/event_horizon/etcd_signed_replay.py"
       - "tests/test_etcd_live.py"
+      - "tests/test_etcd_signed_replay_live.py"
+      - "tests/test_etcd_signed_replay.py"
       - "tests/test_effect_boundary_gateway.py"
       - ".github/workflows/etcd-quorum.yml"
   pull_request:
@@ -78,6 +82,10 @@ jobs:
         env:
           EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
         run: python -m unittest tests.test_etcd_live -v
+      - name: Verify full signed nonce/capability/authorization/checkpoint authority
+        env:
+          EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
+        run: python -m unittest tests.test_etcd_signed_replay_live -v
       - name: Stop one etcd node and verify majority still works
         shell: bash
         env:
@@ -97,6 +105,7 @@ jobs:
               raise SystemExit("two-node majority could not serve requests")
           PY
           python -m unittest tests.test_etcd_live -v
+          python -m unittest tests.test_etcd_signed_replay_live -v
       - name: Stop second node and verify minority cannot issue authority
         shell: bash
         run: |
@@ -142,6 +151,55 @@ jobs:
                   print("PASS: gateway refused to dispatch without etcd quorum")
               finally:
                   gate.close()
+          PY
+      - name: Signed replay authority refuses a minority with pinned checkpoint
+        shell: bash
+        env:
+          EHH_ETCD_ENDPOINT: http://127.0.0.1:3379
+        run: |
+          # Demonstrate loss of quorum for an authority that already has a
+          # committed signed nonce and checkpoint. A fresh bootstrap failure
+          # alone would not test safety of the established service.
+          docker start eh-etcd-3
+          python - <<'PY'
+          import os,time
+          from tests.test_etcd_live import cluster_id
+          for _ in range(45):
+              try:
+                  if cluster_id(os.environ["EHH_ETCD_ENDPOINT"]) == os.environ["EHH_ETCD_CLUSTER_ID"]:
+                      print("PASS: restarted majority elected and serving linearizable reads")
+                      break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit("restarted two-member majority did not become healthy")
+          PY
+          python - <<'PY'
+          import os, subprocess, uuid
+          from event_horizon.canonical import digest
+          from event_horizon.remote_replay import ReplayStateError, ReplayUnavailableError
+          from tests.test_etcd_signed_replay_live import provision
+          service, client, _, _ = provision(
+              namespace="minority." + uuid.uuid4().hex
+          )
+          nonce = "A" * 43
+          ctx = {"deviceId":"dev", "executorId":"exec",
+                 "purpose":"attest", "sessionId":"scope"}
+          assert client.call("nonce-create", "nonces", {
+              "nonce":nonce, "context":ctx, "context_digest":digest(ctx),
+              "issued_at":1000, "expires_at":5000,
+          })["accepted"]
+          checkpoint = service.checkpoint()
+          subprocess.run(["docker","stop","eh-etcd-3"], check=True,
+                         capture_output=True, text=True)
+          try:
+              client.call("nonce-consume", "nonces", {
+                  "nonce":nonce, "context_digest":digest(ctx), "now":2000,
+              })
+          except (ReplayStateError, ReplayUnavailableError):
+              print("PASS: signed replay authority denied nonce with minority; checkpoint before outage",checkpoint)
+          else:
+              raise SystemExit("FAIL: signed nonce replay advanced without quorum")
           PY
       - name: Disposable cluster logs on failure
         if: failure()
