@@ -52,12 +52,12 @@ class LinuxRoundLifecycleTests(unittest.TestCase):
             path.write_bytes(original)
             fd = os.open(path, os.O_RDWR)
             try:
-                _overwrite_pass(fd, len(original), b"\\x00")
+                _overwrite_pass(fd, len(original), b"\x00")
                 self.assertEqual(path.stat().st_size, len(original))
-                self.assertEqual(path.read_bytes(), b"\\x00" * len(original))
-                _overwrite_pass(fd, len(original), b"\\xff")
+                self.assertEqual(path.read_bytes(), b"\x00" * len(original))
+                _overwrite_pass(fd, len(original), b"\xff")
                 self.assertEqual(path.stat().st_size, len(original))
-                self.assertEqual(path.read_bytes(), b"\\xff" * len(original))
+                self.assertEqual(path.read_bytes(), b"\xff" * len(original))
                 _overwrite_pass_random(fd, len(original))
                 self.assertEqual(path.stat().st_size, len(original))
             finally:
