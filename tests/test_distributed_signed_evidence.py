@@ -115,7 +115,6 @@ class DistributedSignedEvidenceTests(unittest.TestCase):
             ))
         events.append(recorder.append("capability.issued", {"request_id": second}))
         for request_id, success, state in [
-            (second, False, "not-started"),
             (second, True, "completed"),
             (second, False, "not-started"),
             (first, False, "not-started"),
@@ -131,6 +130,7 @@ class DistributedSignedEvidenceTests(unittest.TestCase):
                 "ambient_authority_environment_hits": [],
                 "executor_config_has_remote_replay": False,
             },
+            "authority_outage": {"success": False, "effect_state": "not-started", "evidence_gap": "authority-unavailable"},
             "unsigned_signer_mutation": {"denied": True},
             "guardian_veto": {"denied": True, "request_id": "forbidden-distributed-op"},
             "signed_certificate": {
@@ -169,8 +169,8 @@ class DistributedSignedEvidenceTests(unittest.TestCase):
     def test_strict_report_derives_execution_cases_and_signs_context(self):
         result = verify_distributed_report(self._strict_report())
         self.assertTrue(result["passed"])
-        self.assertEqual(result["event_derived_execution_cases"], 7)
-        self.assertEqual(result["signed_coordinator_probe_cases"], 4)
+        self.assertEqual(result["event_derived_execution_cases"], 6)
+        self.assertEqual(result["signed_coordinator_probe_cases"], 5)
         self.assertTrue(result["signed_authority_context"])
         self.assertFalse(result["independent_cluster_attestation"])
 
