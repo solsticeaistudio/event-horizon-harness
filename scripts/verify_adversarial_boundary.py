@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from event_horizon.adversarial_evidence import EvidenceVerificationError, verify_report
-from event_horizon.canonical import strict_json_loads
+from event_horizon.protocol import _object_without_duplicates, _reject_constant
 
 
 def main() -> int:
@@ -18,7 +18,14 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        report = strict_json_loads(args.report.read_bytes())
+        report = json.loads(
+            args.report.read_text(encoding="utf-8"),
+            object_pairs_hook=_object_without_duplicates,
+            parse_constant=_reject_constant,
+        )
+        # Recorder timestamps and receipt issuance times are finite floats.
+        # Unlike signed request payloads, evidence JSON permits these values.
+        json.dumps(report, allow_nan=False)
         pinned = (
             args.pin_recorder_key.read_text(encoding="utf-8")
             if args.pin_recorder_key is not None else None
