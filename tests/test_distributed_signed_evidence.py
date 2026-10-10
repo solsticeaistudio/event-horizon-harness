@@ -104,7 +104,7 @@ class DistributedSignedEvidenceTests(unittest.TestCase):
         events.append(recorder.append("capability.issued", {"request_id": first}))
         outcomes = [
             (first, True, "completed"),
-            (first, not corrupted_replay, "completed" if corrupted_replay else "not-started"),
+            (first, corrupted_replay, "completed" if corrupted_replay else "not-started"),
             (first, False, "not-started"),
         ]
         for request_id, success, state in outcomes:
