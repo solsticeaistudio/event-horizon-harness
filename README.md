@@ -31,6 +31,12 @@ The tested claim is narrower than general containment: compromise inside the hos
 - A deterministic task-policy synthesizer and trusted compiler size authority from task semantics while keeping the adaptive proposal non-authoritative.
 - Canary capabilities, session-scoped behavioral boundary-probing detection, per-capability redemption-time monotonic decay, signed denial certificates, bounded adaptive-adversary interfaces, and a hardware-failsafe simulator provide additional subtract-only controls and evidence.
 
+## Real Firecracker/KVM isolation experiment (operator-reported)
+
+**October 10, 2026:** On an Ubuntu 24.04.5 WSL2 laptop with functioning nested KVM, the standalone Firecracker lab reported `PASS (3 guest-root sessions)`, and the local verifier reported `VERIFIED (3 chains and signed receipts; embedded keys, integrity only)`. The run exercised a narrow, host-authorized synthetic dataset-read boundary and the three teardown triggers: requested stop, deadline and supervisor control-channel loss.
+
+**[See the experiment record, source commit and reproduction instructions](docs/evidence/2026-10-10-wsl2-firecracker.md).** The original JSON report and its SHA-256 are **not yet public**, so this is an operator-supplied local result, not independently reproduced evidence or production certification. A separately witnessed, publicly downloadable report is the next publication milestone.
+
 ## What it does not demonstrate
 
 This repository does not demonstrate containment of a frontier model, production Firecracker isolation, production TPM enrollment or hardware provenance, resistance to host-kernel compromise, separately administered or hardware-backed signing, physically one-way evidence storage, a deployed multi-host replay backend, a physical fail-safe installation, a model-checked proof of distributed partitions/rollback, or an independent security audit. The default adversary is scripted and synthetic; a real model endpoint is optional and its self-report is never trusted.
