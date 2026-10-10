@@ -252,6 +252,11 @@ class LiveSignedReplayTests(unittest.TestCase):
                             "ambient_authority_environment_hits": probe["ambient_authority_environment_hits"],
                             "executor_config_has_remote_replay": config_has_authority,
                         },
+                        "authority_outage": {
+                            "success": unavailable.success,
+                            "effect_state": unavailable.effect_state,
+                            "evidence_gap": "authority-unavailable",
+                        },
                         "unsigned_signer_mutation": {"denied": unsigned_mutation_denied},
                         "guardian_veto": {
                             "denied": guardian_vetoed,
