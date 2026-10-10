@@ -150,13 +150,14 @@ def _verify_strict_report(
         and isinstance(event["payload"], Mapping)
         and event["payload"].get("request_id") in {first, second}
     ]
-    # Every attempted effect must appear as a separate primary execution
-    # event, in experiment order. A signed PASS boolean is not a substitute.
+    # Six attempts have distinct signed execution events. During the
+    # induced authority outage, even denial-evidence append can fail closed;
+    # that seventh attempt therefore needs a separately labeled,
+    # post-recovery coordinator probe rather than fictitious primary evidence.
     expected = [
         ("valid_effect", first, True, "completed"),
         ("capability_replay", first, False, "not-started"),
         ("tampered_arguments", first, False, "not-started"),
-        ("authority_outage", second, False, "not-started"),
         ("recovery_once", second, True, "completed"),
         ("recovery_replay", second, False, "not-started"),
         ("signer_restart_replay", first, False, "not-started"),
@@ -188,7 +189,7 @@ def _verify_strict_report(
     ]
     _require(issued == [first, second],
              "signed capability issues do not match the two authorized requests")
-    # These four cases have no independent source-side oracle in this topology.
+    # These five cases have no complete independent source-side oracle in this topology.
     # Require signed *raw observations*, not bare case/pass booleans, and
     # disclose the remaining coordinator trust assumption to evaluators.
     probes = {}
@@ -205,13 +206,21 @@ def _verify_strict_report(
         probes[payload["case"]] = payload["observation"]
     _require(set(probes) == {
         "executor_credential_probe", "unsigned_signer_mutation",
-        "guardian_veto", "signed_certificate",
+        "guardian_veto", "signed_certificate", "authority_outage",
     }, "missing signed raw coordinator probe")
     root = probes["executor_credential_probe"]
     derived["executor_credential_probe"] = (
         root.get("private_key_material_present") is False
         and root.get("ambient_authority_environment_hits") == []
         and root.get("executor_config_has_remote_replay") is False
+    )
+    # The outage probe is signed after authority recovery; this is a
+    # coordinator observation, NOT an independently authenticated denial.
+    derived["authority_outage"] = (
+        probes["authority_outage"] == {
+            "success": False, "effect_state": "not-started",
+            "evidence_gap": "authority-unavailable",
+        }
     )
     derived["unsigned_signer_mutation"] = (
         probes["unsigned_signer_mutation"] == {"denied": True}
