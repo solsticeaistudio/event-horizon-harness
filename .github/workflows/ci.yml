@@ -32,6 +32,11 @@ jobs:
         run: npm run build:attestation-bridge
       - name: Install project
         run: python -m pip install --disable-pip-version-check -e ".[test]"
+      - name: Check published Firecracker evidence bytes
+        working-directory: docs/evidence/artifacts/2026-10-10
+        run: sha256sum -c linux-isolation.json.sha256
+      - name: Verify published Firecracker evidence signatures and chains
+        run: python scripts/verify_linux_isolation.py docs/evidence/artifacts/2026-10-10/linux-isolation.json
       - name: Lint Python sources
         run: python scripts/lint_python.py
       - name: Run Python tests
