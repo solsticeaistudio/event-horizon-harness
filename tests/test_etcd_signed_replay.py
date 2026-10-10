@@ -14,7 +14,7 @@ from event_horizon.canonical import canonical_bytes, digest, strict_json_loads
 from event_horizon.etcd_signed_replay import EtcdSignedReplayService
 from event_horizon.remote_replay import (
     AuthenticatedReplayClient, ReplayClientPolicy, ReplayRequestSigner,
-    ReplayProtocolError, ReplayStateError, RemoteCapabilityConsumptionStore,
+    ReplayProtocolError, ReplayStateError, ReplayUnavailableError, RemoteCapabilityConsumptionStore,
     RemoteAuthorizationReplayStore,
 )
 
@@ -211,14 +211,14 @@ class SignedEtcdTests(unittest.TestCase):
     def test_quorum_outage_and_ambiguous_response_fail_closed(self):
         c = self.client()
         self.etcd.available = False
-        with self.assertRaises(ReplayStateError):
+        with self.assertRaises(ReplayUnavailableError):
             c.call("capability-consume", "broker", {
                 "token": CAP, "binding_digest": "a"*64,
                 "expires_at": 5000, "consumed_at": 1000,
             })
         self.etcd.available = True
         self.etcd.ambiguous = True
-        with self.assertRaises(ReplayStateError):
+        with self.assertRaises(ReplayUnavailableError):
             c.call("capability-consume", "broker", {
                 "token": CAP, "binding_digest": "a"*64,
                 "expires_at": 5000, "consumed_at": 1000,
