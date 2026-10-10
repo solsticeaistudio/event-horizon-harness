@@ -4,6 +4,81 @@ This opt-in extension of the [Linux/KVM lab](LINUX_ISOLATION.md) tests a service
 
 The useful task is retrieval and checksum of one preapproved, digest-pinned, small inert JSON artifact. There is no package installation, archive extraction, real registry, public network target, real credential, or adaptive model. This models a service-authority chain, not the historical incident's implementation or a demonstrated historical counterfactual.
 
+## Integrated Firecracker + etcd authority experiment (opt-in)
+
+The same paired **compromised package worker** can now use an owned,
+three-member etcd Raft quorum for **one-use capability consumption**. The
+Firecracker guest and worker still have no internet route and no etcd
+credentials or endpoint configuration. The trusted host-side gate is the
+only component configured to contact etcd. There is no automatic fallback
+to SQLite if quorum is lost.
+
+This is an integration of the previously separate KVM and consensus
+experiments. It is not a claim that the unmodified historical October 10
+Firecracker report used etcd, nor that etcd itself has been independently
+audited. Only a new operator-run v2 report can substantiate a real KVM +
+etcd run.
+
+### Run on an owned Ubuntu 24.04 x86_64/KVM host
+
+First follow [Linux/KVM isolation preparation](LINUX_ISOLATION.md), including
+the privileged host prerequisites, verified pinned Firecracker assets and
+project venv. Separately start a **disposable three-member etcd cluster**,
+exposing only one client listener on `127.0.0.1`. Obtain the actual cluster
+ID independently from the etcd cluster configuration or a linearizable etcd
+member-status query. Do **not** copy the example cluster ID from tests.
+
+```bash
+cd ~/event-horizon-harness
+sudo /var/tmp/event-horizon-isolation-venv/bin/python \\
+  scripts/run_package_isolation.py \\
+  --etcd-endpoint http://127.0.0.1:2379 \\
+  --etcd-cluster-id "$EHH_ETCD_CLUSTER_ID" \\
+  --report artifacts/reports/package-etcd-isolation.json
+
+/var/tmp/event-horizon-isolation-venv/bin/python \\
+  scripts/verify_package_isolation.py \\
+  artifacts/reports/package-etcd-isolation.json
+```
+
+The explicit flags are both mandatory for distributed mode. The endpoint
+is restricted to **owned loopback HTTP**; the runner refuses a remote host,
+URL credentials or an unpinned cluster. Per-session keys are scoped to the
+temporary `ehk-*` session namespace and retained in the disposable
+consensus store. Do not run this against production etcd.
+
+### What the host independently checks
+
+For each vulnerable/protected session the trusted host performs a
+linearizable etcd range read after the authorized action. It verifies one
+persisted replay record for the **exact issued capability ID**, the
+expected claims digest, expiry, cluster identity and Raft term. Any
+missing, extra, mismatched or malformed record fails the experiment.
+The oracle result is included in the signed `isolation.observed` event,
+and the v2 report verifier requires agreement among:
+
+- the report's pinned etcd cluster identity
+- the signed supervisor `isolation.context` and issued capability ID
+- the signed `execution.authorized` / `execution.completed` records
+- the supervisor's independently performed etcd replay read
+
+The gate's permission checks still reject changed arguments, forged
+capabilities, unsupported operations, prior-session authority and replay,
+while maintaining the vulnerable-versus-protected fixture controls.
+
+**Limits:** the oracle is separate from the compromised worker and trusted
+effect callback, but it shares the host/supervisor trust boundary; it does
+not independently attest etcd nodes, prove against a compromised host, or
+observe all possible covert effects. Signed keys remain embedded in the
+report, not independently pinned. The worker is still a static native
+fixture, not an adaptive model. A real Firecracker+etcd experiment must be
+executed by an eligible operator to generate a v2 PASS report.
+
+CI's disposable etcd workflow separately exercises the host effect gateway
+and independent oracle against an actual three-node quorum *without KVM*.
+The ordinary Python CI tests use an in-memory deterministic etcd simulator.
+Neither is misrepresented as a completed KVM+etcd operator run.
+
 ## Authority inventory and maximum damage
 
 | Component | Reachable interface and authority | Treatment if compromised |

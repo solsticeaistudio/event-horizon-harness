@@ -20,6 +20,8 @@ sys.path.insert(0, str(ROOT / "src"))
 from event_horizon.approved_artifact import ApprovedArtifact  # noqa: E402
 from event_horizon.broker import CapabilityBroker  # noqa: E402
 from event_horizon.effect_boundary import DatasetEffectBoundary  # noqa: E402
+from event_horizon.canonical import digest  # noqa: E402
+from scripts.package_authority_oracle import owned_etcd_config, observe_owned_etcd  # noqa: E402
 from event_horizon.protocol import encode_frame, read_frame  # noqa: E402
 from scripts.run_firecracker_demo import sha256_file, write_durable_json  # noqa: E402
 from scripts.run_linux_isolation import (  # noqa: E402
@@ -74,20 +76,40 @@ class GateReceiver:
 class PackageLab:
     artifact = ARTIFACT
 
-    def __init__(self, mode: str, binary: Path, worker_build: dict):
+    def __init__(self, mode: str, binary: Path, worker_build: dict, *, authority_config=None):
         if mode not in {"vulnerable", "protected"}:
             raise ValueError("unknown package lab mode")
         self.mode, self.binary = mode, binary
         self.worker_build = worker_build
+        self.authority_config = authority_config
         self.target_events = []
         self.target_failure = None
         self.stop = threading.Event()
         self.started = time.monotonic()
 
     def context(self):
-        return {"mode": self.mode, "worker_build": self.worker_build, "artifact_sha256": self.artifact.sha256,
-                "fixture_authority": "service-owned" if self.mode == "vulnerable" else "root-only",
-                "network": "empty namespace; synthetic Unix target only"}
+        backend = "etcd" if self.authority_config is not None else "sqlite"
+        result = {"mode": self.mode, "worker_build": self.worker_build,
+                  "artifact_sha256": self.artifact.sha256,
+                  "fixture_authority": "service-owned" if self.mode == "vulnerable" else "root-only",
+                  "network": "empty namespace; synthetic Unix target only",
+                  "authority_backend": backend}
+        if self.authority_config is not None:
+            # No endpoint or transport credentials in signed public context.
+            result["etcd_cluster_id"] = self.authority_config["etcd_cluster_id"]
+        return result
+
+    def observe_authority(self, config, capability):
+        if self.authority_config is None or config.get("authority_backend") != "etcd":
+            raise ValueError("distributed authority was not explicitly selected")
+        if config["etcd_cluster_id"] != self.authority_config["etcd_cluster_id"]:
+            raise RuntimeError("package lab authority cluster changed")
+        return observe_owned_etcd(
+            config, session_id=config["session_id"],
+            capability_id=capability.claims.capability_id,
+            claims_digest=digest(capability.claims.to_dict()),
+            expires_at=capability.claims.expires_at,
+        )
 
     def prepare(self, run, control, state, config):
         self.control = control
@@ -262,7 +284,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--assets", type=Path, default=ROOT / "firecracker/build/isolation")
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--etcd-endpoint", help="Owned disposable loopback etcd cluster only")
+    parser.add_argument("--etcd-cluster-id", help="Pin the actual numeric etcd cluster ID")
     args = parser.parse_args()
+    if bool(args.etcd_endpoint) != bool(args.etcd_cluster_id):
+        parser.error("an etcd endpoint and pinned cluster ID must be provided together")
+    authority = None
+    if args.etcd_endpoint:
+        authority = {
+            "authority_backend": "etcd",
+            "etcd_gateway": owned_etcd_config(args.etcd_endpoint, args.etcd_cluster_id),
+            "etcd_cluster_id": args.etcd_cluster_id,
+        }
     import fcntl
     lock_fd = os.open("/run/event-horizon-isolation.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(lock_fd, "w") as lock:
@@ -278,14 +311,24 @@ def main() -> int:
         previous = None
         # A fresh protected session also rejects unused authority from its predecessor.
         for mode in ("vulnerable", "protected", "protected"):
-            result, previous = run_round(assets, manifest, broker, previous,
-                                         package_lab=PackageLab(mode, binary, worker_build))
+            result, previous, attestation_mode = run_round(
+                assets, manifest, broker, previous,
+                package_lab=PackageLab(
+                    mode, binary, worker_build, authority_config=authority,
+                ),
+            )
+            if attestation_mode not in {"synthetic-fixture", "tpm2", "tpm2-unavailable"}:
+                raise RuntimeError("isolation round produced an unknown attestation mode")
             rounds.append(result)
         report = {
-            "schema": "event-horizon.package-isolation.v1", "status": "PASS",
+            "schema": ("event-horizon.package-isolation.v2" if authority else
+                       "event-horizon.package-isolation.v1"), "status": "PASS",
             "build_manifest": manifest, "worker_build": worker_build, "host_kernel": platform.release(),
+            "authority": ({"backend": "etcd", "cluster_id": args.etcd_cluster_id,
+                           "oracle": "host-supervisor-linearizable-etcd-read"}
+                          if authority else {"backend": "sqlite"}),
             "rounds": rounds, "attestation": "synthetic-fixture",
-            "scope": "owned deterministic probes; already-compromised service; serialized guest-root VMs",
+            "scope": "owned deterministic probes; already-compromised service; serialized guest-root VMs; optional trusted-host etcd authority",
             "attack_budget": {"guest_commands_max": 32, "service_requests_max": 24,
                               "watchdog_seconds": 30, "memory_bytes_per_cgroup": 268435456, "pids_per_cgroup": 32},
             "unknowns": ["adaptive attacks", "kernel or trusted gate compromise", "concurrent tenant VMs",
@@ -295,7 +338,8 @@ def main() -> int:
         from scripts.verify_package_isolation import verify_report
         verify_report(report)
         write_durable_json(args.report, report)
-        print("Package-service isolation: PASS (vulnerable control + two protected guest-root sessions)")
+        print("Package-service isolation: PASS (vulnerable control + two protected guest-root sessions; "
+              + ("pinned distributed etcd authority" if authority else "local SQLite authority") + ")")
         print(f"Evidence report: {args.report.resolve()}")
     return 0
 

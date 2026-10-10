@@ -17,7 +17,24 @@ from scripts.verify_linux_isolation import verify_rounds  # noqa: E402
 
 
 def verify_report(report: dict) -> None:
-    verify_rounds(report, schema="event-horizon.package-isolation.v1", triggers=["requested-stop"] * 3)
+    schema = report["schema"]
+    if schema not in {"event-horizon.package-isolation.v1", "event-horizon.package-isolation.v2"}:
+        raise ValueError("unknown package experiment evidence schema")
+    distributed = schema.endswith(".v2")
+    authority = report.get("authority", {"backend": "sqlite"} if not distributed else None)
+    if not isinstance(authority, dict):
+        raise ValueError("missing report authority identity")
+    if distributed:
+        if (set(authority) != {"backend", "cluster_id", "oracle"}
+                or authority["backend"] != "etcd"
+                or authority["oracle"] != "host-supervisor-linearizable-etcd-read"
+                or not isinstance(authority["cluster_id"], str)
+                or not authority["cluster_id"].isdecimal()
+                or int(authority["cluster_id"]) <= 0):
+            raise ValueError("invalid pinned distributed authority context")
+    elif authority != {"backend": "sqlite"}:
+        raise ValueError("local package evidence cannot advertise distributed authority")
+    verify_rounds(report, schema=schema, triggers=["requested-stop"] * 3)
     for index, run in enumerate(report["rounds"]):
         observed = run["observations"]
         package = observed["package"]
@@ -30,6 +47,45 @@ def verify_report(report: dict) -> None:
                 or context["artifact_sha256"] != ARTIFACT.sha256
                 or package["worker_sha256"] != report["worker_build"]["worker_sha256"]):
             raise ValueError("package build/configuration differs from signed context")
+        if distributed:
+            if (context.get("authority_backend") != "etcd"
+                    or context.get("etcd_cluster_id") != authority["cluster_id"]):
+                raise ValueError("round's signed context does not bind the pinned etcd authority")
+            oracle = observed.get("authority_oracle")
+            if not isinstance(oracle, dict) or set(oracle) != {
+                "backend", "cluster_id", "revision", "raft_term", "record_count",
+                "capability_id", "claims_digest", "expires_at",
+                "record_integrity_checked", "source",
+            }:
+                raise ValueError("distributed replay oracle is absent or malformed")
+            if (oracle["backend"] != "etcd"
+                    or oracle["cluster_id"] != authority["cluster_id"]
+                    or oracle["source"] != authority["oracle"]
+                    or oracle["record_integrity_checked"] is not True
+                    or type(oracle["record_count"]) is not int
+                    or oracle["record_count"] != 1
+                    or any(type(oracle[name]) is not int or oracle[name] <= 0
+                           for name in ("revision", "raft_term", "expires_at"))
+                    or not isinstance(oracle["claims_digest"], str)
+                    or len(oracle["claims_digest"]) != 64
+                    or any(ch not in "0123456789abcdef" for ch in oracle["claims_digest"])):
+                raise ValueError("signed etcd consumption oracle failed checks")
+            context_events = [
+                e for e in run["events"]
+                if e["event_type"] == "isolation.context"
+                and e["source_id"] == "host-supervisor"
+            ]
+            if len(context_events) != 1 or oracle["capability_id"] != context_events[0]["payload"]["capability_id"]:
+                raise ValueError("consumption oracle does not bind the session capability")
+            authorized = [e for e in run["events"] if e["event_type"] == "execution.authorized"]
+            completed = [e for e in run["events"] if e["event_type"] == "execution.completed"]
+            if (len(authorized) != 1 or len(completed) != 1
+                    or any(e["payload"].get("capability_id") != oracle["capability_id"]
+                           for e in authorized + completed)):
+                raise ValueError("etcd replay oracle and host execution records disagree")
+        else:
+            if context.get("authority_backend", "sqlite") != "sqlite" or "authority_oracle" in observed:
+                raise ValueError("local replay lab claims unsupported distributed evidence")
         effects = package["forbidden_effects"]
         if set(effects) != set(EFFECTS) or any(value is not (index == 0) for value in effects.values()):
             raise ValueError("paired effect oracle failed")

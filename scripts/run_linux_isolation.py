@@ -714,12 +714,22 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         "verification_context": verify_options(context),
         "replay_database": str(state / "replay.sqlite3"), "decay_database": str(state / "decay.sqlite3"),
     }
+    if package_lab is not None and package_lab.authority_config is not None:
+        # Only the trusted supervisor can select the consensus backend.
+        # These host-only fields never enter the compromised worker's
+        # execution arguments or the Firecracker guest configuration.
+        service_config.update(package_lab.authority_config)
+        service_config.pop("replay_database")
     service_config_path = state / "config.json"
     service_config_path.write_bytes(canonical_bytes(service_config))
     os.chown(service_config_path, EFFECT_UID, EFFECT_UID)
     service_config_path.chmod(0o400)
     if package_lab is not None:
         package_lab.prepare(run, control, state, service_config)
+        # PackageLab adjusts vm_uid to the identity assigned to its worker.
+        # Persist precisely the configuration observed by the host gate;
+        # package-mode config must remain root-only, never world-readable.
+        service_config_path.write_bytes(canonical_bytes(service_config))
     recorder = ExternalRecorder(control / "events.jsonl")
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(str(jail / "vsock.sock_6000"))
@@ -909,15 +919,25 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             if marker.stdout != "synthetic-state":
                 raise RuntimeError(f"independent scratch positive control missing: {marker.stdout!r}; {marker.stderr!r}")
             observed["scratch_write_independently_observed"] = True
-            with sqlite3.connect(state / "replay.sqlite3") as database:
-                count = database.execute("SELECT COUNT(*) FROM capability_consumptions").fetchone()[0]
-            if count != 1:
-                raise RuntimeError("authoritative consumption count is not one")
+            if package_lab is not None and package_lab.authority_config is not None:
+                authority = package_lab.observe_authority(service_config, capability)
+                if authority["record_count"] != 1:
+                    raise RuntimeError("external etcd authority consumption count is not one")
+                observed["authority_oracle"] = authority
+                count = authority["record_count"]
+            else:
+                with sqlite3.connect(state / "replay.sqlite3") as database:
+                    count = database.execute("SELECT COUNT(*) FROM capability_consumptions").fetchone()[0]
+                if count != 1:
+                    raise RuntimeError("authoritative consumption count is not one")
             observed["host_consumption_count"] = count
             observed["unredeemed_capability_at_teardown"] = spare.claims.capability_id
-            for uid, targets in ((VM_UID, (control / "events.jsonl", state / "replay.sqlite3", state / "decay.sqlite3")),
+            authority_state = ((state / "replay.sqlite3",)
+                               if service_config.get("authority_backend", "sqlite") == "sqlite" else ())
+            for uid, targets in ((VM_UID, (control / "events.jsonl", state / "decay.sqlite3")
+                                  + authority_state),
                                  (EFFECT_UID, (control / "events.jsonl", control / "synthetic-secret")
-                                  + ((state / "config.json", state / "replay.sqlite3", state / "decay.sqlite3")
+                                  + ((state / "config.json", state / "decay.sqlite3") + authority_state
                                      if package_lab is not None else ()))):
                 for target in targets:
                     for access in ("-r", "-w"):
