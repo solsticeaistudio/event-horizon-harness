@@ -94,7 +94,7 @@ class RoleReplayIdentityTests(unittest.TestCase):
         config = self.config("verifier")
         pem = Path(config["client_private_key_pem_path"])
         self.assertTrue(pem.is_file())
-        self.assertNotIn("client_private_key_pem", str(role_client_seed_path(self.root, "executor")))
+        self.assertFalse((self.root / "executor-state" / "replay-client-executor.seed").exists())
         self.assertIn("PRIVATE KEY", pem.read_text(encoding="utf-8"))
 
 
