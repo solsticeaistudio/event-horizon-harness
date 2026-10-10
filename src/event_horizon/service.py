@@ -366,7 +366,7 @@ def _signer_specs(config_path: Path) -> dict[str, MessageSpec]:
         allowed_tenant_environments={'default': frozenset({'synthetic'})},
     )
     signing_seed = load_private_seed(config['signing_key_path'])
-    remote = remote_client(config['remote_replay']) if config['remote_replay'] else None
+    remote = remote_client(config['remote_replay']) if config['remote_replay'] is not None else None
     request_authorizer = _protected_authorizer(config, 'capability-signer', remote=remote)
     consumption_store = (
         RemoteCapabilityConsumptionStore(remote, partition='capability.authority')
@@ -571,7 +571,7 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
         {'path', 'signing_key_path', 'max_event_bytes', 'remote_replay', *PROTECTED_CONFIG_FIELDS},
     )
     signing_seed = load_private_seed(config['signing_key_path'])
-    remote = remote_client(config['remote_replay']) if config['remote_replay'] else None
+    remote = remote_client(config['remote_replay']) if config['remote_replay'] is not None else None
     request_authorizer = _protected_authorizer(config, 'evidence-recorder', remote=remote)
     recorder = ExternalRecorder(
         config['path'],
@@ -630,7 +630,7 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
         {'recorder_path', 'signing_key_path', 'remote_replay', *PROTECTED_CONFIG_FIELDS},
     )
     signing_seed = load_private_seed(config['signing_key_path'])
-    remote = remote_client(config['remote_replay']) if config['remote_replay'] else None
+    remote = remote_client(config['remote_replay']) if config['remote_replay'] is not None else None
     request_authorizer = _protected_authorizer(config, 'certificate-signer', remote=remote)
     recorder_view = ExternalRecorder(config['recorder_path'], b'R' * 32)
     builder = ContainmentCertificateBuilder(recorder_view, signing_seed)
