@@ -136,14 +136,20 @@ def _verify_strict_report(
         pinned_recorder_public_key=pinned_recorder_public_key,
     )
     events = report["signed_evidence"]["events"]
+    first = "distributed-7-process"
+    second = "during-authority-outage"
+    # Other harness / service tests may emit additional execution evidence.
+    # Match this experiment's seven named coordinator attempts exactly, rather
+    # than assuming it is the only producer of execution events in the chain.
     execution_events = [
         event for event in events
         if event["event_type"] in {
             "execution.completed", "execution.denied", "execution.indeterminate",
         }
+        and event["source_id"] == "coordinator"
+        and isinstance(event["payload"], Mapping)
+        and event["payload"].get("request_id") in {first, second}
     ]
-    first = "distributed-7-process"
-    second = "during-authority-outage"
     # Every attempted effect must appear as a separate primary execution
     # event, in experiment order. A signed PASS boolean is not a substitute.
     expected = [
@@ -155,8 +161,12 @@ def _verify_strict_report(
         ("recovery_replay", second, False, "not-started"),
         ("signer_restart_replay", first, False, "not-started"),
     ]
-    _require(len(execution_events) == len(expected),
-             "signed primary execution-event count differs from test attempts")
+    _require(
+        len(execution_events) == len(expected),
+        "signed primary execution-event count differs from test attempts: "
+        + repr([(item["event_type"], item["payload"].get("request_id"))
+                for item in execution_events]),
+    )
     derived: dict[str, bool] = {}
     for event, (case, request_id, successful, state) in zip(
         execution_events, expected, strict=True,
