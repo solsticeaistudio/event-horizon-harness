@@ -25,6 +25,12 @@ on:
     paths:
       - "src/event_horizon/etcd_signed_replay.py"
       - "src/event_horizon/distributed_signed_evidence.py"
+      - "src/event_horizon/effect_boundary.py"
+      - "scripts/package_authority_oracle.py"
+      - "scripts/run_package_isolation.py"
+      - "scripts/run_linux_isolation.py"
+      - "tests/test_package_authority_oracle.py"
+      - "tests/test_package_etcd_live.py"
       - "tests/test_etcd_signed_replay.py"
       - "tests/test_etcd_signed_replay_live.py"
       - "tests/test_distributed_signed_evidence.py"
@@ -101,6 +107,10 @@ jobs:
         env:
           EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
         run: python -m unittest tests.test_etcd_live -v
+      - name: Verify package host gateway uses real quorum-backed replay and external oracle
+        env:
+          EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
+        run: python -m unittest tests.test_package_etcd_live -v
       - name: Verify full signed nonce/capability/authorization/checkpoint authority
         env:
           EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
