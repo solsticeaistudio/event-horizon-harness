@@ -21,6 +21,7 @@ from .protected_boundary import (
     provision_private_seed,
 )
 from .recorder import ExternalRecorder
+from .trusted_replay_client import provision_replay_client_policies, role_remote_settings
 
 
 class ServiceUnavailable(RuntimeError):
@@ -179,7 +180,9 @@ class ProcessSeparatedHarness:
         *,
         ttl_seconds: float = 5.0,
         inject_permissive_guardian: bool = False,
+        remote_authority: Mapping[str, Any] | None = None,
     ):
+        self.remote_authority = dict(remote_authority) if remote_authority is not None else None
         self.workdir = Path(workdir)
         self.repository_root = Path(__file__).resolve().parents[2]
         self.trusted_dir = self.workdir / 'trusted-control'
@@ -275,6 +278,10 @@ class ProcessSeparatedHarness:
         })
         attestation_root = self.repository_root / 'attestation'
         replay_namespace = 'public-process-harness'
+        if self.remote_authority is not None:
+            # Role-bound client seeds are preprovisioned before the server is
+            # started so its policy registration is out of band.
+            provision_replay_client_policies(self.workdir, self.remote_authority['service_id'])
         _provision_or_load_seed(self.capability_key_path)
         _provision_or_load_seed(self.recorder_key_path)
         _provision_or_load_seed(self.certificate_key_path)
@@ -294,6 +301,10 @@ class ProcessSeparatedHarness:
                 'authorized_client_key_id': request_signer.key_id,
                 'authorization_replay_database': str(database),
                 'authorization_namespace': replay_namespace,
+                'remote_replay': (
+                    role_remote_settings(self.workdir, role, self.remote_authority)
+                    if self.remote_authority is not None else None
+                ),
             }
 
         try:
@@ -305,6 +316,10 @@ class ProcessSeparatedHarness:
                     'device_seeds': {'exec-1': simulator_seed},
                     'replay_database': str(self.authority_replay_path),
                     'replay_namespace': replay_namespace,
+                    'remote_replay': (
+                        role_remote_settings(self.workdir, 'verifier', self.remote_authority)
+                        if self.remote_authority is not None else None
+                    ),
                 },
             )
             self._start_role(

@@ -89,6 +89,7 @@ class DevelopmentAttestationProvider:
     timeout_seconds: float = 10.0
     replay_database: Path | None = None
     replay_namespace: str = "event-horizon"
+    remote_replay: Mapping[str, Any] | None = None
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False)
 
     def verify_executor(
@@ -106,7 +107,24 @@ class DevelopmentAttestationProvider:
                 raise AttestationError(f"Executor Attestation bridge missing: {script}")
             try:
                 environment = os.environ.copy()
-                if self.replay_database is not None:
+                if self.remote_replay is not None:
+                    from .canonical import canonical_bytes
+                    from .trusted_replay_client import REMOTE_FIELDS
+                    remote = dict(self.remote_replay)
+                    if set(remote) != REMOTE_FIELDS | {"client_private_key_pem_path"}:
+                        raise AttestationError("remote nonce replay configuration is incomplete")
+                    # Node verifier has only a trusted client key and no etcd
+                    # credentials. A failure MUST NOT enable local nonce state.
+                    state_path = Path(remote["checkpoint_state_path"])
+                    config_path = state_path.with_name("nonce-remote-verifier.json")
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                    if config_path.is_symlink():
+                        raise AttestationError("remote replay verifier config is a symlink")
+                    config_path.write_bytes(canonical_bytes(remote))
+                    if os.name != "nt":
+                        config_path.chmod(0o600)
+                    environment["EH_ATTESTATION_REMOTE_REPLAY_CONFIG"] = str(config_path)
+                elif self.replay_database is not None:
                     environment["EH_ATTESTATION_REPLAY_DB"] = str(self.replay_database.resolve())
                     environment["EH_ATTESTATION_REPLAY_NAMESPACE"] = self.replay_namespace
                 completed = subprocess.run(

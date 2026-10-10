@@ -1223,6 +1223,13 @@ class RemoteAuthorizationReplayStore:
         return response["accepted"] is True
 
 
+class _DenyReplayRedirects(urllib.request.HTTPRedirectHandler):
+    """Signed authority messages must never be forwarded to a different URL."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class HttpReplayTransport:
     def __init__(
         self,
@@ -1251,6 +1258,10 @@ class HttpReplayTransport:
             self._ssl_context.load_cert_chain(certfile=client_cert_path, keyfile=client_key_path)
             if not verify_hostname:
                 self._ssl_context.check_hostname = False
+        handlers = [_DenyReplayRedirects()]
+        if self._ssl_context is not None:
+            handlers.append(urllib.request.HTTPSHandler(context=self._ssl_context))
+        self._opener = urllib.request.build_opener(*handlers)
 
     def __call__(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         body = canonical_bytes(request)
@@ -1261,16 +1272,10 @@ class HttpReplayTransport:
             method="POST",
         )
         try:
-            if self._ssl_context is not None:
-                with urllib.request.urlopen(message, timeout=self.timeout_seconds, context=self._ssl_context) as response:
-                    if response.status != 200:
-                        raise ReplayUnavailableError("replay service returned a non-success status")
-                    content = response.read(MAX_HTTP_BODY_BYTES + 1)
-            else:
-                with urllib.request.urlopen(message, timeout=self.timeout_seconds) as response:
-                    if response.status != 200:
-                        raise ReplayUnavailableError("replay service returned a non-success status")
-                    content = response.read(MAX_HTTP_BODY_BYTES + 1)
+            with self._opener.open(message, timeout=self.timeout_seconds) as response:
+                if response.status != 200:
+                    raise ReplayUnavailableError("replay service returned a non-success status")
+                content = response.read(MAX_HTTP_BODY_BYTES + 1)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise ReplayUnavailableError("replay service is unavailable") from exc
         if len(content) > MAX_HTTP_BODY_BYTES:

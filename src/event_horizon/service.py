@@ -31,6 +31,8 @@ from .protected_boundary import (
 )
 from .recorder import ExternalRecorder
 from .replay_state import SqliteCapabilityConsumptionStore
+from .remote_replay import RemoteAuthorizationReplayStore, RemoteCapabilityConsumptionStore
+from .trusted_replay_client import remote_client
 from .task_policy import (
     AuthorityReduction,
     ProviderTrustState,
@@ -53,7 +55,11 @@ def _load_config(path: Path, role: str, fields: set[str]) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError('service configuration is unavailable or malformed') from exc
-    _exact(payload, {'role', *fields}, 'service configuration')
+    # Optional field, but never allow unrelated unknown service settings.
+    base_fields = {'role', *fields}
+    if 'remote_replay' in fields and set(payload) == base_fields - {'remote_replay'}:
+        payload['remote_replay'] = None
+    _exact(payload, base_fields, 'service configuration')
     if payload['role'] != role:
         raise RuntimeError('service role does not match configuration')
     return payload
@@ -70,12 +76,22 @@ PROTECTED_CONFIG_FIELDS = {
 def _protected_authorizer(
     config: Mapping[str, Any],
     audience: str,
+    *,
+    remote=None,
 ) -> ProtectedRequestVerifier:
-    replay_store = SqliteAuthorizationReplayStore(
-        config['authorization_replay_database'],
-        namespace=config['authorization_namespace'],
-        audience=audience,
-    )
+    if remote is None:
+        replay_store = SqliteAuthorizationReplayStore(
+            config['authorization_replay_database'],
+            namespace=config['authorization_namespace'],
+            audience=audience,
+        )
+    else:
+        partition = {
+            'capability-signer': 'protected.signer',
+            'evidence-recorder': 'protected.recorder',
+            'certificate-signer': 'protected.certificate',
+        }[audience]
+        replay_store = RemoteAuthorizationReplayStore(remote, partition=partition)
     return ProtectedRequestVerifier(
         config['authorized_client_public_key'],
         config['authorized_client_key_id'],
@@ -164,7 +180,7 @@ def _verifier_specs(config_path: Path) -> dict[str, MessageSpec]:
     config = _load_config(
         config_path,
         'verifier',
-        {'attestation_root', 'device_seeds', 'replay_database', 'replay_namespace'},
+        {'attestation_root', 'device_seeds', 'replay_database', 'replay_namespace', 'remote_replay'},
     )
     if not isinstance(config['device_seeds'], dict):
         raise RuntimeError('verifier device enrollment is invalid')
@@ -173,6 +189,7 @@ def _verifier_specs(config_path: Path) -> dict[str, MessageSpec]:
         device_seeds=config['device_seeds'],
         replay_database=Path(config['replay_database']),
         replay_namespace=config['replay_namespace'],
+        remote_replay=config['remote_replay'],
     )
 
     def verify_executor(body: dict[str, Any]) -> Mapping[str, Any]:
@@ -337,7 +354,7 @@ def _signer_specs(config_path: Path) -> dict[str, MessageSpec]:
         {
             'ttl_seconds', 'signing_key_path', 'replay_database',
             'replay_namespace', 'consumption_domain', 'decay_database', 'policy',
-            *PROTECTED_CONFIG_FIELDS,
+            *PROTECTED_CONFIG_FIELDS, 'remote_replay',
         },
     )
     policy = _policy(config['policy'])
@@ -349,11 +366,15 @@ def _signer_specs(config_path: Path) -> dict[str, MessageSpec]:
         allowed_tenant_environments={'default': frozenset({'synthetic'})},
     )
     signing_seed = load_private_seed(config['signing_key_path'])
-    request_authorizer = _protected_authorizer(config, 'capability-signer')
-    consumption_store = SqliteCapabilityConsumptionStore(
-        config['replay_database'],
-        namespace=config['replay_namespace'],
-        domain=config['consumption_domain'],
+    remote = remote_client(config['remote_replay']) if config['remote_replay'] is not None else None
+    request_authorizer = _protected_authorizer(config, 'capability-signer', remote=remote)
+    consumption_store = (
+        RemoteCapabilityConsumptionStore(remote, partition='capability.authority')
+        if remote is not None else SqliteCapabilityConsumptionStore(
+            config['replay_database'],
+            namespace=config['replay_namespace'],
+            domain=config['consumption_domain'],
+        )
     )
     broker = CapabilityBroker(
         signing_seed,
@@ -547,10 +568,11 @@ def _recorder_specs(config_path: Path) -> dict[str, MessageSpec]:
     config = _load_config(
         config_path,
         'recorder',
-        {'path', 'signing_key_path', 'max_event_bytes', *PROTECTED_CONFIG_FIELDS},
+        {'path', 'signing_key_path', 'max_event_bytes', 'remote_replay', *PROTECTED_CONFIG_FIELDS},
     )
     signing_seed = load_private_seed(config['signing_key_path'])
-    request_authorizer = _protected_authorizer(config, 'evidence-recorder')
+    remote = remote_client(config['remote_replay']) if config['remote_replay'] is not None else None
+    request_authorizer = _protected_authorizer(config, 'evidence-recorder', remote=remote)
     recorder = ExternalRecorder(
         config['path'],
         signing_seed,
@@ -605,10 +627,11 @@ def _certificate_specs(config_path: Path) -> dict[str, MessageSpec]:
     config = _load_config(
         config_path,
         'certificate',
-        {'recorder_path', 'signing_key_path', *PROTECTED_CONFIG_FIELDS},
+        {'recorder_path', 'signing_key_path', 'remote_replay', *PROTECTED_CONFIG_FIELDS},
     )
     signing_seed = load_private_seed(config['signing_key_path'])
-    request_authorizer = _protected_authorizer(config, 'certificate-signer')
+    remote = remote_client(config['remote_replay']) if config['remote_replay'] is not None else None
+    request_authorizer = _protected_authorizer(config, 'certificate-signer', remote=remote)
     recorder_view = ExternalRecorder(config['recorder_path'], b'R' * 32)
     builder = ContainmentCertificateBuilder(recorder_view, signing_seed)
 
