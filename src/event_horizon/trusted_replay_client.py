@@ -7,7 +7,6 @@ No network/plaintext fallback and no local SQLite fallback in remote mode.
 """
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 import threading
@@ -121,7 +120,9 @@ def role_remote_settings(
             serialization.NoEncryption(),
         )
         pem_file.parent.mkdir(parents=True, exist_ok=True)
-        if pem_file.exists() and pem_file.read_bytes() != pkcs8:
+        if pem_file.is_symlink():
+            raise RuntimeError("remote nonce client PEM must not be a symlink")
+        if pem_file.exists() and (not pem_file.is_file() or pem_file.read_bytes() != pkcs8):
             raise RuntimeError("remote nonce client PEM differs from pinned role seed")
         if not pem_file.exists():
             # Constrain private PEM creation and avoid symlink following.
