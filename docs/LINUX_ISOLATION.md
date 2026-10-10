@@ -40,6 +40,42 @@ The requested report is marked `INCOMPLETE` at the start of a run and becomes `P
 
 ## Build and reproduce
 
+The source-controlled `firecracker/linux-kvm.lock.json` pins the upstream
+Firecracker v1.15.1 x86_64 release by the official GitHub release SHA-256
+digest and the 6.1.155 CI kernel digest from the repository's recorded WSL2
+fixture. The preparation command checks both downloaded blobs against these
+hashes before extraction. The kernel hash is historical fixture evidence,
+not independent authentication of AWS S3; a wrong or replaced download is
+rejected rather than used.
+
+For a fresh Ubuntu 24.04 WSL2 installation, do setup in the **Linux home
+filesystem** (not `/mnt/c`) to avoid jailer, file ownership and Unix-socket
+permission semantics varying across NTFS mounts:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git python3-venv python3-pip build-essential libc6-dev \
+  e2fsprogs util-linux ca-certificates
+cd ~
+git clone https://github.com/solsticeaistudio/event-horizon-harness.git
+cd event-horizon-harness
+python3 -m venv /var/tmp/event-horizon-isolation-venv
+/var/tmp/event-horizon-isolation-venv/bin/python -m pip install -e .
+python3 scripts/prepare_linux_isolation.py
+mkdir -p artifacts/reports
+sudo /var/tmp/event-horizon-isolation-venv/bin/python scripts/run_linux_isolation.py run \
+  --report artifacts/reports/linux-isolation.json
+/var/tmp/event-horizon-isolation-venv/bin/python scripts/verify_linux_isolation.py \
+  artifacts/reports/linux-isolation.json
+```
+
+Use this opt-in program only with trusted, owned synthetic fixtures.
+It runs a root-owned experiment launcher and dedicated cgroups. Review the
+script and the [lab boundaries](#boundaries-and-authority) before executing.
+The existing experiment is the standalone **SQLite-authorized dataset
+gateway**, not yet an integration of Firecracker with the new distributed
+signed etcd authority.
+
 Linux dependencies: Python 3.11+ and the pinned project dependencies; GCC/static libc, `mkfs.ext4`, `debugfs`, `unshare`, `setpriv`; accessible KVM; and already-enabled cgroup v2 `cpu`, `memory`, `pids` controllers. The launcher needs root to configure the jail and dedicated cgroups, then drops the VM/service identities. It refuses unsupported prerequisites without a fallback.
 
 From the repository on the selected Linux host:

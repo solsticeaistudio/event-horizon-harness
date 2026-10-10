@@ -125,7 +125,7 @@ fix_timestamp.py
 firecracker.zip
 firecracker/build/
 firecracker/guest/
-firecracker/linux-kvm.lock.json
+# Keep firecracker/linux-kvm.lock.json tracked: source-of-truth asset hashes
 firecracker/guest/compromised_package.c
 
 # Formal verification artifacts
