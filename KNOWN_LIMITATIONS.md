@@ -26,6 +26,14 @@ actually executed.
   observations were truthful or independently observed, nor cryptographically
   attest an actual etcd cluster. Historical v1 reports only authenticate
   coordinator PASS assertions. Independent signer pinning remains necessary.
+- The opt-in [package-service KVM experiment](docs/PACKAGE_ISOLATION.md)
+  can select a pinned disposable loopback etcd quorum for host-enforced
+  capability consumption. The host's linearizable oracle checks the exact
+  consumed record and signed event correlation. CI runs its real etcd
+  gateway/oracle tests without KVM; **no completed combined operator-run
+  Firecracker+etcd report is currently published**. The worker is a fixed
+  synthetic already-compromised fixture, not an adaptive AI agent. Host
+  supervisor, host-side oracle, recorder and underlying etcd remain trusted.
 - The recent seven-process CI runs use a real three-member etcd Raft cluster
   and a same-host signed HTTP authority. Real consensus is tested for
   capability, authorization and attestation nonce replay plus signed
