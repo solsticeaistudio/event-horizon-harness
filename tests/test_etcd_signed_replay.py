@@ -109,7 +109,9 @@ class SignedEtcdTests(unittest.TestCase):
             },
             partitions={"broker", "nonce", "auth"},
         )
+        self.trusted_clock = {"seconds": 1.5}
         self.params = dict(
+            transition_clock=lambda: self.trusted_clock["seconds"],
             expected_cluster_id=CID, namespace="study",
             service_id=SID, epoch=1, signing_key=self.server_seed,
             clients={self.policy.key_id: self.policy},
@@ -130,11 +132,11 @@ class SignedEtcdTests(unittest.TestCase):
         self.assertTrue(auth.consume(NONCE, "b" * 64, 5000, 1000))
         self.assertFalse(cap.consume(CAP, "a" * 64, 5000, 1000))
         self.assertFalse(auth.consume(NONCE, "b" * 64, 5000, 1000))
-        self.assertEqual(c.checkpoint, 4)
-        self.assertEqual(self.service.checkpoint()[1:], (4, c.checkpoint_digest))
+        self.assertEqual(c.checkpoint, 2)
+        self.assertEqual(self.service.checkpoint()[1:], (2, c.checkpoint_digest))
         self.assertEqual(
             len([key for key in self.etcd.data if b"/checkpoint/" in base64.b64decode(key)]),
-            5,
+            3,
         )
 
     def test_nonce_lifecycle_binds_and_commits_state_and_checkpoint_together(self):
@@ -160,7 +162,7 @@ class SignedEtcdTests(unittest.TestCase):
         self.assertFalse(c.call("nonce-consume", "nonce", {
             "nonce": NONCE, "context_digest": digest(context), "now": 1501,
         })["accepted"])
-        self.assertEqual(c.checkpoint, 4)
+        self.assertEqual(c.checkpoint, 2)
         # On restart, no new bootstrap and no previous nonce disclosure.
         restarted = EtcdSignedReplayService(self.etcd, **self.params)
         self.assertEqual(restarted.checkpoint()[1:], self.service.checkpoint()[1:])
@@ -175,6 +177,7 @@ class SignedEtcdTests(unittest.TestCase):
         }
         self.assertTrue(c.call("nonce-create", "nonce", creation)["accepted"])
         self.assertEqual(c.call("nonce-create", "nonce", creation)["status"], "already-exists")
+        self.trusted_clock["seconds"] = 2.5
         expired = c.call("nonce-consume", "nonce", {
             "nonce": NONCE, "context_digest": digest(context), "now": 2500,
         })
@@ -207,7 +210,7 @@ class SignedEtcdTests(unittest.TestCase):
             results = list(pool.map(attempt, range(24)))
         self.assertEqual(results.count(True), 1)
         self.assertEqual(results.count(False), 23)
-        self.assertEqual(self.service.checkpoint()[1], 24)
+        self.assertEqual(self.service.checkpoint()[1], 1)
 
     def test_quorum_outage_and_ambiguous_response_fail_closed(self):
         c = self.client()
@@ -249,8 +252,8 @@ class SignedEtcdTests(unittest.TestCase):
             store = RemoteCapabilityConsumptionStore(client, partition="broker")
             self.assertTrue(store.consume(CAP, "e"*64, 5000, 1000))
             self.assertFalse(store.consume(CAP, "e"*64, 5000, 1001))
-            self.assertEqual(client.checkpoint, 2)
-            self.assertEqual(self.service.checkpoint()[1], 2)
+            self.assertEqual(client.checkpoint, 1)
+            self.assertEqual(self.service.checkpoint()[1], 1)
         finally:
             server.close()
 
@@ -266,6 +269,54 @@ class SignedEtcdTests(unittest.TestCase):
         c = self.client()
         with self.assertRaises(ReplayProtocolError):
             c.call("raft-vote", "broker", {"term": 1})
+
+
+    def test_server_clock_rejects_backdated_nonce_redemption(self):
+        c = self.client()
+        context = {
+            "deviceId": "device", "executorId": "executor",
+            "purpose": "attest", "sessionId": "session",
+        }
+        self.assertTrue(c.call("nonce-create", "nonce", {
+            "nonce": NONCE, "context": context,
+            "context_digest": digest(context),
+            "issued_at": 1000, "expires_at": 2000,
+        })["accepted"])
+        self.trusted_clock["seconds"] = 2.5
+        response = c.call("nonce-consume", "nonce", {
+            "nonce": NONCE, "context_digest": digest(context),
+            "now": 1500,  # A signed but stale client timestamp.
+        })
+        self.assertEqual(response["status"], "expired")
+        self.assertFalse(response["accepted"])
+
+    def test_no_op_denials_and_inspection_do_not_write_checkpoints(self):
+        c = self.client()
+        baseline = self.service.checkpoint()
+        for _ in range(5):
+            self.assertEqual(c.call("nonce-inspect", "nonce", {
+                "nonce": NONCE, "now": 1500,
+            })["status"], "unknown")
+        self.assertEqual(self.service.checkpoint(), baseline)
+        cap = RemoteCapabilityConsumptionStore(c, partition="broker")
+        self.assertTrue(cap.consume(CAP, "f" * 64, 5000, 1500))
+        committed = self.service.checkpoint()
+        for _ in range(5):
+            self.assertFalse(cap.consume(CAP, "f" * 64, 5000, 1500))
+        self.assertEqual(self.service.checkpoint(), committed)
+
+    def test_client_rate_budget_fails_closed_without_etcd_writes(self):
+        params = {**self.params, "max_client_requests_per_minute": 2}
+        limited = EtcdSignedReplayService(self.etcd, **params)
+        c = self.client(limited.handle)
+        for _ in range(2):
+            self.assertEqual(c.call("nonce-inspect", "nonce", {
+                "nonce": NONCE, "now": 1500,
+            })["status"], "unknown")
+        prior = limited.checkpoint()
+        with self.assertRaises(ReplayProtocolError):
+            c.call("nonce-inspect", "nonce", {"nonce": NONCE, "now": 1500})
+        self.assertEqual(limited.checkpoint(), prior)
 
 
 if __name__ == "__main__":

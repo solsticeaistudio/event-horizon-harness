@@ -135,6 +135,22 @@ two members forming the remaining majority:
 - `report-quorum-3.json`
 - `report-quorum-2.json`
 
+Newly generated reports use the v2 schema and include individual execution
+outcome records for six attempted effects, five structured coordinator
+probes (including the authority-outage result captured *after* recovery), and a signed-by-recorder coordinator snapshot of the etcd
+cluster ID, service ID, epoch, and checkpoint digest. The v2 verifier
+cross-checks the PASS labels against those records and rejects missing
+or contradictory primary records. **This still trusts the coordinator as
+an observer**; it does not supply an independently hosted effect oracle
+or independently authenticated etcd provenance. Historical v1 files
+remain verifiable but do not provide these stricter checks.
+
+Replay decisions now use the trusted service clock rather than a client
+nonce `now` field, with clock-skew rejection. The etcd backend only
+checkpoints actual record transitions, not idempotent denied/replayed
+requests or read-only inspections. A per-client, per-instance admission
+budget reduces excess request load but is not a distributed rate limit.
+
 Each report embeds the recorder's hash-chained event stream with independent
 Ed25519 receipt signatures, eleven explicit adversarial acceptance outcomes,
 two real signed capability issuances, and two permitted synthetic effect

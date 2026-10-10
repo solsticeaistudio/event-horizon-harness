@@ -18,6 +18,9 @@ operator explicitly requests bootstrap.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from collections import deque
+import threading
+import time
 from typing import Any
 
 from cryptography.hazmat.primitives import serialization
@@ -48,6 +51,8 @@ from .remote_replay import (
     _require_scope,
     genesis_checkpoint_digest,
     replay_key_id,
+    _now_ms,
+    MAX_CLOCK_SKEW_MS,
 )
 from .replay_state import CapabilityConsumptionError
 
@@ -83,6 +88,8 @@ class EtcdSignedReplayService:
         clients: Mapping[str, ReplayClientPolicy],
         now: Callable[[], float] | None = None,
         bootstrap: bool = False,
+        transition_clock: Callable[[], float] | None = None,
+        max_client_requests_per_minute: int = 240,
     ):
         if not callable(transport):
             raise TypeError("etcd replay transport must be callable")
@@ -100,6 +107,14 @@ class EtcdSignedReplayService:
         if any(key != policy.key_id for key, policy in self.clients.items()):
             raise ValueError("replay client policy key mismatch")
         self.now = now
+        # transition_clock is for deterministic lab tests; production uses
+        # the trusted server clock used by signed request freshness.
+        self._transition_clock = transition_clock
+        if type(max_client_requests_per_minute) is not int or max_client_requests_per_minute < 1:
+            raise ValueError("per-client replay request limit must be positive")
+        self.max_client_requests_per_minute = max_client_requests_per_minute
+        self._admission_lock = threading.Lock()
+        self._admission = {}
         self.prefix = f"/event-horizon/signed-replay/v1/{self.namespace}/{self.service_id}"
         self.head_key = _b64(f"{self.prefix}/head".encode("utf-8"))
         if bootstrap:
@@ -267,6 +282,10 @@ class EtcdSignedReplayService:
 
     def handle(self, request: Mapping[str, Any]) -> dict[str, Any]:
         authenticated, policy, request_digest = ReferenceReplayService._authenticate_request(self, request)
+        # Bound authenticated-client workload before reaching the global
+        # etcd head. Each service instance has its own in-memory limit;
+        # deploy an upstream distributed limiter for multi-instance use.
+        self._admit_client(authenticated["client_key_id"])
         operation = authenticated["operation"]
         partition = authenticated["partition"]
         if operation not in self._SUPPORTED:
@@ -313,6 +332,15 @@ class EtcdSignedReplayService:
             accepted, status, result, next_record = self._transition(
                 operation, authenticated["payload"], token, record,
             )
+            # A duplicate denial, wrong-context attempt, or read-only
+            # inspection is not a state transition. Return a signed result
+            # pinned to the observed head without creating another global
+            # checkpoint. This significantly reduces write amplification.
+            if next_record == record:
+                return self._sign_response(
+                    authenticated, request_digest, accepted=accepted,
+                    status=status, result=result, state=state,
+                )
             next_num = state["checkpoint"] + 1
             next_digest = digest({
                 "schema": "event-horizon.replay-checkpoint.v1",
@@ -389,22 +417,37 @@ class EtcdSignedReplayService:
             result["consumedAt"] = row["consumed_at"]
         return result
 
-    @staticmethod
+    def _admit_client(self, client_key_id: str) -> None:
+        instant = time.monotonic()
+        with self._admission_lock:
+            hits = self._admission.setdefault(client_key_id, deque())
+            while hits and instant - hits[0] >= 60:
+                hits.popleft()
+            if len(hits) >= self.max_client_requests_per_minute:
+                raise ReplayProtocolError("replay client request budget exhausted")
+            hits.append(instant)
+
     def _transition(
+        self,
         operation: str, payload: Mapping[str, Any], token: str,
         existing: dict[str, Any] | None,
     ) -> tuple[bool, str, dict[str, Any], dict[str, Any] | None]:
+        trusted_now = _now_ms(self._transition_clock or self.now)
         if operation in {"capability-consume", "authorization-consume"}:
             value = _require_exact_fields(
                 payload, {"binding_digest", "consumed_at", "expires_at", "token"}, "token payload"
             )
             binding = _require_digest(value["binding_digest"], "token binding")
             expiry = _require_positive_integer(value["expires_at"], "token expiry")
-            consumed = _require_integer(value["consumed_at"], "token consumption")
+            claimed_time = _require_integer(value["consumed_at"], "token consumption")
+            if abs(claimed_time - trusted_now) > MAX_CLOCK_SKEW_MS:
+                raise ReplayProtocolError("token timestamp differs from trusted service clock")
+            if trusted_now >= expiry:
+                return False, "expired", {}, existing
             if existing is None:
                 return True, "consumed-now", {}, {
                     "schema": "eh.signed-replay-token.v1",
-                    "binding_digest": binding, "expires_at": expiry, "consumed_at": consumed,
+                    "binding_digest": binding, "expires_at": expiry, "consumed_at": trusted_now,
                 }
             if (
                 set(existing) != {"schema", "binding_digest", "expires_at", "consumed_at"}
@@ -435,6 +478,8 @@ class EtcdSignedReplayService:
             expires = _require_positive_integer(value["expires_at"], "nonce expires")
             if expires <= issued or expires - issued > 3_600_000:
                 raise ReplayProtocolError("nonce lifetime invalid")
+            if abs(issued - trusted_now) > MAX_CLOCK_SKEW_MS or trusted_now >= expires:
+                raise ReplayProtocolError("nonce issuance is outside trusted time window")
             candidate = {
                 "schema": "eh.signed-replay-nonce.v1", "nonce": token,
                 "context": dict(context), "context_digest": cdigest,
@@ -454,7 +499,10 @@ class EtcdSignedReplayService:
             raise ReplayProtocolError("unsupported replay operation")
         fields = {"nonce", "now"} | ({"context_digest"} if operation == "nonce-consume" else set())
         value = _require_exact_fields(payload, fields, "nonce operation")
-        at = _require_integer(value["now"], "nonce now")
+        claimed_now = _require_integer(value["now"], "nonce now")
+        if abs(claimed_now - trusted_now) > MAX_CLOCK_SKEW_MS:
+            raise ReplayProtocolError("nonce timestamp differs from trusted service clock")
+        at = trusted_now
         cdigest = (
             _require_digest(value["context_digest"], "nonce context digest")
             if operation == "nonce-consume" else None

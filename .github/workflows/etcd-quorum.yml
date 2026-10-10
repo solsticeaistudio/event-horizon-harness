@@ -23,6 +23,11 @@ on:
       - ".github/workflows/etcd-quorum.yml"
   pull_request:
     paths:
+      - "src/event_horizon/etcd_signed_replay.py"
+      - "src/event_horizon/distributed_signed_evidence.py"
+      - "tests/test_etcd_signed_replay.py"
+      - "tests/test_etcd_signed_replay_live.py"
+      - "tests/test_distributed_signed_evidence.py"
       - "src/event_horizon/authority_backends.py"
       - "src/event_horizon/trusted_effect_gateway.py"
       - "src/event_horizon/effect_boundary.py"
@@ -206,7 +211,7 @@ jobs:
               raise SystemExit("restarted two-member majority did not become healthy")
           PY
           python - <<'PY'
-          import os, subprocess, uuid
+          import os, subprocess, time, uuid
           from event_horizon.canonical import digest
           from event_horizon.remote_replay import ReplayStateError, ReplayUnavailableError
           from tests.test_etcd_signed_replay_live import provision
@@ -216,16 +221,17 @@ jobs:
           nonce = "A" * 43
           ctx = {"deviceId":"dev", "executorId":"exec",
                  "purpose":"attest", "sessionId":"scope"}
+          now = int(time.time() * 1000)
           assert client.call("nonce-create", "nonces", {
               "nonce":nonce, "context":ctx, "context_digest":digest(ctx),
-              "issued_at":1000, "expires_at":5000,
+              "issued_at":now, "expires_at":now + 60_000,
           })["accepted"]
           checkpoint = service.checkpoint()
           subprocess.run(["docker","stop","eh-etcd-3"], check=True,
                          capture_output=True, text=True)
           try:
               client.call("nonce-consume", "nonces", {
-                  "nonce":nonce, "context_digest":digest(ctx), "now":2000,
+                  "nonce":nonce, "context_digest":digest(ctx), "now":now,
               })
           except (ReplayStateError, ReplayUnavailableError):
               print("PASS: signed replay authority denied nonce with minority; checkpoint before outage",checkpoint)

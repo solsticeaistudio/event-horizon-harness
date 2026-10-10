@@ -12,6 +12,20 @@ actually executed.
 - A **historical separate** Firecracker/Ubuntu/WSL2 lab exercised root inside
   a restricted synthetic microVM. The updated distributed seven-process path
   has **not** yet been run under KVM or reviewed for VM escape resistance.
+- The etcd replay authority uses its own trusted server clock for
+  redemption/expiry decisions and bounds the incoming claimed timestamp.
+  Service clock manipulation or skew beyond the configured tolerance fails
+  closed; a compromised host clock is not within the demonstrated boundary.
+  In-process per-client admission budgets and avoiding no-op checkpoint
+  writes reduce, but do not eliminate, denial-of-service risks. Limits reset
+  with a service restart and are not distributed across replicas.
+- Distributed evidence format v2 checks six attempted outcomes against
+  signed coordinator execution records and requires five signed structured
+  coordinator probes (including the post-recovery outage report), and binds an etcd ID/checkpoint snapshot to
+  its evidence chain. It **does not** establish that the coordinator's
+  observations were truthful or independently observed, nor cryptographically
+  attest an actual etcd cluster. Historical v1 reports only authenticate
+  coordinator PASS assertions. Independent signer pinning remains necessary.
 - The recent seven-process CI runs use a real three-member etcd Raft cluster
   and a same-host signed HTTP authority. Real consensus is tested for
   capability, authorization and attestation nonce replay plus signed
