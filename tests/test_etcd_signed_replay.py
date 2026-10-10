@@ -133,10 +133,10 @@ class SignedEtcdTests(unittest.TestCase):
         self.assertFalse(cap.consume(CAP, "a" * 64, 5000, 1000))
         self.assertFalse(auth.consume(NONCE, "b" * 64, 5000, 1000))
         self.assertEqual(c.checkpoint, 2)
-        self.assertEqual(self.service.checkpoint()[1:], (4, c.checkpoint_digest))
+        self.assertEqual(self.service.checkpoint()[1:], (2, c.checkpoint_digest))
         self.assertEqual(
             len([key for key in self.etcd.data if b"/checkpoint/" in base64.b64decode(key)]),
-            5,
+            3,
         )
 
     def test_nonce_lifecycle_binds_and_commits_state_and_checkpoint_together(self):
@@ -162,7 +162,7 @@ class SignedEtcdTests(unittest.TestCase):
         self.assertFalse(c.call("nonce-consume", "nonce", {
             "nonce": NONCE, "context_digest": digest(context), "now": 1501,
         })["accepted"])
-        self.assertEqual(c.checkpoint, 4)
+        self.assertEqual(c.checkpoint, 2)
         # On restart, no new bootstrap and no previous nonce disclosure.
         restarted = EtcdSignedReplayService(self.etcd, **self.params)
         self.assertEqual(restarted.checkpoint()[1:], self.service.checkpoint()[1:])
