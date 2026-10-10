@@ -1,79 +1,94 @@
-# Status
+# Event Horizon Harness — verified engineering status
 
-## Completed
+This is a **research harness**, not a production containment product or a
+third-party security certification. The [GitHub Actions workflow](https://github.com/solsticeaistudio/event-horizon-harness/actions/workflows/ci.yml)
+is the source of truth for tests on the exact commit under review. Do not
+reuse historical test counts as current verification.
 
-- Audited the repository and recorded verified trust, capability, replay, evidence, and isolation paths in `docs/BASELINE_AUDIT.md`.
-- Implemented typed adaptive task-policy proposals, deterministic trusted compilation, static/rule/model/shadow/evaluation modes, conservative fallback, and sizing metrics.
-- Enforced provider-derived trust, exact capability bindings, durable one-use redemption, canary tripwires, signed denial certificates, persistent session-scoped behavioral subtract-only reduction, and per-capability redemption-time monotonic authority decay.
-- Added Hypothesis/stateful protocol tests, concurrent redemption stress with a vulnerable positive control, deterministic chaos hooks, bounded adaptive-adversary integration, literature metadata feed, hardware-failsafe simulator, and a narrow TLA+ model.
-- Added security reporting, public claim-boundary documentation, and reproducible extended-suite commands.
+## Tested baselines and evidence
 
-## Fixes Applied This Session (Re-audit from fresh clone)
+- **Last established seven-process integration baseline:** commit
+  `52bb5aa8df6cb788e4eb8565c68b8b3f6646cd12` (draft PR #6),
+  [three-job CI PASS](https://github.com/solsticeaistudio/event-horizon-harness/actions/runs/38015116507):
+  Python 3.11 ran **289 tests, 285 passed, 4 skipped**; Node/TypeScript
+  and integration/repository-policy jobs also passed.
+- The same baseline passed a [disposable three-node etcd quorum
+  run](https://github.com/solsticeaistudio/event-horizon-harness/actions/runs/38015119518).
+  It exercised signed nonce, capability, authorization replay, checkpoint
+  continuity, seven-process integration, two-node majority, quorum loss,
+  and fail-closed execution when the trusted replay backend was unavailable.
+  The run exported signed coordinator observations; a separately pinned
+  recorder identity is needed to authenticate their issuer.
+- **This hardening branch:** adds deterministic signed revocation-chain tests
+  and documentation cleanup. Its precise pass/fail count must be taken from
+  the *latest workflow on this branch*, not the historical 289-test baseline.
+- **Historical Linux/KVM experiment:** the [documented Firecracker
+  setup](docs/LINUX_ISOLATION.md) was exercised on a particular WSL2/Ubuntu
+  24.04.3 host in September 2026. This is not verification of the current
+  distributed-authority revision, which has **not** yet passed a new KVM
+  integration run. Production isolation and independent escape review remain
+  unproven.
+- The [TLA+ state-machine model](formal/EventHorizon.tla) includes
+  lifecycle properties such as at-most-one committed effect and consumed
+  capabilities not being reissued. Some subset invariants follow
+  definitionally from the set intersection. **The model does not yet
+  represent distributed replay-store rollback/restoration, etcd partitions,
+  or actual host/kernel effects.** No new TLC claim is made by this branch.
 
-### KeyManager Fixes (src/event_horizon/key_management.py)
-1. **Fixed `is_revoked()`**: Changed `SELECT status` to `SELECT *` so `row[5]` correctly accesses the status column (was indexing into single-column result)
-2. **Fixed `get_revocation_list()`**: SQL query building now places WHERE before ORDER BY (was `ORDER BY revoked_at WHERE ...`)
-3. **Fixed `check_revocation_chain()`**: Now requires at least 3 revocations for meaningful chain verification, properly validates each link's `previous_revocation_digest` against computed digest of previous entry
-4. **Removed duplicate method definitions**: `list_keys`, `check_rotation_needed`, `auto_rotate_due` had 5 copies each; kept only the last valid implementation
-5. **Fixed HSM-backed signing**: `_sign()` method now uses `self._hsm.sign_ed25519()` when HSM is available, with software fallback
-6. **Fixed HSM key generation**: `generate_key()` and `rotate_key()` now use HSM when configured
-7. **Restored missing `get_provenance()` method** that was accidentally removed during deduplication
+## Current architecture
 
-### HTTP Adapter Fixes (src/event_horizon/adapters/http.py)
-1. **Fixed 2PC prepare semantics**: Prepare phase now performs VALIDATION ONLY (uses dry-run parameter or HEAD/OPTIONS request) - does NOT cause external effects
-2. **Fixed 2PC commit semantics**: Commit phase now executes the ACTUAL write with the operation data and idempotency key
-3. **Added `dry_run_param` and `prepare_method` config options** to HTTPConfig for API-specific dry-run support
-4. **Updated abort semantics**: Since prepare is validation-only, abort simply cleans local state
+- Exact Ed25519 capability/request bindings and guardian unanimity
+  enforcement are central to the normal software harness.
+- Trusted signer, recorder, certificate service, and Node attestation
+  verifier can share one signed replay authority. Its etcd backend commits
+  nonce, capability, authorization and chained checkpoint transitions
+  atomically. See [full seven-process test](docs/SEVEN_PROCESS_REMOTE_AUTHORITY.md).
+- The host-side Firecracker dataset effect gateway has been wired to signed
+  capability verification in the stacked branches, but full distributed
+  authority + guest-root Firecracker testing still needs a supported KVM host.
+- HSM-backed key-manager signing is configured to fail closed on HSM
+  outages. Actual PKCS#11 device interoperability and key rotation need
+  independent hardware validation.
+- The **legacy** `raft_replay.py` is disabled for production proposals;
+  `raft_core.py` is a separately labeled research-only fixed-membership
+  laboratory. Real quorum-backed authority testing uses etcd, not custom
+  Raft.
+- `production_attestation.py` validates enrolled Ed25519-signed claims;
+  its `tpm2` identifier **does not establish a TPM quote or PCR
+  verification**. The TypeScript TPM verifier is distinct and does not
+  establish fleet enrollment/hardware endorsement in these CI experiments.
 
-## Tests Executed
+## Known gaps before making stronger claims
 
-- `python -m pytest tests/ -q`: **332 tests and 204 subtests passed** (was 213/165)
-- `python scripts/generate_security_report.py`: **PASS** (was PASS WITH UNAVAILABLE CHECKS)
-- `python scripts/check_formal_model.py --require-tlc`: **PASS** - 11,416,825 states generated, 395,328 distinct states, depth 18, all invariants hold (was skipped - now TLC runs)
-- `python -m ruff check src tests scripts`: passed
-- `python scripts/lint_python.py`: passed
+1. Independent review of the trust-critical issuer/broker, replay transitions,
+   protected request signer, host effect gate, verifier, and evidence recorder.
+2. Reproduction on a fresh KVM-capable Linux host with root-compromised guest
+   and independently captured host-side effect/access observations.
+3. Reproducible signer/cluster credential provisioning, independently pinned
+   witness/recorder identity, revocation rollback detection and audited
+   recovery/epoch promotion.
+4. Stronger formal specification of crash, partition, restore/rollback,
+   cross-domain effects, client persistence and fail-closed decisions.
+5. Separate primary deployment trust identities from simulated/test fixtures,
+   verify production TPM quote generation and endorsement roots, and complete
+   operational security hardening.
 
-## Known Failures
+## Reproduce the checks
 
-- No portable test failure is known. All 332 tests pass.
-- Physical hardware-in-the-loop, production TPM, Firecracker are unavailable in this environment (simulators used).
-- Tests are project-authored and no external security audit has occurred.
-
-## Security Limitations
-
-- Adaptive and behavioral model outputs are untrusted proposals; only deterministic compilation and reductions enforce authority.
-- The local replay/evidence stores and development keys remain under one host account; no consensus-backed multi-host or physically independent recorder is claimed.
-- Live decay state is per fresh one-use capability, not session/lineage accumulating; optional behavioral decay counters are zero in the live broker path.
-- Canary denial-certificate emission is available through the certificate infrastructure but is not automatically wired into every canary event path.
-- The adaptive LLM endpoint is optional, bounded, and controller-side; no paid endpoint or model success claim is required.
-- The hardware subsystem is a simulator only; no firmware target or physical switch was tested.
-- The formal model is a narrow state-machine model.
-- Tests are project-authored and no external security audit has occurred. No frontier-model containment claim is made.
-
-## Files Changed This Session
-
-- `src/event_horizon/key_management.py`: Fixed is_revoked, get_revocation_list, check_revocation_chain, removed duplicate methods, HSM signing, HSM key generation, restored get_provenance
-- `src/event_horizon/adapters/http.py`: Fixed 2PC prepare/commit semantics, added dry_run_param config, updated abort
-
-## Commands to Reproduce
-
-```powershell
-cd C:\dev\event-horizon-harness
+```bash
+npm ci
+npm run build
 python -m pip install -e ".[test]"
-python -m pytest tests/ -q
-python scripts/generate_security_report.py
-python scripts/check_formal_model.py --require-tlc
-python -m ruff check src tests scripts
 python scripts/lint_python.py
+python -m unittest discover -s tests -v
+python scripts/check_repository_policy.py
 ```
 
-## Next Engineering Milestone
+CI adds the TypeScript suite, end-to-end demo, signed evidence verification,
+cross-language replay interop, and real etcd quorum tests. Check the exact
+commit SHA of the workflow before quoting results.
 
-Push fixes to GitHub, create PR for review, then deploy the authenticated replay and evidence interfaces under separate principals with rollback-resistant replicated storage.
-
-## Exact Next Command
-
-```powershell
-cd C:\dev\event-horizon-harness
-git push --force origin fix/truthful-execution-outcomes
-```
+See [known limitations](KNOWN_LIMITATIONS.md),
+[Linux isolation](docs/LINUX_ISOLATION.md),
+[atomic signed replay](docs/ATOMIC_SIGNED_ETCD_REPLAY.md), and
+[seven-process integration](docs/SEVEN_PROCESS_REMOTE_AUTHORITY.md).

@@ -1,11 +1,9 @@
-"""Raft consensus for replicated replay service.
+"""DEPRECATED / UNSAFE Raft prototype retained only for source review.
 
-Provides leader election, log replication, and checkpoint continuity.
-Old-leader fencing via monotonic term numbers.
-Rollback-resistant checkpoints via quorum commits.
-Log snapshotting for log compaction.
-Membership changes via joint consensus.
-Leadership transfer for graceful leadership transfer.
+DO NOT USE FOR AUTHORITY. This incomplete implementation lacks safe durable
+quorum commits, verified old-leader fencing, functional snapshot SQL, and a
+proof of crash/restart safety. Both `propose` and the cluster factory fail
+closed. Use `etcd_signed_replay.py` for the tested consensus-backed service.
 """
 
 from __future__ import annotations

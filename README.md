@@ -23,7 +23,7 @@ The tested claim is narrower than general containment: compromise inside the hos
 - Strict canonical requests cross explicit process boundaries with bounded schemas and duplicate-key rejection. Shared adversarial vectors enforce the same NFC, byte, item, depth, numeric, and Unicode key-order domain in Python and TypeScript.
 - Executor Attestation issues a fresh, context-bound nonce and dispatches verification by signed-bundle method. The default public demo uses a simulator and labels it development-only.
 - An Ed25519 capability binds the exact request, arguments, session, executor, device, measurement, attestation, verifier policy, static policy, expiry, output limit, and one-use identifier.
-- The signer and executor independently reconstruct request and argument digests. SQLite-backed replay state makes nonce and capability consumption durable and atomic across cooperating processes on one host. A signed cross-language interface defines the same transitions for a separately deployed replay authority.
+- The signer and executor independently reconstruct request and argument digests. SQLite-backed replay state makes nonce and capability consumption durable and atomic across cooperating processes on one host. A signed cross-language interface supports an etcd-backed replay authority in the opt-in software lab, not an independently deployed production service.
 - Capability issuance/consumption, evidence append, and certificate construction require fresh Ed25519 client authorization. Service signing seeds are restricted file-backed fixtures, not inline JSON values.
 - Four required guardians form a unanimity veto. Missing, malformed, stale, inconsistent, crashed, or timed-out decisions deny execution.
 - An independent logical evidence recorder hash-chains events and signs receipts. A detached Ed25519 containment certificate covers the recorded evidence domains and verified teardown; authenticity requires an independently provisioned signer key or pinned key ID.
@@ -33,7 +33,7 @@ The tested claim is narrower than general containment: compromise inside the hos
 
 ## What it does not demonstrate
 
-This repository does not demonstrate containment of a frontier model, production Firecracker isolation, production TPM enrollment or hardware provenance, resistance to host-kernel compromise, separately administered or hardware-backed signing, physically one-way evidence storage, a deployed multi-host replay backend, a physical fail-safe installation, TLC model checking on this host, or an independent security audit. The default adversary is scripted and synthetic; a real model endpoint is optional and its self-report is never trusted.
+This repository does not demonstrate containment of a frontier model, production Firecracker isolation, production TPM enrollment or hardware provenance, resistance to host-kernel compromise, separately administered or hardware-backed signing, physically one-way evidence storage, a deployed multi-host replay backend, a physical fail-safe installation, a model-checked proof of distributed partitions/rollback, or an independent security audit. The default adversary is scripted and synthetic; a real model endpoint is optional and its self-report is never trusted.
 
 See [Known limitations](KNOWN_LIMITATIONS.md) for the complete claim boundary.
 
@@ -153,7 +153,7 @@ python scripts/check_repository_policy.py
 python scripts/generate_security_report.py
 ```
 
-The exact current test counts are recorded in [STATUS.md](STATUS.md). The real-TPM integration test is opt-in on a configured Linux host. For an isolated clone, run `scripts/verify-clean-install.sh` or `scripts/verify-clean-install.ps1`.
+Use [CI on the exact commit](https://github.com/solsticeaistudio/event-horizon-harness/actions/workflows/ci.yml) for current test counts. [STATUS.md](STATUS.md) distinguishes verified baselines from historical test claims. The real-TPM integration test is opt-in on a configured Linux host. For an isolated clone, run `scripts/verify-clean-install.sh` or `scripts/verify-clean-install.ps1`.
 
 Containment-certificate verification fails closed without `--trusted-key` or an independently pinned `--trusted-key-id`. `ContainmentCertificateBuilder.verify_self_consistency()` exists only for diagnostics and does not establish trusted authenticity.
 
@@ -178,16 +178,16 @@ Report plausible containment bypasses privately before publishing details.
 
 ## Current limitations
 
-The default execution path is process separation, not a production microVM. TPM fixtures and `swtpm` do not establish hardware provenance. The hardware-failsafe component is a simulator only. The optional adaptive adversary is a bounded controller-side interface, not a completed hostile-cell model campaign. Literature fixtures are metadata-only and pending human review. Signing and evidence mutations are authenticated, but their development keys, services, and storage remain under one host account. The remote replay protocol has authenticated Python and TypeScript clients, signed checkpoints, explicit epochs, and a single-writer reference service; no consensus-backed multi-host deployment or old-leader fencing is included. Tests are project-authored and automated, and no external audit has occurred.
+The default execution path is process separation, not a production microVM. TPM fixtures and `swtpm` do not establish hardware provenance. The hardware-failsafe component is a simulator only. The optional adaptive adversary is a bounded controller-side interface, not a completed hostile-cell model campaign. Literature fixtures are metadata-only and pending human review. Signing and evidence mutations are authenticated, but their development keys, services, and storage remain under one host account. The remote replay protocol has authenticated Python and TypeScript clients and an etcd implementation with atomic signed nonce, authorization, capability and checkpoint transitions, tested against a disposable three-member quorum and the seven-process same-host harness. This is not independently administered, production multi-host deployment or a host-isolation proof. Tests are project-authored and automated, and no external audit has occurred.
 
 These are active limitations, not deployment footnotes. See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
 
 ## Roadmap
 
 1. Deploy the authenticated signing/evidence interfaces under separate principals with externally provisioned protected keys and storage.
-2. Deploy the authenticated replay interface on a consensus-backed multi-host state machine with old-leader fencing, protected client checkpoints, and independent monitoring.
+2. Deploy the CI-tested etcd-backed replay service on independent trusted hosts with protected client checkpoints, audited recovery and independent monitoring.
 3. Complete production TPM enrollment, endorsement validation, quote generation, and measurement policy.
-4. Run the executor in a reproducibly built Firecracker image with enforced host controls and teardown.
+4. Repeat the integrated distributed-authority execution path inside Firecracker on supported Linux/KVM, with independent host effect observations and teardown.
 5. Commission independent parser, capability, attestation, evidence, and containment review.
 
 Contribution requirements are in [CONTRIBUTING.md](CONTRIBUTING.md). The repository retains its existing source-review license; see [LICENSE](LICENSE).
@@ -200,4 +200,4 @@ The reference backends and their security boundaries are described in
 existing durable SQLite authority; Option B provides an optional etcd v3
 consensus-backed transaction adapter; `raft_core.py` is an isolated,
 fixed-membership research Raft fault lab, **not** a deployable consensus
-service. The legacy incomplete `raft_replay.py` remains fail-closed.
+service. The legacy incomplete `raft_replay.py` remains fail-closed. The tested signed etcd authority is `etcd_signed_replay.py`; see [seven-process integration](docs/SEVEN_PROCESS_REMOTE_AUTHORITY.md).
