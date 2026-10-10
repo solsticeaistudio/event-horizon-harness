@@ -33,8 +33,8 @@ if [[ ! -x "$PY" ]]; then
   echo "Missing prepared isolation Python: $PY; follow docs/LINUX_ISOLATION.md" >&2
   exit 1
 fi
-if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
-  echo "/dev/kvm is not accessible to the operator; KVM must be configured before this lab" >&2
+if [[ ! -e /dev/kvm ]]; then
+  echo "/dev/kvm is missing; KVM must be configured before this lab" >&2
   exit 1
 fi
 if [[ ! -f firecracker/build/isolation/manifest.json ]]; then
