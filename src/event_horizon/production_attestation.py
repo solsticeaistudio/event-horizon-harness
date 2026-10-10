@@ -1,3 +1,11 @@
+"""Legacy enrolled-signature attestation claims; NOT hardware TPM quotes.
+
+The `tpm2` string accepted here is caller-provided metadata; this module
+does not parse TPMS_ATTEST, validate PCR quotes or verify TPM endorsement.
+Use the separate TypeScript TPM quote verifier for that operation.
+Neither path alone proves production hardware enrollment or provenance.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -53,7 +61,7 @@ class AttestationPolicyError(RuntimeError):
 
 
 class ProductionAttestationManager:
-    """Production attestation enrollment, provenance validation, measurement policy, revocation, updates."""
+    """Legacy signed-claim enrollment and policy; not TPM quote verification."""
 
     def __init__(
         self,
