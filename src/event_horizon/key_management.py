@@ -413,86 +413,72 @@ class KeyManager:
 
         self._record_provenance(key_id_str, "revoke", "operator", {"reason": reason})
 
-    def revoke_key_with_crl(self, key_id_str: str, *, actor: str = "operator", reason: str = "revoked") -> KeyRevocation:
-        """Revoke a key and create a signed revocation entry for CRL distribution.
+    @staticmethod
+    def _revocation_link(signature: str) -> str:
+        """Legacy-compatible CRL link: SHA-256 over canonical b64url signature.
 
-        This creates a cryptographically signed revocation entry that can be
-        distributed to all system components for revocation checking.
+        This format was already expected by check_revocation_chain(). We use
+        the full existing 32-hex-character link to avoid silently changing
+        the stored schema or invalidating a correctly chained older record.
+        """
+        return hashlib.sha256(signature.encode("ascii")).hexdigest()[:32]
+
+    def revoke_key_with_crl(self, key_id_str: str, *, actor: str = "operator", reason: str = "revoked") -> KeyRevocation:
+        """Revoke one key and append a signed CRL link atomically.
+
+        Database ROWID is the insertion order. Sorting by second-resolution
+        timestamps can reorder revocations that occurred within one second.
+        Refuse to append to an already malformed chain. A failure to sign
+        rolls back both the key status and revocation entry.
         """
         with self._lock:
-            row = self._db.execute("SELECT * FROM keys WHERE key_id = ?", (key_id_str,)).fetchone()
-            if not row:
-                raise KeyManagementError(f"key {key_id_str} not found")
-            if row[5] == "revoked":
-                raise KeyManagementError(f"key {key_id_str} already revoked")
-
-            revoked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            self._db.execute(
-                "UPDATE keys SET status = 'revoked', rotated_at = ? WHERE key_id = ?",
-                (revoked_at, key_id_str),
-            )
-
-            # Get previous revocation for chain
-            prev_row = self._db.execute(
-                "SELECT * FROM revocations ORDER BY revoked_at DESC LIMIT 1"
-            ).fetchone()
-            prev_digest = prev_row[5] if prev_row else None  # signature column as chain link
-
-            # Create revocation entry
-            revocation = KeyRevocation(
-                key_id=key_id_str,
-                revoked_at=revoked_at,
-                reason=reason,
-                revoked_by=actor,
-                signature="",  # Will be filled after signing
-                previous_revocation_digest=prev_digest,
-            )
-
-            # Sign the revocation
-            payload = {
-                "key_id": revocation.key_id,
-                "revoked_at": revocation.revoked_at,
-                "reason": revocation.reason,
-                "revoked_by": revocation.revoked_by,
-                "previous_revocation_digest": revocation.previous_revocation_digest,
-            }
-            signature = self._sign(payload)
-
-            revocation = KeyRevocation(
-                key_id=revocation.key_id,
-                revoked_at=revocation.revoked_at,
-                reason=revocation.reason,
-                revoked_by=revocation.revoked_by,
-                signature=signature,
-                previous_revocation_digest=revocation.previous_revocation_digest,
-            )
-
-            # Store revocation
-            self._db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS revocations (
-                    key_id TEXT NOT NULL,
-                    revoked_at TEXT NOT NULL,
-                    reason TEXT NOT NULL,
-                    revoked_by TEXT NOT NULL,
-                    signature TEXT NOT NULL,
-                    previous_revocation_digest TEXT,
-                    PRIMARY KEY (key_id, revoked_at)
+            try:
+                self._db.execute("BEGIN IMMEDIATE")
+                row = self._db.execute(
+                    "SELECT * FROM keys WHERE key_id = ?", (key_id_str,)
+                ).fetchone()
+                if row is None:
+                    raise KeyManagementError(f"key {key_id_str} not found")
+                if row[5] != "active":
+                    raise KeyManagementError(f"key {key_id_str} is not active")
+                if not self.check_revocation_chain():
+                    raise KeyManagementError("revocation chain is invalid; refusing append")
+                previous = self._db.execute(
+                    "SELECT signature FROM revocations ORDER BY rowid DESC LIMIT 1"
+                ).fetchone()
+                prev_digest = self._revocation_link(previous[0]) if previous else None
+                revoked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                payload = {
+                    "key_id": key_id_str,
+                    "revoked_at": revoked_at,
+                    "reason": reason,
+                    "revoked_by": actor,
+                    "previous_revocation_digest": prev_digest,
+                }
+                signature = self._sign(payload)
+                self._db.execute(
+                    "INSERT INTO revocations (key_id, revoked_at, reason, revoked_by, "
+                    "signature, previous_revocation_digest) VALUES (?, ?, ?, ?, ?, ?)",
+                    (key_id_str, revoked_at, reason, actor, signature, prev_digest),
                 )
-                """
-            )
-            self._db.execute(
-                "INSERT INTO revocations (key_id, revoked_at, reason, revoked_by, signature, previous_revocation_digest) VALUES (?, ?, ?, ?, ?, ?)",
-                (revocation.key_id, revocation.revoked_at, revocation.reason, revocation.revoked_by, revocation.signature, revocation.previous_revocation_digest),
-            )
-            self._db.commit()
-
+                self._db.execute(
+                    "UPDATE keys SET status = 'revoked', rotated_at = ? WHERE key_id = ?",
+                    (revoked_at, key_id_str),
+                )
+                self._db.commit()
+            except Exception:
+                self._db.rollback()
+                raise
+        # Provenance is a separately signed event; a failure here cannot
+        # undo the committed CRL. The CRL remains the authoritative record.
         self._record_provenance(key_id_str, "revoke", actor, {"reason": reason})
-
-        return revocation
+        return KeyRevocation(
+            key_id=key_id_str, revoked_at=revoked_at, reason=reason,
+            revoked_by=actor, signature=signature, previous_revocation_digest=prev_digest,
+        )
 
     def verify_revocation(self, revocation: KeyRevocation) -> bool:
-        """Verify a revocation entry's signature."""
+        """Verify exact signature encoding under the configured signing identity."""
         payload = {
             "key_id": revocation.key_id,
             "revoked_at": revocation.revoked_at,
@@ -501,8 +487,18 @@ class KeyManager:
             "previous_revocation_digest": revocation.previous_revocation_digest,
         }
         try:
-            sig_bytes = base64.urlsafe_b64decode(revocation.signature + "==")
-            self._public_key.verify(sig_bytes, canonical_bytes(payload))
+            sig = revocation.signature
+            if not isinstance(sig, str) or not sig or "=" in sig:
+                return False
+            sig_bytes = base64.urlsafe_b64decode(sig + "=" * (-len(sig) % 4))
+            if base64.urlsafe_b64encode(sig_bytes).rstrip(b"=").decode("ascii") != sig:
+                return False
+            public_key = serialization.load_pem_public_key(
+                self.public_key_pem.encode("ascii")
+            )
+            if not isinstance(public_key, Ed25519PublicKey):
+                return False
+            public_key.verify(sig_bytes, canonical_bytes(payload))
             return True
         except Exception:
             return False
@@ -519,7 +515,7 @@ class KeyManager:
         if since:
             query += " WHERE revoked_at > ?"
             params.append(since)
-        query += " ORDER BY revoked_at"
+        query += " ORDER BY rowid"
         rows = self._db.execute(query, params).fetchall()
         revocations = []
         for row in rows:
@@ -534,27 +530,29 @@ class KeyManager:
         return revocations
 
     def check_revocation_chain(self) -> bool:
-        """Verify the integrity of the revocation chain."""
-        rows = self._db.execute("SELECT * FROM revocations ORDER BY revoked_at").fetchall()
-        if not rows:
+        """Verify ordered, signed CRL links, including the first entry.
+
+        This does NOT prove completeness if an administrator removes a
+        valid suffix of the SQLite history. Pin a signed checkpoint outside
+        the host for independent deletion/rollback detection.
+        """
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM revocations ORDER BY rowid"
+            ).fetchall()
+            prev_digest = None
+            for row in rows:
+                if row[5] != prev_digest:
+                    return False
+                revocation = KeyRevocation(
+                    key_id=row[0], revoked_at=row[1], reason=row[2],
+                    revoked_by=row[3], signature=row[4],
+                    previous_revocation_digest=row[5],
+                )
+                if not self.verify_revocation(revocation):
+                    return False
+                prev_digest = self._revocation_link(row[4])
             return True
-
-        prev_digest = None
-        for row in rows:
-            if row[5] != prev_digest:  # previous_revocation_digest
-                return False
-            # Verify signature
-            rev = KeyRevocation(
-                key_id=row[0], revoked_at=row[1], reason=row[2],
-                revoked_by=row[3], signature=row[4], previous_revocation_digest=row[5] if len(row) > 5 else None
-            )
-            if not self.verify_revocation(rev):
-                return False
-            # Compute digest for next link
-            import hashlib
-            prev_digest = hashlib.sha256(row[4].encode()).hexdigest()[:32]
-
-        return True
 
     def get_key(self, key_id_str: str) -> KeyMetadata | None:
         """Get a key by its ID."""
