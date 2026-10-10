@@ -11,6 +11,7 @@ does not expose a hardened HTTP endpoint or establish OS-process isolation.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any, Callable, Mapping, Protocol
 
 from .broker import CapabilityVerifier
@@ -28,6 +29,7 @@ class GatewayDecision:
     effect_state: str
     error_class: str | None = None
     output: Any = None
+    output_bytes: int = 0
 
 
 class TrustedEffectGateway:
@@ -43,13 +45,33 @@ class TrustedEffectGateway:
         verifier: CapabilityVerifier,
         effects: Mapping[str, Callable[[ActionRequest], Any]],
         recorder: EvidenceSink,
+        *,
+        event_prefix: str = "gateway",
+        tenant: str = "default",
+        environment: str = "synthetic",
     ):
+        if event_prefix not in {"gateway", "execution"}:
+            raise ValueError("unrecognized evidence event namespace")
+        self.event_prefix = event_prefix
+        self.tenant = tenant
+        self.environment = environment
         if not effects or any(not isinstance(name, str) or not callable(fn)
                               for name, fn in effects.items()):
             raise ValueError("gateway must have explicit trusted effect handlers")
         self.verifier = verifier
         self.effects = dict(effects)
         self.recorder = recorder
+
+    def _record_denial(self, request: ActionRequest, error_class: str) -> None:
+        # A recorder outage must never weaken the authority decision.
+        try:
+            self.recorder.append(f"{self.event_prefix}.denied", {
+                "request_id": request.request_id,
+                "error_class": error_class,
+                "effect_state": "not-started",
+            })
+        except Exception:
+            pass
 
     def execute(
         self,
@@ -63,27 +85,30 @@ class TrustedEffectGateway:
         policy_digest: str,
         now: float | None = None,
     ) -> GatewayDecision:
-        # No arbitrary network target, command or caller-supplied callback.
-        # Refuse to consume authority for unsupported effects.
+        # Only host-defined actions are dispatched. Neither tools nor effect
+        # callbacks may be supplied by the untrusted workload.
         handler = self.effects.get(request.operation)
         if handler is None:
+            self._record_denial(request, "unsupported-operation")
             return GatewayDecision(False, "not-started", "unsupported-operation")
         try:
-            self.verifier.verify_and_consume(
+            claims = self.verifier.verify_and_consume(
                 capability, request,
                 executor_measurement=executor_measurement,
                 device_id=device_id,
                 attestation=attestation,
                 verifier_policy_digest=verifier_policy_digest,
                 policy_digest=policy_digest,
+                tenant=self.tenant,
+                environment=self.environment,
                 now=now,
             )
         except Exception:
-            # Never turn unavailable/ambiguous replay into permission.
+            # Unknown/ambiguous consumption outcomes are not retried.
+            self._record_denial(request, "authority-denied")
             return GatewayDecision(False, "not-started", "authority-denied")
-        # A missing recorder cannot authorize an effect either.
         try:
-            self.recorder.append("gateway.authorized", {
+            self.recorder.append(f"{self.event_prefix}.authorized", {
                 "request_id": request.request_id,
                 "request_digest": request.request_digest,
                 "capability_id": capability.claims.capability_id,
@@ -92,10 +117,15 @@ class TrustedEffectGateway:
             return GatewayDecision(False, "not-started", "evidence-unavailable")
         try:
             output = handler(request)
+            encoded = json.dumps(
+                output, sort_keys=True, default=str,
+            ).encode("utf-8")
+            if len(encoded) > claims.max_output_bytes:
+                raise PermissionError("result exceeds signed capability output ceiling")
         except Exception:
-            # A side effect may have happened before the handler threw.
+            # An effect callback may have committed before raising.
             try:
-                self.recorder.append("gateway.indeterminate", {
+                self.recorder.append(f"{self.event_prefix}.indeterminate", {
                     "request_id": request.request_id,
                     "effect_state": "possibly-committed",
                 })
@@ -103,14 +133,16 @@ class TrustedEffectGateway:
                 pass
             return GatewayDecision(False, "possibly-committed", "effect-indeterminate")
         try:
-            self.recorder.append("gateway.completed", {
+            self.recorder.append(f"{self.event_prefix}.completed", {
                 "request_id": request.request_id,
+                "capability_id": claims.capability_id,
+                "success": True,
+                "output_bytes": len(encoded),
                 "effect_state": "completed",
             })
         except Exception:
             return GatewayDecision(False, "possibly-committed", "evidence-indeterminate")
-        return GatewayDecision(True, "completed", output=output)
-
+        return GatewayDecision(True, "completed", output=output, output_bytes=len(encoded))
 
 def select_consumption_store(
     *,

@@ -35,6 +35,17 @@ def _request(**overrides):
 def run(workdir: str | Path) -> dict:
     """Execute real seven-process harness cases and return transparent outcomes."""
     with ProcessSeparatedHarness(workdir, ttl_seconds=30.0) as harness:
+        # Capture every authorized append result, including its Ed25519
+        # receipt. The companion verifier runs outside the harness process.
+        signed_events = []
+        original_record = harness.record
+
+        def capture_record(*args, **kwargs):
+            record = original_record(*args, **kwargs)
+            signed_events.append(record)
+            return record
+
+        harness.record = capture_record
         observations = {}
         request, capability, attestation = harness.request_capability(_request())
         first = harness.execute(request, capability, attestation)
@@ -111,6 +122,13 @@ def run(workdir: str | Path) -> dict:
             and observations["signer_outage"]["effect_state"] == "not-started"
             and observations["replay_after_restart"]["denied"]
         )
+        for case, observed in sorted(observations.items()):
+            harness.record("adversarial.observation", {
+                "case": case, "result": observed,
+            })
+        status = harness.call("recorder", "verify", {})
+        if status["valid"] is not True or status["count"] != len(signed_events):
+            raise RuntimeError("adversarial recorder chain is incomplete")
         return {
             "schema": "event-horizon.adversarial-boundary-observations.v1",
             "topology": "same-host-seven-process-development",
@@ -120,6 +138,16 @@ def run(workdir: str | Path) -> dict:
             "observable": observations,
             "pass": bool(passed),
             "evidence_path": str(harness.recorder_path),
+            "signed_evidence": {
+                "public_key_pem": harness.service_info["recorder"]["public_key_pem"],
+                "event_count": status["count"],
+                "chain_tip": status["detail"],
+                "events": signed_events,
+                "trust_note": (
+                    "Embedded recorder key establishes internal integrity only; "
+                    "pin the public key out of band to authenticate the issuer."
+                ),
+            },
         }
 
 

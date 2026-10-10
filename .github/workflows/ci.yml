@@ -79,6 +79,21 @@ jobs:
         run: npm run build
       - name: Run complete public demonstration
         run: python -m event_horizon.public_demo --workdir "$RUNNER_TEMP/event-horizon-integration" --artifacts-dir "$RUNNER_TEMP/event-horizon-artifacts"
+      - name: Export signed adversarial observations
+        run: |
+          python -m event_horizon.adversarial_boundary \
+            --workdir "$RUNNER_TEMP/eh-adversarial" \
+            --output "$RUNNER_TEMP/eh-adversarial/report.json"
+      - name: Independently verify adversarial evidence bundle
+        run: python scripts/verify_adversarial_boundary.py "$RUNNER_TEMP/eh-adversarial/report.json"
+      - name: Publish synthetic adversarial evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: eh-adversarial-evidence
+          path: |
+            ${{ runner.temp }}/eh-adversarial/report.json
+            ${{ runner.temp }}/eh-adversarial/external-evidence/events.jsonl
+          retention-days: 7
       - name: Verify cross-language remote replay protocol
         run: python scripts/verify_remote_replay_interop.py
       - name: Verify generated evidence chain
