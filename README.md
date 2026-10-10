@@ -206,4 +206,4 @@ The reference backends and their security boundaries are described in
 existing durable SQLite authority; Option B provides an optional etcd v3
 consensus-backed transaction adapter; `raft_core.py` is an isolated,
 fixed-membership research Raft fault lab, **not** a deployable consensus
-service. The legacy incomplete `raft_replay.py` remains fail-closed. The tested signed etcd authority is `etcd_signed_replay.py`; see [seven-process integration](docs/SEVEN_PROCESS_REMOTE_AUTHORITY.md).
+service. The legacy unsafe HTTP authority remains fail-closed, but [`raft_replay.py` now offers a repaired durable **research-only** bridge](docs/RAFT_RESEARCH_REPAIR.md) to the fixed-membership `raft_core.py`. The tested signed etcd authority is `etcd_signed_replay.py`; see [seven-process integration](docs/SEVEN_PROCESS_REMOTE_AUTHORITY.md).

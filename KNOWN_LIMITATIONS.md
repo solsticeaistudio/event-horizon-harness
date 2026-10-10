@@ -70,12 +70,16 @@ actually executed.
   invariants are definitional set-subset statements. No sound formal proof
   of distributed rollback, partitions, restore, external effects, or host
   containment has been established.
-- The old `raft_replay.py` implementation has an unsafe/incomplete Raft
-  design and contains unsupported snapshot SQL. Proposal and cluster
-  creation deliberately fail closed. The separately defined
-  `raft_core.py` is a research-only deterministic testbed; **neither**
-  is used as the production-suitable replay authority. The tested backend
-  uses real etcd.
+- The original `raft_replay.py` HTTP/RPC authority and its old cluster
+  factory remain deliberately fail-closed: network peer authentication,
+  durable quorum transport and membership/snapshot install are not
+  validated. A **separate**, explicitly named `create_research_raft_cluster`
+  adapter now exercises durable `raft_core.py` replicas through the
+  legacy class API. Committed-prefix digests and corrected legacy snapshot
+  metadata are lab-only; they are not independent trust anchors or
+  snapshot-restore/compaction support. Neither custom-Raft module is used
+  as EHH's deployed authority. Live distributed authority uses real etcd.
+  See [Raft repair scope](docs/RAFT_RESEARCH_REPAIR.md).
 - The optional HTTP effect adapter uses preflight and commit, **not**
   a remote atomic two-phase commit. External writes require endpoint-side
   idempotency and uncertain-commit reconciliation. A failure should not

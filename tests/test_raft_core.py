@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from event_horizon.raft_core import (
@@ -149,6 +150,71 @@ class RaftResearchCoreTests(unittest.TestCase):
         self.assertEqual(self.nodes["a"].last_index, 1)
         self.assertEqual(self.nodes["a"].commit_index, 0)
         self.assertIsNone(self.nodes["a"].known_consumption("broker", TOKEN))
+
+
+    def test_committed_checkpoint_is_durable_and_rejects_gaps(self):
+        self.assertTrue(self.nodes["a"].elect())
+        original = self.nodes["a"].committed_checkpoint()
+        self.assertEqual(original[0], 0)
+        self.assertTrue(self.nodes["a"].propose(command()))
+        after = self.nodes["a"].committed_checkpoint()
+        self.assertEqual(after[0], 1)
+        self.assertNotEqual(after[1], original[1])
+        self.nodes["b"].close()
+        self.nodes["b"] = DurableRaftNode(
+            self.paths["b"], node_id="b", member_ids=MEMBERS,
+        )
+        self._connect()
+        self.assertEqual(self.nodes["b"].committed_checkpoint(), after)
+        self.nodes["c"].close()
+        with __import__("sqlite3").connect(self.paths["c"]) as db:
+            db.execute(
+                "INSERT INTO raft_log(idx, term, command) VALUES (99, 3, ?)",
+                (b'{"op":"noop"}',),
+            )
+        with self.assertRaisesRegex(RaftCoreError, "gap"):
+            DurableRaftNode(self.paths["c"], node_id="c", member_ids=MEMBERS)
+
+    def test_failed_commit_transaction_restores_in_memory_indices(self):
+        self.assertTrue(self.nodes["a"].elect())
+        leader = self.nodes["a"]
+        original_apply = leader._apply_committed
+        def faulty_apply():
+            original_apply()
+            raise RuntimeError("simulated interruption before commit")
+        with patch.object(leader, "_apply_committed", side_effect=faulty_apply):
+            with self.assertRaisesRegex(RuntimeError, "interruption"):
+                leader.propose(command())
+        self.assertEqual(leader.commit_index, 0)
+        self.assertEqual(leader.applied_index, 0)
+        self.assertIsNone(leader.known_consumption("broker", TOKEN))
+        self.assertEqual(leader.role, "follower")
+        leader.close()
+        self.nodes["a"] = DurableRaftNode(
+            self.paths["a"], node_id="a", member_ids=MEMBERS,
+        )
+        self.assertEqual(self.nodes["a"].commit_index, 0)
+        self.assertEqual(self.nodes["a"].applied_index, 0)
+        self.assertIsNone(self.nodes["a"].known_consumption("broker", TOKEN))
+
+    def test_failed_follower_apply_restores_local_indices(self):
+        follower = self.nodes["b"]
+        original_apply = follower._apply_committed
+        with patch.object(follower, "_apply_committed") as hooked:
+            def fail_once():
+                original_apply()
+                raise RuntimeError("simulated follower crash before commit")
+            hooked.side_effect = fail_once
+            with self.assertRaisesRegex(RuntimeError, "follower crash"):
+                follower.append_entries(
+                    1, "a", 0, 0,
+                    [{"index": 1, "term": 1, "command": command()}],
+                    1,
+                )
+        self.assertEqual(follower.commit_index, 0)
+        self.assertEqual(follower.applied_index, 0)
+        self.assertIsNone(follower.known_consumption("broker", TOKEN))
+
 
 
 if __name__ == "__main__":

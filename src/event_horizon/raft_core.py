@@ -93,6 +93,8 @@ class DurableRaftNode:
         self.peers: dict[str, DurableRaftNode] = {}
         self._next: dict[str, int] = {}
         self._match: dict[str, int] = {}
+        if self._db.execute("SELECT COUNT(*) FROM raft_log").fetchone()[0] != self.last_index:
+            raise RaftCoreError("durable Raft log has a gap")
         if not (0 <= self.applied_index <= self.commit_index <= self.last_index):
             raise RaftCoreError("durable Raft checkpoint is invalid")
         with self._db:
@@ -234,26 +236,63 @@ class DurableRaftNode:
                 ):
                     raise RaftCoreError("invalid replicated Raft log entry")
                 cursor = item["index"]
-            with self._db:
-                for item in entries:
-                    index = item["index"]
-                    old = self._entry(index)
-                    value = dict(item["command"])
-                    if old is not None and (old[0] != item["term"] or old[1] != value):
-                        if index <= self.commit_index:
-                            raise RaftCoreError("attempted truncation of committed log")
-                        self._db.execute("DELETE FROM raft_log WHERE idx >= ?", (index,))
-                        old = None
-                    if old is None:
-                        self._db.execute(
-                            "INSERT INTO raft_log(idx,term,command) VALUES (?,?,?)",
-                            (index, item["term"], canonical_bytes(value)),
-                        )
-                if leader_commit > self.commit_index:
-                    self.commit_index = min(leader_commit, self.last_index)
-                    self._set("commit_index", str(self.commit_index))
-                self._apply_committed()
+            try:
+                with self._db:
+                    for item in entries:
+                        index = item["index"]
+                        old = self._entry(index)
+                        value = dict(item["command"])
+                        if old is not None and (old[0] != item["term"] or old[1] != value):
+                            if index <= self.commit_index:
+                                raise RaftCoreError("attempted truncation of committed log")
+                            self._db.execute("DELETE FROM raft_log WHERE idx >= ?", (index,))
+                            old = None
+                        if old is None:
+                            self._db.execute(
+                                "INSERT INTO raft_log(idx,term,command) VALUES (?,?,?)",
+                                (index, item["term"], canonical_bytes(value)),
+                            )
+                    if leader_commit > self.commit_index:
+                        self.commit_index = min(leader_commit, self.last_index)
+                        self._set("commit_index", str(self.commit_index))
+                    self._apply_committed()
+            except Exception:
+                self._restore_committed_indices()
+                raise
             return self.term, True, cursor
+
+    def committed_checkpoint(self) -> tuple[int, str]:
+        """Local audit digest of the committed prefix; not a quorum read.
+
+        The replay result is included, binding it to the applied state.
+        Callers must not treat this digest as an external witness.
+        """
+        with self._lock:
+            entries = []
+            for index in range(1, self.commit_index + 1):
+                entry = self._entry(index)
+                if entry is None:
+                    raise RaftCoreError("committed Raft log entry missing")
+                result = self._db.execute(
+                    "SELECT result FROM replay_results WHERE idx = ?", (index,)
+                ).fetchone()
+                if result is None:
+                    raise RaftCoreError("committed replay result missing")
+                entries.append({
+                    "index": index, "term": entry[0],
+                    "command": entry[1], "result": result[0],
+                })
+            return self.commit_index, digest({
+                "schema": "event-horizon.raft-research-checkpoint.v1",
+                "membership": list(self.members), "committed_entries": entries,
+            })
+
+    def _restore_committed_indices(self) -> None:
+        """Undo in-memory commit/apply indices after SQLite transaction rollback."""
+        self.commit_index = int(self._state("commit_index", "0"))
+        self.applied_index = int(self._state("applied_index", "0"))
+        if not 0 <= self.applied_index <= self.commit_index <= self.last_index:
+            raise RaftCoreError("Raft indices became inconsistent after rollback")
 
     def _apply_committed(self) -> None:
         """Replay authoritative consumption and checkpoint in one DB transaction."""
@@ -365,10 +404,16 @@ class DurableRaftNode:
                 matched = 1 + sum(int(idx >= position) for idx in self._match.values())
                 if matched <= len(self.members) // 2:
                     raise RaftCoreUnavailable("Raft proposal not durably acknowledged by quorum")
-                with self._db:
-                    self.commit_index = position
-                    self._set("commit_index", str(position))
-                    self._apply_committed()
+                try:
+                    with self._db:
+                        self.commit_index = position
+                        self._set("commit_index", str(position))
+                        self._apply_committed()
+                except Exception:
+                    self._restore_committed_indices()
+                    self.role = "follower"
+                    self.leader_id = None
+                    raise
                 row = self._db.execute(
                     "SELECT result FROM replay_results WHERE idx = ?", (position,)
                 ).fetchone()
