@@ -29,7 +29,7 @@ from tests.test_etcd_live import cluster_id
 from event_horizon.process_harness import ProcessSeparatedHarness
 from event_horizon.models import ActionRequest
 from event_horizon.protocol import ProtocolError
-from event_horizon.distributed_signed_evidence import verify_distributed_report
+from event_horizon.distributed_signed_evidence import STRICT_SCHEMA, verify_distributed_report
 from event_horizon.intent_canonicalizer import AuthorizationDenied
 from event_horizon.remote_replay import ReplayHttpServer
 from event_horizon.trusted_replay_client import (
@@ -238,6 +238,40 @@ class LiveSignedReplayTests(unittest.TestCase):
                         "unsigned_signer_mutation": unsigned_mutation_denied,
                         "guardian_veto": guardian_vetoed,
                     }
+                    # Version 2 also signs the *observable inputs* used to
+                    # judge cases, rather than only final PASS assertions.
+                    config_has_authority = (
+                        "remote_replay" in config
+                        or "client_seed_path" in str(config)
+                        or "etcd" in str(config)
+                    )
+                    probes = {
+                        "executor_credential_probe": {
+                            "private_key_material_present": probe["private_key_material_present"],
+                            "ambient_authority_environment_hits": probe["ambient_authority_environment_hits"],
+                            "executor_config_has_remote_replay": config_has_authority,
+                        },
+                        "unsigned_signer_mutation": {"denied": unsigned_mutation_denied},
+                        "guardian_veto": {
+                            "denied": guardian_vetoed,
+                            "request_id": "forbidden-distributed-op",
+                        },
+                        "signed_certificate": {
+                            "certificate_schema": certificate["certificate"]["schema"],
+                        },
+                    }
+                    for case, observation in sorted(probes.items()):
+                        harness.record("adversarial.probe", {
+                            "case": case, "observation": observation,
+                        })
+                    _, authority_checkpoint, authority_digest = service.checkpoint()
+                    harness.record("distributed.authority.context", {
+                        "cluster_id": service.expected_cluster_id,
+                        "service_id": service.service_id,
+                        "epoch": service.epoch,
+                        "checkpoint": authority_checkpoint,
+                        "checkpoint_digest": authority_digest,
+                    })
                     for case, passed in sorted(cases.items()):
                         harness.record("adversarial.observation", {
                             "case": case, "passed": passed,
@@ -246,7 +280,7 @@ class LiveSignedReplayTests(unittest.TestCase):
                     self.assertTrue(recorder["valid"])
                     self.assertEqual(recorder["count"], len(signed_events))
                     report = {
-                        "schema": "event-horizon.distributed-adversarial-evidence.v1",
+                        "schema": STRICT_SCHEMA,
                         "topology": "same-host-seven-process-live-etcd",
                         "hardware_isolation_tested": False,
                         "etcd_backend_tested": True,
