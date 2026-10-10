@@ -35,7 +35,7 @@ The tested claim is narrower than general containment: compromise inside the hos
 
 **October 10, 2026:** On an Ubuntu 24.04.5 WSL2 laptop with functioning nested KVM, the standalone Firecracker lab reported `PASS (3 guest-root sessions)`, and the local verifier reported `VERIFIED (3 chains and signed receipts; embedded keys, integrity only)`. The run exercised a narrow, host-authorized synthetic dataset-read boundary and the three teardown triggers: requested stop, deadline and supervisor control-channel loss.
 
-**[See the experiment record, source commit and reproduction instructions](docs/evidence/2026-10-10-wsl2-firecracker.md).** The original JSON report and its SHA-256 are **not yet public**, so this is an operator-supplied local result, not independently reproduced evidence or production certification. A separately witnessed, publicly downloadable report is the next publication milestone.
+**[See the experiment record, source commit and reproduction instructions](docs/evidence/2026-10-10-wsl2-firecracker.md).** The [original JSON report](docs/evidence/artifacts/2026-10-10/linux-isolation.json) and [SHA-256 checksum](docs/evidence/artifacts/2026-10-10/linux-isolation.json.sha256) are public. Verification uses public keys embedded in the report and does **not** independently attest the machine, signer identity, or production containment. A separately witnessed result remains future work.
 
 ## What it does not demonstrate
 
