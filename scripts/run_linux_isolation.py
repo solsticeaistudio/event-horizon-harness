@@ -499,6 +499,7 @@ def _overwrite_pass(fd: int, size: int, pattern: bytes) -> None:
     chunk_size = 64 * 1024  # 64KB chunks
     pattern_chunk = pattern * chunk_size
     written = 0
+    os.lseek(fd, 0, os.SEEK_SET)
     while written < size:
         chunk = min(chunk_size, size - written)
         os.write(fd, pattern_chunk[:chunk])
@@ -522,6 +523,7 @@ def _overwrite_pass_random(fd: int, size: int) -> None:
     """Single overwrite pass with cryptographically random data."""
     chunk_size = 64 * 1024
     written = 0
+    os.lseek(fd, 0, os.SEEK_SET)
     while written < size:
         chunk = min(chunk_size, size - written)
         random_data = os.urandom(chunk)
@@ -696,14 +698,11 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     thread = None
     receiver = (EvidenceReceiver(observer, recorder) if package_lab is None
                 else package_lab.receiver(observer, recorder, service_config))
-    receiver.receipts.append(recorder.append("isolation.context", {
-        "build_manifest_digest": digest(manifest), "host_kernel": platform.release(),
-        "configuration_digest": digest(config), "attestation_mode": attestation_mode,
-        "session_id": request.session_id, "capability_id": capability.claims.capability_id,
-        **({"package_context": package_lab.context()} if package_lab is not None else {}),
-    }, source_id="host-supervisor")["receipt"])
     observed = {}
-    attestation_mode = "synthetic-fixture"  # default, updated after TPM attestation
+    # Mode must exist before the context is signed. It is only updated
+    # after a successful TPM request; with the default no-TPM build the
+    # trust mode remains the synthetic fixture and is never upgraded.
+    attestation_mode = "synthetic-fixture"
 
     def limit_effect():
         (group / "effect/cgroup.procs").write_text(str(os.getpid()))
@@ -712,6 +711,15 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         resource.setrlimit(resource.RLIMIT_FSIZE, (16 * 1024 * 1024, 16 * 1024 * 1024))
 
     try:
+        # Exactly one signed context per session. The evidence verifier
+        # rejects duplicates, and attestation results have a separate event.
+        receiver.receipts.append(recorder.append("isolation.context", {
+            "build_manifest_digest": digest(manifest), "host_kernel": platform.release(),
+            "configuration_digest": digest(config),
+            "attestation_mode": "tpm2-requested" if manifest.get("tpm2_enabled") else "synthetic-fixture",
+            "session_id": request.session_id, "capability_id": capability.claims.capability_id,
+            **({"package_context": package_lab.context()} if package_lab is not None else {}),
+        }, source_id="host-supervisor")["receipt"])
         with (control / "service.log").open("wb") as service_log:
             service_command = [
                 "unshare", "--net", "--", "setpriv", f"--reuid={EFFECT_UID}", f"--regid={EFFECT_UID}",
@@ -769,29 +777,33 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             if observed["guest_root_diagnostic"]["uid"] != 0:
                 raise RuntimeError("fixture is not executing as guest root")
 
-            # Request TPM attestation from guest agent
-            import secrets
-            tpm_nonce = secrets.token_hex(32)
-            try:
-                tpm_attest = guest_tpm_attest(channel, tpm_nonce)
-                observed["tpm_attestation"] = tpm_attest
-                attestation_mode = "tpm2"
-                # Record TPM attestation in evidence chain
-                receiver.receipts.append(recorder.append("tpm.attestation", {
-                    "nonce": tpm_nonce,
-                    "quote": tpm_attest["quote"],
-                    "signature": tpm_attest["signature"],
-                }, source_id="host-supervisor")["receipt"])
-            except Exception as e:
-                observed["tpm_attestation_error"] = str(e)
-                attestation_mode = "tpm2-unavailable"
+            # Never advertise hardware provenance for a guest compiled
+            # without TPM2. Optional attestation can only upgrade the label
+            # after a fresh quote is obtained (independent quote verification
+            # and endorsement are still out of scope for this experiment).
+            if manifest.get("tpm2_enabled"):
+                import secrets
+                tpm_nonce = secrets.token_hex(32)
+                try:
+                    tpm_attest = guest_tpm_attest(channel, tpm_nonce)
+                    observed["tpm_attestation"] = tpm_attest
+                    attestation_mode = "tpm2"
+                    receiver.receipts.append(recorder.append("tpm.attestation", {
+                        "nonce": tpm_nonce,
+                        "quote": tpm_attest["quote"],
+                        "signature": tpm_attest["signature"],
+                    }, source_id="host-supervisor")["receipt"])
+                except Exception as exc:
+                    observed["tpm_attestation_error"] = str(exc)
+                    attestation_mode = "tpm2-unavailable"
+            else:
+                observed["tpm_attestation_error"] = "TPM2 not enabled in guest build"
 
-            # Update isolation.context with attestation mode
-            receiver.receipts.append(recorder.append("isolation.context", {
-                "build_manifest_digest": digest(manifest), "host_kernel": platform.release(),
-                "configuration_digest": digest(config), "attestation_mode": attestation_mode,
-                "session_id": request.session_id, "capability_id": capability.claims.capability_id,
-                **({"package_context": package_lab.context()} if package_lab is not None else {}),
+            # This assessment is a separate signed observation. Re-appending
+            # isolation.context would violate verifier uniqueness.
+            receiver.receipts.append(recorder.append("attestation.assessed", {
+                "attestation_mode": attestation_mode,
+                "session_id": request.session_id,
             }, source_id="host-supervisor")["receipt"])
 
             if send_frame(channel, {"type": "scratch_probe"}) != {"prior_state": False}:
