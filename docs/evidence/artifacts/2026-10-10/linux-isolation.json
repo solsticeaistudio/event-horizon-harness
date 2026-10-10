@@ -1,0 +1,1252 @@
+{
+  "attestation": "synthetic-fixture",
+  "build_manifest": {
+    "artifacts": {
+      "firecracker": "7e8b57e88c459396d4680d83dcdd8c7f72305447cb55b11f4ac98ad70a3f7825",
+      "initramfs.cpio.gz": "d54f16511fd3941b69723cb6a7c6fe2a4e9fd1faafb15cc5f2f001f725aef5db",
+      "jailer": "4830a9b1fc6cece036d8992ff12f1fe9c5247aacad77f42c7aba683c7a08622e",
+      "vmlinux": "e20e46d0c36c55c0d1014eb20576171b3f3d922260d9f792017aeff53af3d4f2"
+    },
+    "asset_lock": {
+      "archive_sha256": "d4a32ab2322d887ca1bc4a4e7afa9cc35393e6362dfc2b3becb389d362e4275a",
+      "archive_url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.15.1/firecracker-v1.15.1-x86_64.tgz",
+      "firecracker_sha256": "7e8b57e88c459396d4680d83dcdd8c7f72305447cb55b11f4ac98ad70a3f7825",
+      "firecracker_version": "1.15.1",
+      "jailer_sha256": "4830a9b1fc6cece036d8992ff12f1fe9c5247aacad77f42c7aba683c7a08622e",
+      "kernel_sha256": "e20e46d0c36c55c0d1014eb20576171b3f3d922260d9f792017aeff53af3d4f2",
+      "kernel_url": "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/x86_64/vmlinux-6.1.155"
+    },
+    "compiler_sha256": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+    "compiler_version": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "guest_source_sha256": "f51806c1def3cd371f7c79a606fd976993755bd88d36a3a107bcdaa9e83bca36",
+    "reproducibility_scope": "identical guest source, compiler/static libc, Python and zlib toolchain",
+    "schema": "event-horizon.isolation-build.v1",
+    "toolchain": "system-gcc",
+    "tpm2_enabled": false
+  },
+  "host_kernel": "6.6.87.2-microsoft-standard-WSL2",
+  "isolation": "firecracker-kvm-jailer",
+  "rounds": [
+    {
+      "events": [
+        {
+          "event_hash": "a6dee1efb2a034aeae7f883b1fce5321e9ce9f9947d59c4db322fc4215938979",
+          "event_type": "isolation.context",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "build_manifest_digest": "8b4b7fbf1c0c8fbf8415ff02c27128b4680b492bb9996863d65fd2801c30c623",
+            "capability_id": "cap_f6313d4dc20a03774e81647c",
+            "configuration_digest": "55e60b9fe69fe7e319bc7dab06811361901b5785db6e3f5357bdeabcfe1709fb",
+            "host_kernel": "6.6.87.2-microsoft-standard-WSL2",
+            "session_id": "ehk-f13zk_n_"
+          },
+          "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sequence": 1,
+          "source_id": "host-supervisor",
+          "source_sequence": 1,
+          "timestamp": 1791659371.1308136
+        },
+        {
+          "event_hash": "14dc11ab89301ee01b6fea9d8353bf6ec0c0ad76b8379faba149f7bc97e72339",
+          "event_type": "attestation.assessed",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "session_id": "ehk-f13zk_n_"
+          },
+          "previous_hash": "a6dee1efb2a034aeae7f883b1fce5321e9ce9f9947d59c4db322fc4215938979",
+          "sequence": 2,
+          "source_id": "host-supervisor",
+          "source_sequence": 2,
+          "timestamp": 1791659371.5521953
+        },
+        {
+          "event_hash": "53fd5b9e718e619898147fe51a5565fcd4771e836bf9718b01b9b6971f75ccbf",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "14dc11ab89301ee01b6fea9d8353bf6ec0c0ad76b8379faba149f7bc97e72339",
+          "sequence": 3,
+          "source_id": "host-effect-service",
+          "source_sequence": 1,
+          "timestamp": 1791659371.5624928
+        },
+        {
+          "event_hash": "88fec391ba848f51f5aadd074be56c26b3b3a2537f331908e7788acb734294fc",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "53fd5b9e718e619898147fe51a5565fcd4771e836bf9718b01b9b6971f75ccbf",
+          "sequence": 4,
+          "source_id": "host-effect-service",
+          "source_sequence": 2,
+          "timestamp": 1791659371.5685408
+        },
+        {
+          "event_hash": "2be626911112194345029672436a7c9e588b1e4a99c359dcd9aaa9359a3b0e24",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "88fec391ba848f51f5aadd074be56c26b3b3a2537f331908e7788acb734294fc",
+          "sequence": 5,
+          "source_id": "host-effect-service",
+          "source_sequence": 3,
+          "timestamp": 1791659371.5729878
+        },
+        {
+          "event_hash": "20cc0296e3dccd061f4f758e77362c3c42d92575dba368479bb5ecbd322d9cf6",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "2be626911112194345029672436a7c9e588b1e4a99c359dcd9aaa9359a3b0e24",
+          "sequence": 6,
+          "source_id": "host-effect-service",
+          "source_sequence": 4,
+          "timestamp": 1791659371.5765686
+        },
+        {
+          "event_hash": "428fa9ff05ab434692450ab8c1b7fca18c051b83e483a1e431578bfddcd2fcd8",
+          "event_type": "execution.authorized",
+          "payload": {
+            "capability_id": "cap_f6313d4dc20a03774e81647c",
+            "request_digest": "66f6d02047eff8e75dfcdbe536984caf54ca8d599ae72ab31b7f5f76bc68c5bf",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "20cc0296e3dccd061f4f758e77362c3c42d92575dba368479bb5ecbd322d9cf6",
+          "sequence": 7,
+          "source_id": "host-effect-service",
+          "source_sequence": 5,
+          "timestamp": 1791659371.588414
+        },
+        {
+          "event_hash": "461a3e5979c7df0db5c65c97cc723e6304b9b5a49938d99ad850bb11178e20fe",
+          "event_type": "execution.completed",
+          "payload": {
+            "capability_id": "cap_f6313d4dc20a03774e81647c",
+            "effect_state": "completed",
+            "output_bytes": 43,
+            "request_id": "dataset-read",
+            "source": "host-effect-service",
+            "success": true
+          },
+          "previous_hash": "428fa9ff05ab434692450ab8c1b7fca18c051b83e483a1e431578bfddcd2fcd8",
+          "sequence": 8,
+          "source_id": "host-effect-service",
+          "source_sequence": 6,
+          "timestamp": 1791659371.5914073
+        },
+        {
+          "event_hash": "f975545abda137b4a079819ee58abe99ea9c140bdfb7f78bdb2ff1388f04cc08",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "461a3e5979c7df0db5c65c97cc723e6304b9b5a49938d99ad850bb11178e20fe",
+          "sequence": 9,
+          "source_id": "host-effect-service",
+          "source_sequence": 7,
+          "timestamp": 1791659371.5976636
+        },
+        {
+          "event_hash": "0a58b4fb3e2f87cf54234f4a420588488e44a67897787abfde7d140419eeff1f",
+          "event_type": "isolation.observed",
+          "payload": {
+            "authoritative_state_read_write_denials": true,
+            "denied_cases": [
+              "missing_capability",
+              "forged_signature",
+              "argument_substitution",
+              "unauthorized_operation"
+            ],
+            "forbidden_vsock_port_diagnostic": {
+              "connected": false
+            },
+            "fresh_scratch_diagnostic": true,
+            "guest_root_diagnostic": {
+              "authority_environment": 0,
+              "authority_files": 0,
+              "package_manager": false,
+              "uid": 0
+            },
+            "host_consumption_count": 1,
+            "host_effect_uid": 60001,
+            "host_principal_file_denials": true,
+            "host_resource_limits_verified": {
+              "cpu_quota_percent": 100,
+              "memory_bytes_per_service": 268435456,
+              "pids_per_service": 32
+            },
+            "host_vm_uid": 60000,
+            "metadata_configured": false,
+            "network_interfaces_configured": 0,
+            "replay_denied": true,
+            "retired_effect_endpoint_unreachable": true,
+            "scratch_write_independently_observed": true,
+            "separate_network_namespaces": true,
+            "tpm_attestation_error": "TPM2 not enabled in guest build",
+            "unredeemed_capability_at_teardown": "cap_920abe9ec3c5b28c2852ec21",
+            "useful_dataset_read_and_summary": true,
+            "vm_chroot_verified": true,
+            "vm_seccomp_verified": true
+          },
+          "previous_hash": "f975545abda137b4a079819ee58abe99ea9c140bdfb7f78bdb2ff1388f04cc08",
+          "sequence": 10,
+          "source_id": "host-supervisor",
+          "source_sequence": 3,
+          "timestamp": 1791659371.8388388
+        },
+        {
+          "event_hash": "dc2097b77d3d28bc46d6726e3e6cca0892f6211726fb391d76ede38f3cc702f1",
+          "event_type": "teardown.verified",
+          "payload": {
+            "authority_revoked_by_endpoint_shutdown": true,
+            "config_removed": true,
+            "effect_endpoint_removed": true,
+            "process_groups_empty": true,
+            "scratch_removed": true,
+            "trigger": "requested-stop",
+            "vsock_removed": true
+          },
+          "previous_hash": "0a58b4fb3e2f87cf54234f4a420588488e44a67897787abfde7d140419eeff1f",
+          "sequence": 11,
+          "source_id": "host-supervisor",
+          "source_sequence": 4,
+          "timestamp": 1791659371.8426807
+        }
+      ],
+      "evidence_chain_tip": "dc2097b77d3d28bc46d6726e3e6cca0892f6211726fb391d76ede38f3cc702f1",
+      "observations": {
+        "authoritative_state_read_write_denials": true,
+        "denied_cases": [
+          "missing_capability",
+          "forged_signature",
+          "argument_substitution",
+          "unauthorized_operation"
+        ],
+        "forbidden_vsock_port_diagnostic": {
+          "connected": false
+        },
+        "fresh_scratch_diagnostic": true,
+        "guest_root_diagnostic": {
+          "authority_environment": 0,
+          "authority_files": 0,
+          "package_manager": false,
+          "uid": 0
+        },
+        "host_consumption_count": 1,
+        "host_effect_uid": 60001,
+        "host_principal_file_denials": true,
+        "host_resource_limits_verified": {
+          "cpu_quota_percent": 100,
+          "memory_bytes_per_service": 268435456,
+          "pids_per_service": 32
+        },
+        "host_vm_uid": 60000,
+        "metadata_configured": false,
+        "network_interfaces_configured": 0,
+        "replay_denied": true,
+        "retired_effect_endpoint_unreachable": true,
+        "scratch_write_independently_observed": true,
+        "separate_network_namespaces": true,
+        "tpm_attestation_error": "TPM2 not enabled in guest build",
+        "unredeemed_capability_at_teardown": "cap_920abe9ec3c5b28c2852ec21",
+        "useful_dataset_read_and_summary": true,
+        "vm_chroot_verified": true,
+        "vm_seccomp_verified": true
+      },
+      "receipts": [
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "a6dee1efb2a034aeae7f883b1fce5321e9ce9f9947d59c4db322fc4215938979",
+            "issued_at": 1791659371.1327145,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 1,
+            "source_id": "host-supervisor",
+            "source_sequence": 1
+          },
+          "signature": "rEPek4ZEY8YKi5vp81fm0LcDTSnwkNC5aRBkFng5bp9jNDRlNNwa7zVaRoA8IPg9Uq2ca6imib6sSLszHbFhAg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "14dc11ab89301ee01b6fea9d8353bf6ec0c0ad76b8379faba149f7bc97e72339",
+            "issued_at": 1791659371.5558555,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 2,
+            "source_id": "host-supervisor",
+            "source_sequence": 2
+          },
+          "signature": "a6gFpIelGVY3OxIDCoG-jNW_hLp7EmOHfEcWQBaUze-0BEh7bsjBsipNR9v4RaBLYDS85fvaUQwGKl120C_pCw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "53fd5b9e718e619898147fe51a5565fcd4771e836bf9718b01b9b6971f75ccbf",
+            "issued_at": 1791659371.5647795,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 3,
+            "source_id": "host-effect-service",
+            "source_sequence": 1
+          },
+          "signature": "ZwDLMXnW3xCSeGYDk6NhfqZwvrq4Xn5yi3l_we0IKw23BnJh8lwQPRlet_O6z3QD0XLZF_GIjAGeY1Up0EGABg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "88fec391ba848f51f5aadd074be56c26b3b3a2537f331908e7788acb734294fc",
+            "issued_at": 1791659371.5705855,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 4,
+            "source_id": "host-effect-service",
+            "source_sequence": 2
+          },
+          "signature": "C_Eluz-0uKBowPaN6iKnWuMnGOEuvJBJ9AXvFCorhHnu9cSUSCb5N-Qw6QPNY1DoWdZDKriyZdC6G4YZnbJnDA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "2be626911112194345029672436a7c9e588b1e4a99c359dcd9aaa9359a3b0e24",
+            "issued_at": 1791659371.5747466,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 5,
+            "source_id": "host-effect-service",
+            "source_sequence": 3
+          },
+          "signature": "9dMK_tAKEv0tUnW_wB7CkRsWAcgWrfTAEU_ESzj1WtWHJfD5qt_DL_WJ8Ik2es5VdORS1QX82iX7iAifiTDoDg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "20cc0296e3dccd061f4f758e77362c3c42d92575dba368479bb5ecbd322d9cf6",
+            "issued_at": 1791659371.578526,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 6,
+            "source_id": "host-effect-service",
+            "source_sequence": 4
+          },
+          "signature": "IllYVxbHGdjPEv2FEEG2_Up3pQ_BajhXJJvPl7vA-hmwU0Dreqg2V4Q2ZsQ7tJOO8-5Hn-0GFCd3zrC3_dSmAA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "428fa9ff05ab434692450ab8c1b7fca18c051b83e483a1e431578bfddcd2fcd8",
+            "issued_at": 1791659371.5903454,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 7,
+            "source_id": "host-effect-service",
+            "source_sequence": 5
+          },
+          "signature": "1pHSs0SWg-qlBSthR71jJxhzqRJtbVb3OAi8HeBCo0Bp6cqY40OwYT4Xxu7pxaABQwCYG25W3Lj2036CPGI-Bw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "461a3e5979c7df0db5c65c97cc723e6304b9b5a49938d99ad850bb11178e20fe",
+            "issued_at": 1791659371.5940888,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 8,
+            "source_id": "host-effect-service",
+            "source_sequence": 6
+          },
+          "signature": "VTFocY6eaWiuQfUCvuznFHo2iBNmKYcY18xI_DFOQWFVxO-SPr1zLhz01u_ZpiYVA9KmRxXwNSS2f3CK9_WFBg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "f975545abda137b4a079819ee58abe99ea9c140bdfb7f78bdb2ff1388f04cc08",
+            "issued_at": 1791659371.5996728,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 9,
+            "source_id": "host-effect-service",
+            "source_sequence": 7
+          },
+          "signature": "7L0wgS6nNmPVjpwudyOlj5SnMo7HPvxLdKUGm36tmciiyJmOUqxKUcxIc400n0RxlXfnpxnbTU8EGOBhU07TBQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "0a58b4fb3e2f87cf54234f4a420588488e44a67897787abfde7d140419eeff1f",
+            "issued_at": 1791659371.8419385,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 10,
+            "source_id": "host-supervisor",
+            "source_sequence": 3
+          },
+          "signature": "R0Udqm6fCCp4vVTrXRzxhldEtozwWgWexbsof0EXBsgOfCBb3DHx5cHfq2rSc-ifAzq35mQhDyPBCm6asSbwBQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "dc2097b77d3d28bc46d6726e3e6cca0892f6211726fb391d76ede38f3cc702f1",
+            "issued_at": 1791659371.8447268,
+            "key_id": "ed25519:9841c458354652aee0d3797e4ddb15a2",
+            "sequence": 11,
+            "source_id": "host-supervisor",
+            "source_sequence": 4
+          },
+          "signature": "kiyj0hk5-HeQuAwztsSUygfpIvToOeAiEg8hnopFFVLD24YtGitp2ySE0K1prDrgmP4ZBwGrUAW8YGAW5PLeAQ"
+        }
+      ],
+      "recorder_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAuf2KDosEn/foait1AbUMTRa6FNrmkPLp9E4iHkjEZTA=\n-----END PUBLIC KEY-----\n",
+      "run_directory": "/var/tmp/ehk-f13zk_n_",
+      "teardown": {
+        "authority_revoked_by_endpoint_shutdown": true,
+        "config_removed": true,
+        "effect_endpoint_removed": true,
+        "process_groups_empty": true,
+        "scratch_removed": true,
+        "trigger": "requested-stop",
+        "vsock_removed": true
+      }
+    },
+    {
+      "events": [
+        {
+          "event_hash": "6bd7e779c9a92cd2fe3772fce83e2dba505c62a221d6e5a74b2b5c23bd8772a8",
+          "event_type": "isolation.context",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "build_manifest_digest": "8b4b7fbf1c0c8fbf8415ff02c27128b4680b492bb9996863d65fd2801c30c623",
+            "capability_id": "cap_4e185f46750dc4a0bac3cdf5",
+            "configuration_digest": "55e60b9fe69fe7e319bc7dab06811361901b5785db6e3f5357bdeabcfe1709fb",
+            "host_kernel": "6.6.87.2-microsoft-standard-WSL2",
+            "session_id": "ehk-auxex9kc"
+          },
+          "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sequence": 1,
+          "source_id": "host-supervisor",
+          "source_sequence": 1,
+          "timestamp": 1791659371.8994503
+        },
+        {
+          "event_hash": "be3fe5079e0c5531ea733289cba86dc5731fe13ce1d5667026c56a7d67966921",
+          "event_type": "attestation.assessed",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "session_id": "ehk-auxex9kc"
+          },
+          "previous_hash": "6bd7e779c9a92cd2fe3772fce83e2dba505c62a221d6e5a74b2b5c23bd8772a8",
+          "sequence": 2,
+          "source_id": "host-supervisor",
+          "source_sequence": 2,
+          "timestamp": 1791659370.7565408
+        },
+        {
+          "event_hash": "30632e35b55494856747edd86c7479ec24d6929597f2fc410405490fd0f87a13",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "be3fe5079e0c5531ea733289cba86dc5731fe13ce1d5667026c56a7d67966921",
+          "sequence": 3,
+          "source_id": "host-effect-service",
+          "source_sequence": 1,
+          "timestamp": 1791659370.7669966
+        },
+        {
+          "event_hash": "cc1981f3632155e2e4ae82cca50ec837df2d482d25e9e81ecf2f0b189cdf0019",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "30632e35b55494856747edd86c7479ec24d6929597f2fc410405490fd0f87a13",
+          "sequence": 4,
+          "source_id": "host-effect-service",
+          "source_sequence": 2,
+          "timestamp": 1791659370.7723112
+        },
+        {
+          "event_hash": "e7cf9caee9e77629e2d55ee64114722619230fb1ef808fa43754da8add4573b7",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "cc1981f3632155e2e4ae82cca50ec837df2d482d25e9e81ecf2f0b189cdf0019",
+          "sequence": 5,
+          "source_id": "host-effect-service",
+          "source_sequence": 3,
+          "timestamp": 1791659370.7768834
+        },
+        {
+          "event_hash": "a857669544c755f63f3f4c113b174abd4238fae60e6c05b4d3672809126540c4",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "e7cf9caee9e77629e2d55ee64114722619230fb1ef808fa43754da8add4573b7",
+          "sequence": 6,
+          "source_id": "host-effect-service",
+          "source_sequence": 4,
+          "timestamp": 1791659370.7808151
+        },
+        {
+          "event_hash": "5b3e532dfdb8956d8158c0bd0b8d84f4682a7da9dc75039a4b3eee7937febcaa",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "a857669544c755f63f3f4c113b174abd4238fae60e6c05b4d3672809126540c4",
+          "sequence": 7,
+          "source_id": "host-effect-service",
+          "source_sequence": 5,
+          "timestamp": 1791659370.784169
+        },
+        {
+          "event_hash": "71cdac75e579355f4d71e80c7c3f46804e62bc8031134cf7f964c8e82221e6da",
+          "event_type": "execution.authorized",
+          "payload": {
+            "capability_id": "cap_4e185f46750dc4a0bac3cdf5",
+            "request_digest": "2b641181ffb10bcc7564da80b345faea7dac69eb29a920f21e51656882162144",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "5b3e532dfdb8956d8158c0bd0b8d84f4682a7da9dc75039a4b3eee7937febcaa",
+          "sequence": 8,
+          "source_id": "host-effect-service",
+          "source_sequence": 6,
+          "timestamp": 1791659370.7974327
+        },
+        {
+          "event_hash": "74657eb7b76c8c100336856ef5dd6083791f15d21b7ddb5d225841c342afac6a",
+          "event_type": "execution.completed",
+          "payload": {
+            "capability_id": "cap_4e185f46750dc4a0bac3cdf5",
+            "effect_state": "completed",
+            "output_bytes": 43,
+            "request_id": "dataset-read",
+            "source": "host-effect-service",
+            "success": true
+          },
+          "previous_hash": "71cdac75e579355f4d71e80c7c3f46804e62bc8031134cf7f964c8e82221e6da",
+          "sequence": 9,
+          "source_id": "host-effect-service",
+          "source_sequence": 7,
+          "timestamp": 1791659370.8005335
+        },
+        {
+          "event_hash": "f162600e9ee1030ba1098b5ea991af0c38aebdf774011d308d7717a190967c7c",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "74657eb7b76c8c100336856ef5dd6083791f15d21b7ddb5d225841c342afac6a",
+          "sequence": 10,
+          "source_id": "host-effect-service",
+          "source_sequence": 8,
+          "timestamp": 1791659370.8065941
+        },
+        {
+          "event_hash": "df1f513ec029288c24a1005de0d2056629dfd0998e23e5a8a9bbb568adc77517",
+          "event_type": "isolation.observed",
+          "payload": {
+            "authoritative_state_read_write_denials": true,
+            "denied_cases": [
+              "missing_capability",
+              "forged_signature",
+              "argument_substitution",
+              "unauthorized_operation",
+              "prior_session_capability"
+            ],
+            "forbidden_vsock_port_diagnostic": {
+              "connected": false
+            },
+            "fresh_scratch_diagnostic": true,
+            "guest_root_diagnostic": {
+              "authority_environment": 0,
+              "authority_files": 0,
+              "package_manager": false,
+              "uid": 0
+            },
+            "host_consumption_count": 1,
+            "host_effect_uid": 60001,
+            "host_principal_file_denials": true,
+            "host_resource_limits_verified": {
+              "cpu_quota_percent": 100,
+              "memory_bytes_per_service": 268435456,
+              "pids_per_service": 32
+            },
+            "host_vm_uid": 60000,
+            "metadata_configured": false,
+            "network_interfaces_configured": 0,
+            "replay_denied": true,
+            "retired_effect_endpoint_unreachable": true,
+            "scratch_write_independently_observed": true,
+            "separate_network_namespaces": true,
+            "tpm_attestation_error": "TPM2 not enabled in guest build",
+            "unredeemed_capability_at_teardown": "cap_b03546ba387767ea02fef8fd",
+            "useful_dataset_read_and_summary": true,
+            "vm_chroot_verified": true,
+            "vm_seccomp_verified": true
+          },
+          "previous_hash": "f162600e9ee1030ba1098b5ea991af0c38aebdf774011d308d7717a190967c7c",
+          "sequence": 11,
+          "source_id": "host-supervisor",
+          "source_sequence": 3,
+          "timestamp": 1791659380.6535814
+        },
+        {
+          "event_hash": "3efac0003c8dabf2337fb52c2235921b18da4d12cd9c920741ffbf3ba6fd476e",
+          "event_type": "teardown.verified",
+          "payload": {
+            "authority_revoked_by_endpoint_shutdown": true,
+            "config_removed": true,
+            "effect_endpoint_removed": true,
+            "process_groups_empty": true,
+            "scratch_removed": true,
+            "trigger": "deadline",
+            "vsock_removed": true
+          },
+          "previous_hash": "df1f513ec029288c24a1005de0d2056629dfd0998e23e5a8a9bbb568adc77517",
+          "sequence": 12,
+          "source_id": "host-supervisor",
+          "source_sequence": 4,
+          "timestamp": 1791659380.6597123
+        }
+      ],
+      "evidence_chain_tip": "3efac0003c8dabf2337fb52c2235921b18da4d12cd9c920741ffbf3ba6fd476e",
+      "observations": {
+        "authoritative_state_read_write_denials": true,
+        "denied_cases": [
+          "missing_capability",
+          "forged_signature",
+          "argument_substitution",
+          "unauthorized_operation",
+          "prior_session_capability"
+        ],
+        "forbidden_vsock_port_diagnostic": {
+          "connected": false
+        },
+        "fresh_scratch_diagnostic": true,
+        "guest_root_diagnostic": {
+          "authority_environment": 0,
+          "authority_files": 0,
+          "package_manager": false,
+          "uid": 0
+        },
+        "host_consumption_count": 1,
+        "host_effect_uid": 60001,
+        "host_principal_file_denials": true,
+        "host_resource_limits_verified": {
+          "cpu_quota_percent": 100,
+          "memory_bytes_per_service": 268435456,
+          "pids_per_service": 32
+        },
+        "host_vm_uid": 60000,
+        "metadata_configured": false,
+        "network_interfaces_configured": 0,
+        "replay_denied": true,
+        "retired_effect_endpoint_unreachable": true,
+        "scratch_write_independently_observed": true,
+        "separate_network_namespaces": true,
+        "tpm_attestation_error": "TPM2 not enabled in guest build",
+        "unredeemed_capability_at_teardown": "cap_b03546ba387767ea02fef8fd",
+        "useful_dataset_read_and_summary": true,
+        "vm_chroot_verified": true,
+        "vm_seccomp_verified": true
+      },
+      "receipts": [
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "6bd7e779c9a92cd2fe3772fce83e2dba505c62a221d6e5a74b2b5c23bd8772a8",
+            "issued_at": 1791659371.901567,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 1,
+            "source_id": "host-supervisor",
+            "source_sequence": 1
+          },
+          "signature": "GEgqnkraCOkspYYJg18f6RYRnz5L3zZLGmHbrNZyGM_tZzfYeLPrjWgoTp46ZIIPWiAfqmFVTgjPDBJgaxHZDg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "be3fe5079e0c5531ea733289cba86dc5731fe13ce1d5667026c56a7d67966921",
+            "issued_at": 1791659370.7600331,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 2,
+            "source_id": "host-supervisor",
+            "source_sequence": 2
+          },
+          "signature": "EbD97fvla_-F0tpor7n1W2JK7OFCiwf2BSNUsRO5K5FAlIXsPcdqlsVlmtkosmsmX7aMUXyO_z9KHLJxa62HAg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "30632e35b55494856747edd86c7479ec24d6929597f2fc410405490fd0f87a13",
+            "issued_at": 1791659370.7692993,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 3,
+            "source_id": "host-effect-service",
+            "source_sequence": 1
+          },
+          "signature": "-m3H10RSrtLFjw_q8PrP89EixCIZw3XlIeCez7t2TtPs7-xhf5Va1ival1nYZveLgvTojWxp5hMMbmFqUVhsCA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "cc1981f3632155e2e4ae82cca50ec837df2d482d25e9e81ecf2f0b189cdf0019",
+            "issued_at": 1791659370.77455,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 4,
+            "source_id": "host-effect-service",
+            "source_sequence": 2
+          },
+          "signature": "WTwXQNTF_4VgCdZwDLwvpc8ENp6WuCQj6M2dgy0MOz3z6ueXVQjCkcVzgGwjvKBttGfUEVf9ymnp6zXHmQxdAw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "e7cf9caee9e77629e2d55ee64114722619230fb1ef808fa43754da8add4573b7",
+            "issued_at": 1791659370.779153,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 5,
+            "source_id": "host-effect-service",
+            "source_sequence": 3
+          },
+          "signature": "QlUY9dGbyE_0qO-F2mz2JxzqKGSIgz-6W8p6G-ReG7YahET6FF7Xhc0J8_p6O1B_X6mHXd6Q4JY-tBCo9TSqCw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "a857669544c755f63f3f4c113b174abd4238fae60e6c05b4d3672809126540c4",
+            "issued_at": 1791659370.7825096,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 6,
+            "source_id": "host-effect-service",
+            "source_sequence": 4
+          },
+          "signature": "ycWIi1dqV5PrD0hNJEVKDBh1J9wfqHwJiXmpMahqIFXjhQhDK0jRyWTYfK8DMmDDnWByyS5OycoF0xGNvXO_Dw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "5b3e532dfdb8956d8158c0bd0b8d84f4682a7da9dc75039a4b3eee7937febcaa",
+            "issued_at": 1791659370.7867575,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 7,
+            "source_id": "host-effect-service",
+            "source_sequence": 5
+          },
+          "signature": "ZpiRp586F8zUmT_vYmp48rGxGC5GyfmlCAlkat-iZPBpv-bLDYaSIvoXfiADj79gJFdC0cu9Bl07qVH0LylYCg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "71cdac75e579355f4d71e80c7c3f46804e62bc8031134cf7f964c8e82221e6da",
+            "issued_at": 1791659370.7997043,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 8,
+            "source_id": "host-effect-service",
+            "source_sequence": 6
+          },
+          "signature": "278E4koyObUQaD8Ay-mlXLPndPLZW8mlOP6bltbhzhPYXc9UL-mYAIRjtXqL2RdQK0Oyzzo4q-QqhhDqX5obCQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "74657eb7b76c8c100336856ef5dd6083791f15d21b7ddb5d225841c342afac6a",
+            "issued_at": 1791659370.802722,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 9,
+            "source_id": "host-effect-service",
+            "source_sequence": 7
+          },
+          "signature": "z4iIxSHjd1brcP1o_1wDQgHMmTQWC4XSHc6EjAYW8bRblY3CeU6CLPmmg70PfXzl85gVLbKosuiGe9KDhhGLCw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "f162600e9ee1030ba1098b5ea991af0c38aebdf774011d308d7717a190967c7c",
+            "issued_at": 1791659370.8086927,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 10,
+            "source_id": "host-effect-service",
+            "source_sequence": 8
+          },
+          "signature": "Btdzbrfo422OWVS0ciwV39bx_IN5FomQ2DtfzI_0dMXjO4xhPbfF3Q5KNn6iupMCIe67nwP65MKafj73--GYBg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "df1f513ec029288c24a1005de0d2056629dfd0998e23e5a8a9bbb568adc77517",
+            "issued_at": 1791659380.6588233,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 11,
+            "source_id": "host-supervisor",
+            "source_sequence": 3
+          },
+          "signature": "0gZsx_TaJCj7_9dqzTYaNcpFMcQ0LCdEHkP2UpyygEWzzcufve8_Q59YjsEDV8lhQZV-G2_KYa3Ug-2i3vETDw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "3efac0003c8dabf2337fb52c2235921b18da4d12cd9c920741ffbf3ba6fd476e",
+            "issued_at": 1791659380.661563,
+            "key_id": "ed25519:d417179b717f33be1cfbcc442e692240",
+            "sequence": 12,
+            "source_id": "host-supervisor",
+            "source_sequence": 4
+          },
+          "signature": "478mEYPw90yeseDwGW4rrc8oj8bIWXknPLmszcDgTH-NAL14LkPvSRt6GKfr45FOIhqXN20_kV42ktOmRi1JBA"
+        }
+      ],
+      "recorder_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAXdwgzareJf/MObg/aZN3h7VqSI6kRmBrleun6NHsYTc=\n-----END PUBLIC KEY-----\n",
+      "run_directory": "/var/tmp/ehk-auxex9kc",
+      "teardown": {
+        "authority_revoked_by_endpoint_shutdown": true,
+        "config_removed": true,
+        "effect_endpoint_removed": true,
+        "process_groups_empty": true,
+        "scratch_removed": true,
+        "trigger": "deadline",
+        "vsock_removed": true
+      }
+    },
+    {
+      "events": [
+        {
+          "event_hash": "714c7e422a0072c20471d6b9a4e68defb9249b81163af11d0f333e801b04c249",
+          "event_type": "isolation.context",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "build_manifest_digest": "8b4b7fbf1c0c8fbf8415ff02c27128b4680b492bb9996863d65fd2801c30c623",
+            "capability_id": "cap_05373f8aa4efa1eabe4e4697",
+            "configuration_digest": "55e60b9fe69fe7e319bc7dab06811361901b5785db6e3f5357bdeabcfe1709fb",
+            "host_kernel": "6.6.87.2-microsoft-standard-WSL2",
+            "session_id": "ehk-9v_ez2i2"
+          },
+          "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sequence": 1,
+          "source_id": "host-supervisor",
+          "source_sequence": 1,
+          "timestamp": 1791659380.714105
+        },
+        {
+          "event_hash": "c8967790a2afce46c73eb75558eba9cf0f69cdc6362d22e0096dd25635b28d36",
+          "event_type": "attestation.assessed",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "session_id": "ehk-9v_ez2i2"
+          },
+          "previous_hash": "714c7e422a0072c20471d6b9a4e68defb9249b81163af11d0f333e801b04c249",
+          "sequence": 2,
+          "source_id": "host-supervisor",
+          "source_sequence": 2,
+          "timestamp": 1791659381.1635067
+        },
+        {
+          "event_hash": "ee49dbb2eb7e49763de7d1b303f09981b62c817529e4a6b9d794edad0765ceb5",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "c8967790a2afce46c73eb75558eba9cf0f69cdc6362d22e0096dd25635b28d36",
+          "sequence": 3,
+          "source_id": "host-effect-service",
+          "source_sequence": 1,
+          "timestamp": 1791659381.1734748
+        },
+        {
+          "event_hash": "3e7529351832e351dd5d1dace9408e122d6c866d9d74b174478f8c0fc9d3d034",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "ee49dbb2eb7e49763de7d1b303f09981b62c817529e4a6b9d794edad0765ceb5",
+          "sequence": 4,
+          "source_id": "host-effect-service",
+          "source_sequence": 2,
+          "timestamp": 1791659381.178053
+        },
+        {
+          "event_hash": "ee7374c9d924fa2f167f28179412b7c91e8a513601477f9dfed6a01b0b5648fa",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "3e7529351832e351dd5d1dace9408e122d6c866d9d74b174478f8c0fc9d3d034",
+          "sequence": 5,
+          "source_id": "host-effect-service",
+          "source_sequence": 3,
+          "timestamp": 1791659381.1824174
+        },
+        {
+          "event_hash": "c43f9ed544df7e41768015a90497879e54856f030efacf0a9385db45f1a3cf13",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "ee7374c9d924fa2f167f28179412b7c91e8a513601477f9dfed6a01b0b5648fa",
+          "sequence": 6,
+          "source_id": "host-effect-service",
+          "source_sequence": 4,
+          "timestamp": 1791659381.186547
+        },
+        {
+          "event_hash": "6b55fa49484ad5eba77ebec79bca11ec7da78317b1585e18d9d3295c48f31fc0",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "c43f9ed544df7e41768015a90497879e54856f030efacf0a9385db45f1a3cf13",
+          "sequence": 7,
+          "source_id": "host-effect-service",
+          "source_sequence": 5,
+          "timestamp": 1791659381.190355
+        },
+        {
+          "event_hash": "548de75a37123149d14a0bf5139a85f474ffcb5b2bed336bcaf5b277afbc8c4b",
+          "event_type": "execution.authorized",
+          "payload": {
+            "capability_id": "cap_05373f8aa4efa1eabe4e4697",
+            "request_digest": "24cd68658dad22e5993a2f5f725bdd691527ddad92188ba6bc6e1c72ce61c6b5",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "6b55fa49484ad5eba77ebec79bca11ec7da78317b1585e18d9d3295c48f31fc0",
+          "sequence": 8,
+          "source_id": "host-effect-service",
+          "source_sequence": 6,
+          "timestamp": 1791659381.2047522
+        },
+        {
+          "event_hash": "e198c63f71abbdfb3f93f3c376e166035c4c5b926e2c277d9730ae182c33bfee",
+          "event_type": "execution.completed",
+          "payload": {
+            "capability_id": "cap_05373f8aa4efa1eabe4e4697",
+            "effect_state": "completed",
+            "output_bytes": 43,
+            "request_id": "dataset-read",
+            "source": "host-effect-service",
+            "success": true
+          },
+          "previous_hash": "548de75a37123149d14a0bf5139a85f474ffcb5b2bed336bcaf5b277afbc8c4b",
+          "sequence": 9,
+          "source_id": "host-effect-service",
+          "source_sequence": 7,
+          "timestamp": 1791659381.2082202
+        },
+        {
+          "event_hash": "e31e6ad4b5d4b75335fabedda8532c5cb234ae193ec89c11c8c7c273c385e9fb",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read",
+            "source": "host-effect-service"
+          },
+          "previous_hash": "e198c63f71abbdfb3f93f3c376e166035c4c5b926e2c277d9730ae182c33bfee",
+          "sequence": 10,
+          "source_id": "host-effect-service",
+          "source_sequence": 8,
+          "timestamp": 1791659381.2144554
+        },
+        {
+          "event_hash": "9f55c33fb9cbba74962e5f17d29ee639ae9df878110c8604cfce2bf6bb5fa530",
+          "event_type": "isolation.observed",
+          "payload": {
+            "authoritative_state_read_write_denials": true,
+            "denied_cases": [
+              "missing_capability",
+              "forged_signature",
+              "argument_substitution",
+              "unauthorized_operation",
+              "prior_session_capability"
+            ],
+            "forbidden_vsock_port_diagnostic": {
+              "connected": false
+            },
+            "fresh_scratch_diagnostic": true,
+            "guest_root_diagnostic": {
+              "authority_environment": 0,
+              "authority_files": 0,
+              "package_manager": false,              "uid": 0
+            },
+            "host_consumption_count": 1,
+            "host_effect_uid": 60001,
+            "host_principal_file_denials": true,
+            "host_resource_limits_verified": {
+              "cpu_quota_percent": 100,
+              "memory_bytes_per_service": 268435456,
+              "pids_per_service": 32
+            },
+            "host_vm_uid": 60000,
+            "metadata_configured": false,
+            "network_interfaces_configured": 0,
+            "replay_denied": true,
+            "retired_effect_endpoint_unreachable": true,
+            "scratch_write_independently_observed": true,
+            "separate_network_namespaces": true,
+            "tpm_attestation_error": "TPM2 not enabled in guest build",
+            "unredeemed_capability_at_teardown": "cap_f760930b7ff240c8269f667c",
+            "useful_dataset_read_and_summary": true,
+            "vm_chroot_verified": true,
+            "vm_seccomp_verified": true
+          },
+          "previous_hash": "e31e6ad4b5d4b75335fabedda8532c5cb234ae193ec89c11c8c7c273c385e9fb",
+          "sequence": 11,
+          "source_id": "host-supervisor",
+          "source_sequence": 3,
+          "timestamp": 1791659381.4694357
+        },
+        {
+          "event_hash": "71f92b3134dfb8c6ae20d0a3e0c008aae0c6f4414f49e59705233265a51dd78b",
+          "event_type": "teardown.verified",
+          "payload": {
+            "authority_revoked_by_endpoint_shutdown": true,
+            "config_removed": true,
+            "effect_endpoint_removed": true,
+            "process_groups_empty": true,
+            "scratch_removed": true,
+            "trigger": "supervisor-channel-closed",
+            "vsock_removed": true
+          },
+          "previous_hash": "9f55c33fb9cbba74962e5f17d29ee639ae9df878110c8604cfce2bf6bb5fa530",
+          "sequence": 12,
+          "source_id": "host-supervisor",
+          "source_sequence": 4,
+          "timestamp": 1791659381.47235
+        }
+      ],
+      "evidence_chain_tip": "71f92b3134dfb8c6ae20d0a3e0c008aae0c6f4414f49e59705233265a51dd78b",
+      "observations": {
+        "authoritative_state_read_write_denials": true,
+        "denied_cases": [
+          "missing_capability",
+          "forged_signature",
+          "argument_substitution",
+          "unauthorized_operation",
+          "prior_session_capability"
+        ],
+        "forbidden_vsock_port_diagnostic": {
+          "connected": false
+        },
+        "fresh_scratch_diagnostic": true,
+        "guest_root_diagnostic": {
+          "authority_environment": 0,
+          "authority_files": 0,
+          "package_manager": false,
+          "uid": 0
+        },
+        "host_consumption_count": 1,
+        "host_effect_uid": 60001,
+        "host_principal_file_denials": true,
+        "host_resource_limits_verified": {
+          "cpu_quota_percent": 100,
+          "memory_bytes_per_service": 268435456,
+          "pids_per_service": 32
+        },
+        "host_vm_uid": 60000,
+        "metadata_configured": false,
+        "network_interfaces_configured": 0,
+        "replay_denied": true,
+        "retired_effect_endpoint_unreachable": true,
+        "scratch_write_independently_observed": true,
+        "separate_network_namespaces": true,
+        "tpm_attestation_error": "TPM2 not enabled in guest build",
+        "unredeemed_capability_at_teardown": "cap_f760930b7ff240c8269f667c",
+        "useful_dataset_read_and_summary": true,
+        "vm_chroot_verified": true,
+        "vm_seccomp_verified": true
+      },
+      "receipts": [
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "714c7e422a0072c20471d6b9a4e68defb9249b81163af11d0f333e801b04c249",
+            "issued_at": 1791659380.7164586,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 1,
+            "source_id": "host-supervisor",
+            "source_sequence": 1
+          },
+          "signature": "-m7rSJmc8MRkKU_GQMsoEy0AryF0mI0C6EUvpMpm4JcYrGlFwbfqN-QKe2pIJrLcRqMqwYyjHNf73IioymY2Dw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "c8967790a2afce46c73eb75558eba9cf0f69cdc6362d22e0096dd25635b28d36",
+            "issued_at": 1791659381.1675253,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 2,
+            "source_id": "host-supervisor",
+            "source_sequence": 2
+          },
+          "signature": "To5HY-9G-ogcxs31dL__GmJUhhiYizUcE0-CgZad-XNoA4M1byOpU46RHSrTtlux9Dun8VmS6icKMviZS_yAAw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "ee49dbb2eb7e49763de7d1b303f09981b62c817529e4a6b9d794edad0765ceb5",
+            "issued_at": 1791659381.17542,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 3,
+            "source_id": "host-effect-service",
+            "source_sequence": 1
+          },
+          "signature": "draUngZGbG6boTf27RWjaYa8M2S3EEeGqv_VLbVnjehNxZtNNm72i-Ih0txiugOVEi-Bic7mo-rqzCSoW0N3Cw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "3e7529351832e351dd5d1dace9408e122d6c866d9d74b174478f8c0fc9d3d034",
+            "issued_at": 1791659381.1802716,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 4,
+            "source_id": "host-effect-service",
+            "source_sequence": 2
+          },
+          "signature": "87fzQQdozy8RCOhJU1wldyinbh8JY0kGDiaVfJZFToL3L-7SPq37quZT6g9g4PURSHWnjRUBQ0jMF7jtG1UpAQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "ee7374c9d924fa2f167f28179412b7c91e8a513601477f9dfed6a01b0b5648fa",
+            "issued_at": 1791659381.1848888,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 5,
+            "source_id": "host-effect-service",
+            "source_sequence": 3
+          },
+          "signature": "o_A4Vg2uFA83e_KKOSWRmMXjAEmma5gMkmm_AzAc3UHHmlMV-704STI8T9eGQzIwe5SzOXs36DIx66Jql55GDA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "c43f9ed544df7e41768015a90497879e54856f030efacf0a9385db45f1a3cf13",
+            "issued_at": 1791659381.1883755,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 6,
+            "source_id": "host-effect-service",
+            "source_sequence": 4
+          },
+          "signature": "FEPh4XORHfZOSGf1gNWCGdO5woyrwSxVDCMhe-bjkv-K8dFbXbrdPhWUQdxCmFIrCKVSgAFEO05ouX66z5EfDg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "6b55fa49484ad5eba77ebec79bca11ec7da78317b1585e18d9d3295c48f31fc0",
+            "issued_at": 1791659381.1921575,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 7,
+            "source_id": "host-effect-service",
+            "source_sequence": 5
+          },
+          "signature": "HG8LuUB6NkRiHpbVE0B9ooxvLWRk8Jloucr2T0DhK850u7U4sXtu9x3wXscFfJGuOW1R0YM5x71XHuEAceeNDQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "548de75a37123149d14a0bf5139a85f474ffcb5b2bed336bcaf5b277afbc8c4b",
+            "issued_at": 1791659381.207267,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 8,
+            "source_id": "host-effect-service",
+            "source_sequence": 6
+          },
+          "signature": "8Y4pNh-hkYebPuh2c6eltQBWiOj_v6KFmlPKQNBraNGUchd0wogvvpMLbA9WskWMLVmz3734Bj_eQaAs4KoHAQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "e198c63f71abbdfb3f93f3c376e166035c4c5b926e2c277d9730ae182c33bfee",
+            "issued_at": 1791659381.210492,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 9,
+            "source_id": "host-effect-service",
+            "source_sequence": 7
+          },
+          "signature": "4M73wX_OykbUKsm9ZFU7FkgKbIkY8PuRYuHcKi5CiyATWNg3ruJOvw4F4NgpbGPiqQjyCrd4s7VHuw2Jqm2lBg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "e31e6ad4b5d4b75335fabedda8532c5cb234ae193ec89c11c8c7c273c385e9fb",
+            "issued_at": 1791659381.216706,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 10,
+            "source_id": "host-effect-service",
+            "source_sequence": 8
+          },
+          "signature": "M-mJpMlYMEHY8blNZ7RfCyp_dnVsxUZ_VGetKXt7k10rNvxs6Ikpekxi9iTsQOZuWxKU9LmeGtFZjuLNrcjmAQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "9f55c33fb9cbba74962e5f17d29ee639ae9df878110c8604cfce2bf6bb5fa530",
+            "issued_at": 1791659381.4715872,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 11,
+            "source_id": "host-supervisor",
+            "source_sequence": 3
+          },
+          "signature": "7Rt7iNwbNozYqIHWOl4LHDPeOtJU-M86fvK7fMcvqj2zhFeuoeAhsbcBYIrqzfD6PKdGJE9z65h0BLjHepuiAA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "71f92b3134dfb8c6ae20d0a3e0c008aae0c6f4414f49e59705233265a51dd78b",
+            "issued_at": 1791659381.4740577,
+            "key_id": "ed25519:cb405913373da4de09b8055d1d76cd12",
+            "sequence": 12,
+            "source_id": "host-supervisor",
+            "source_sequence": 4
+          },
+          "signature": "bopl1iV-6zmvnT2RUN5_p-VhfHiODTHo32Np6X2JnxKMaKL133e8k_90ee9mm0oMPTXgbOSppq4WMYXXodEmCg"
+        }
+      ],
+      "recorder_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAIv5XkT2eABtbS3eCxtOMPhQQXmt8U4bSjs/9CB/1gC8=\n-----END PUBLIC KEY-----\n",
+      "run_directory": "/var/tmp/ehk-9v_ez2i2",
+      "teardown": {
+        "authority_revoked_by_endpoint_shutdown": true,
+        "config_removed": true,
+        "effect_endpoint_removed": true,
+        "process_groups_empty": true,
+        "scratch_removed": true,
+        "trigger": "supervisor-channel-closed",
+        "vsock_removed": true
+      }
+    }
+  ],
+  "schema": "event-horizon.linux-isolation-experiment.v1",
+  "scope": "single-host serialized sessions; deterministic owned probes; no independent security audit",
+  "status": "PASS",
+  "workload": "guest-root synthetic dataset read and response checksum"
+}
