@@ -18,6 +18,16 @@ LEGACY_PATTERN = re.compile(b"hard" + b"proof", re.IGNORECASE)
 LEGACY_ALLOWED = {"CHANGELOG.md", "docs/RENAMING_NOTES.md"}
 MAX_TRACKED_BYTES = 5 * 1024 * 1024
 
+# One pre-existing, deliberately published demo movie is pinned to its
+# exact Git blob object ID. No wildcard media exception and no exemption
+# for modified binaries. Ordinary tracked paths retain the 5 MiB ceiling.
+APPROVED_MEDIA = {
+    "demo/event-horizon-demo.mp4": (
+        "23bccf383c4a4efcc99943bb207a7fc332f9e2df",
+        35 * 1024 * 1024,
+    ),
+}
+
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
@@ -43,7 +53,22 @@ def main() -> int:
         if not path.is_file():
             continue
         size = path.stat().st_size
-        if size > MAX_TRACKED_BYTES:
+        if name in APPROVED_MEDIA:
+            approved_oid, approved_size = APPROVED_MEDIA[name]
+            if size > approved_size:
+                failures.append(f"pinned demo asset exceeds explicit size cap: {name}")
+                continue
+            actual_oid = subprocess.run(
+                ["git", "hash-object", "--", name],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            if actual_oid != approved_oid:
+                failures.append(f"pinned demo asset Git object ID changed: {name}")
+                continue
+        elif size > MAX_TRACKED_BYTES:
             failures.append(f"tracked file exceeds 5 MiB: {name}")
             continue
         content = path.read_bytes()
