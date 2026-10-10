@@ -27,6 +27,8 @@ from event_horizon.remote_replay import (
 )
 from tests.test_etcd_live import cluster_id
 from event_horizon.process_harness import ProcessSeparatedHarness
+from event_horizon.models import ActionRequest
+from event_horizon.protocol import ProtocolError
 from event_horizon.distributed_signed_evidence import verify_distributed_report
 from event_horizon.intent_canonicalizer import AuthorizationDenied
 from event_horizon.remote_replay import ReplayHttpServer
@@ -116,6 +118,38 @@ class LiveSignedReplayTests(unittest.TestCase):
                     self.assertFalse(replay.success)
                     self.assertEqual(replay.effect_state, "not-started")
                     self.assertIn("replay", replay.error.lower())
+                    tampered_action = ActionRequest.from_dict({
+                        **action.canonical_payload(),
+                        "arguments": {"offset": 1, "length": 64},
+                    })
+                    modified = harness.execute(
+                        tampered_action, capability, attestation,
+                    )
+                    self.assertFalse(modified.success)
+                    self.assertEqual(modified.effect_state, "not-started")
+                    unsigned_mutation_denied = False
+                    try:
+                        harness.call(
+                            "signer", "consume", {
+                                "request": action.canonical_payload(),
+                                "capability": capability.to_dict(),
+                                "attestation": attestation,
+                            }, authorize=False,
+                        )
+                    except ProtocolError:
+                        unsigned_mutation_denied = True
+                    self.assertTrue(unsigned_mutation_denied)
+                    guardian_vetoed = False
+                    try:
+                        harness.request_capability({
+                            **request, "request_id": "forbidden-distributed-op",
+                            "operation": "shell.execute",
+                            "resource_id": "host-root",
+                            "arguments": {},
+                        })
+                    except AuthorizationDenied:
+                        guardian_vetoed = True
+                    self.assertTrue(guardian_vetoed)
                     probe = harness.root_probe()
                     self.assertFalse(probe["private_key_material_present"])
                     config = json.loads(harness.config_paths["executor"].read_text())
@@ -198,6 +232,11 @@ class LiveSignedReplayTests(unittest.TestCase):
                             certificate["certificate"]["schema"]
                             == "event-horizon.containment-certificate.v0.5"
                         ),
+                        "tampered_arguments": (
+                            not modified.success and modified.effect_state == "not-started"
+                        ),
+                        "unsigned_signer_mutation": unsigned_mutation_denied,
+                        "guardian_veto": guardian_vetoed,
                     }
                     for case, passed in sorted(cases.items()):
                         harness.record("adversarial.observation", {
