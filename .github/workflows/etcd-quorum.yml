@@ -3,8 +3,19 @@ on:
   push:
     branches:
       - feature/multi-authority-backends-raft-20261009
+      - feature/host-gateway-and-signed-adversarial-evidence-20261009
     paths:
       - "src/event_horizon/authority_backends.py"
+      - "src/event_horizon/trusted_effect_gateway.py"
+      - "src/event_horizon/effect_boundary.py"
+      - "tests/test_etcd_live.py"
+      - "tests/test_effect_boundary_gateway.py"
+      - ".github/workflows/etcd-quorum.yml"
+  pull_request:
+    paths:
+      - "src/event_horizon/authority_backends.py"
+      - "src/event_horizon/trusted_effect_gateway.py"
+      - "src/event_horizon/effect_boundary.py"
       - "tests/test_etcd_live.py"
       - ".github/workflows/etcd-quorum.yml"
   workflow_dispatch:
@@ -108,6 +119,29 @@ jobs:
               print("PASS: isolated minority refused capability consumption")
           else:
               raise SystemExit("FAIL: minority acknowledged authority without quorum")
+          PY
+      - name: Verify live effect gateway denies minority before effect
+        shell: bash
+        env:
+          EHH_ETCD_ENDPOINT: http://127.0.0.1:3379
+        run: |
+          python - <<'PY'
+          import os, tempfile, uuid
+          from tests.test_etcd_live import signed_effect_gateway_fixture
+          with tempfile.TemporaryDirectory() as directory:
+              gate, message = signed_effect_gateway_fixture(
+                  os.environ["EHH_ETCD_ENDPOINT"],
+                  os.environ["EHH_ETCD_CLUSTER_ID"],
+                  "minority." + uuid.uuid4().hex,
+                  directory, replica=0,
+              )
+              try:
+                  result = gate.execute(message, peer_uid=60000)
+                  assert result["success"] is False, result
+                  assert result["effect_state"] == "not-started", result
+                  print("PASS: gateway refused to dispatch without etcd quorum")
+              finally:
+                  gate.close()
           PY
       - name: Disposable cluster logs on failure
         if: failure()
