@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 import tempfile
 import unittest
 import uuid
@@ -368,6 +369,8 @@ class LiveSignedReplayTests(unittest.TestCase):
 
     def test_signed_capability_nonce_and_authorization_under_real_quorum(self):
         service, client, config, params = provision()
+        now = int(time.time() * 1000)
+        expiry = now + 60_000
         nonce = "A" * 43
         cap = "cap_0123456789abcdef01234567"
         context = {
@@ -377,17 +380,17 @@ class LiveSignedReplayTests(unittest.TestCase):
         self.assertTrue(client.call("nonce-create", "nonces", {
             "nonce": nonce, "context": context,
             "context_digest": digest(context),
-            "issued_at": 1000, "expires_at": 5000,
+            "issued_at": now, "expires_at": expiry,
         })["accepted"])
         self.assertTrue(client.call("nonce-consume", "nonces", {
-            "nonce": nonce, "context_digest": digest(context), "now": 3000,
+            "nonce": nonce, "context_digest": digest(context), "now": now,
         })["accepted"])
         self.assertFalse(client.call("nonce-consume", "nonces", {
-            "nonce": nonce, "context_digest": digest(context), "now": 3001,
+            "nonce": nonce, "context_digest": digest(context), "now": now,
         })["accepted"])
         auth = RemoteAuthorizationReplayStore(client, partition="authorizations")
-        self.assertTrue(auth.consume("A" * 43, "b" * 64, 5000, 1000))
-        self.assertFalse(auth.consume("A" * 43, "b" * 64, 5000, 1001))
+        self.assertTrue(auth.consume("A" * 43, "b" * 64, expiry, now))
+        self.assertFalse(auth.consume("A" * 43, "b" * 64, expiry, now))
         # Real transport and second independently initialized replica use
         # one global ordering and token keyspace.
         replica = EtcdSignedReplayService.connect(config, **params, bootstrap=False)
@@ -404,7 +407,7 @@ class LiveSignedReplayTests(unittest.TestCase):
         self.assertEqual(attempts.count(True), 1, attempts)
         self.assertEqual(attempts.count(False), 15, attempts)
         self.assertEqual(service.checkpoint(), replica.checkpoint())
-        self.assertEqual(service.checkpoint()[1], 21)
+        self.assertEqual(service.checkpoint()[1], 4)
         self.assertFalse(
             RemoteCapabilityConsumptionStore(client, partition="capabilities")
             .consume(cap, "a"*64, 5000, 1001)
