@@ -33,6 +33,7 @@ class FakeTrustedVerifier:
         accepted = self.store.consume(TOKEN, DIGEST, 5000, 1000)
         if not accepted:
             raise PermissionError("replay")
+        return SimpleNamespace(capability_id=TOKEN, max_output_bytes=4096)
 
 
 class OutageStore:
