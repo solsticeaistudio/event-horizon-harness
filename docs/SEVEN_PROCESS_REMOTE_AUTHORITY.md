@@ -107,8 +107,9 @@ The disposable real three-node etcd workflow tests the same
 end-to-end seven-process experiment with all three members, and again after
 one member is stopped. It also checks actual etcd record keys for every
 authorized replay partition, exercises a protected certificate creation,
-and induces a temporary trusted-authority transport outage **inside the
-seven-process workflow**, verifying no action is dispatched without a signed
+rejects tampered capability arguments, unsigned signer mutation, and
+forbidden operations before dispatch, and induces a temporary trusted-authority
+transport outage **inside the seven-process workflow**, verifying no action is dispatched without a signed
 replay authorization, followed by recovery and once-only consumption.
 
 The majority-loss case physically stops a second etcd member and verifies
@@ -135,7 +136,7 @@ two members forming the remaining majority:
 - `report-quorum-2.json`
 
 Each report embeds the recorder's hash-chained event stream with independent
-Ed25519 receipt signatures, eight explicit adversarial acceptance outcomes,
+Ed25519 receipt signatures, eleven explicit adversarial acceptance outcomes,
 two real signed capability issuances, and two permitted synthetic effect
 completions. The CI workflow independently checks the signature and chain
 consistency before publishing the `eh-seven-process-distributed-evidence`
