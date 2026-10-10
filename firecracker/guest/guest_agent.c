@@ -109,6 +109,8 @@ static int write_frame(int fd, const char *payload) {
     return write_exact(fd, payload, length);
 }
 
+#ifdef EH_HAS_TPM2
+/* Quote encoding is needed only when TPM2 support is built. */
 static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 static int base64_encode(const unsigned char *in, size_t in_len, char *out, size_t out_size) {
@@ -132,6 +134,7 @@ static int base64_encode(const unsigned char *in, size_t in_len, char *out, size
     out[out_len] = '\0';
     return (int)out_len;
 }
+#endif
 
 static int authority_file_count(void) {
     const char *paths[] = {
@@ -343,13 +346,6 @@ static int tpm_generate_quote(const char *nonce_hex, char **quote_out, char **si
 
     return 0;
 }
-#else
-static int tpm_generate_quote(const char *nonce_hex, char **quote_out, char **sig_out) {
-    (void)nonce_hex;
-    *quote_out = NULL;
-    *sig_out = NULL;
-    return -1;
-}
 #endif
 
 /* Intentionally no guest-local authorization. Guest root can send arbitrary bytes;
@@ -454,39 +450,58 @@ if (write_frame(client, "{\"attempted\":true}") != 0) return;
                 (unsigned int)geteuid()
             );
             if (write_frame(client, response) != 0) return;
-        } else if (strncmp(payload, "{\042type\042:\042tpm_attest\042", 20) == 0) {
-            // Parse nonce from payload: {"type":"tpm_attest","nonce":"..."}
-            char *nonce_start = strstr(payload, "{\042nonce\042:\042");
-            if (!nonce_start) {
-                if (write_frame(client, "{\042error\042:\042missing_nonce\042,\042ok\042:false}") != 0) return;
-            }
-            nonce_start += 12; // skip {"nonce":"
-            char *nonce_end = strchr(nonce_start, '\042');
-            if (!nonce_end) {
-                if (write_frame(client, "{\042error\042:\042malformed_nonce\042,\042ok\042:false}") != 0) return;
-            }
-            size_t nonce_len = nonce_end - nonce_start;
-            char nonce[nonce_len + 1];
-            memcpy(nonce, nonce_start, nonce_len);
-            nonce[nonce_len] = '\0';
-
+        } else if (strncmp(payload, "{\\042type\\042:\\042tpm_attest\\042", 20) == 0) {
 #ifdef EH_HAS_TPM2
+            /* TPM2 attestation is optional. Never fabricate a quote. */
+            const char *nonce_key = "\\042nonce\\042:\\042";
+            char *nonce_start = strstr(payload, nonce_key);
+            if (!nonce_start) {
+                if (write_frame(client, "{\\042error\\042:\\042missing_nonce\\042,\\042ok\\042:false}") != 0) return;
+                continue;
+            }
+            nonce_start += strlen(nonce_key);
+            char *nonce_end = strchr(nonce_start, '\\042');
+            if (!nonce_end || (size_t)(nonce_end - nonce_start) != EH_TPM_NONCE_SIZE * 2) {
+                if (write_frame(client, "{\\042error\\042:\\042malformed_nonce\\042,\\042ok\\042:false}") != 0) return;
+                continue;
+            }
+            char nonce[EH_TPM_NONCE_SIZE * 2 + 1];
+            memcpy(nonce, nonce_start, EH_TPM_NONCE_SIZE * 2);
+            nonce[EH_TPM_NONCE_SIZE * 2] = '\\0';
+            int valid_hex = 1;
+            for (size_t i = 0; i < EH_TPM_NONCE_SIZE * 2; i++) {
+                char ch = nonce[i];
+                if (!((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')
+                      || (ch >= 'A' && ch <= 'F'))) {
+                    valid_hex = 0;
+                    break;
+                }
+            }
+            if (!valid_hex) {
+                if (write_frame(client, "{\\042error\\042:\\042malformed_nonce\\042,\\042ok\\042:false}") != 0) return;
+                continue;
+            }
             char *quote = NULL;
             char *sig = NULL;
             if (tpm_generate_quote(nonce, &quote, &sig) != 0 || !quote || !sig) {
-                if (write_frame(client, "{\042error\042:\042tpm_quote_failed\042,\042ok\042:false}") != 0) return;
+                free(quote);
+                free(sig);
+                if (write_frame(client, "{\\042error\\042:\\042tpm_quote_failed\\042,\\042ok\\042:false}") != 0) return;
+                continue;
             }
             char response[EH_MAX_FRAME];
             int count = snprintf(response, sizeof(response),
-                "{\042quote\042:\042%s\042,\042signature\042:\042%s\042,\042nonce\042:\042%s\042,\042ok\042:true}",
+                "{\\042quote\\042:\\042%s\\042,\\042signature\\042:\\042%s\\042,\\042nonce\\042:\\042%s\\042,\\042ok\\042:true}",
                 quote, sig, nonce);
             free(quote);
             free(sig);
-            if (count > 0 && (size_t)count < sizeof(response)) {
-                if (write_frame(client, response) != 0) return;
+            if (count <= 0 || (size_t)count >= sizeof(response)) {
+                if (write_frame(client, "{\\042error\\042:\\042tpm_quote_too_large\\042,\\042ok\\042:false}") != 0) return;
+                continue;
             }
+            if (write_frame(client, response) != 0) return;
 #else
-            if (write_frame(client, "{\042error\042:\042tpm_not_available\042,\042ok\042:false}") != 0) return;
+            if (write_frame(client, "{\\042error\\042:\\042tpm_not_available\\042,\\042ok\\042:false}") != 0) return;
 #endif
         } else if (strcmp(payload, "{\042type\042:\042shutdown\042}") == 0) {
             if (write_frame(client, "{\042accepted\042:true}") != 0) return;
@@ -498,7 +513,6 @@ if (write_frame(client, "{\"attempted\":true}") != 0) return;
             if (write_frame(client, "{\042error\042:\042unknown_message\042,\042ok\042:false}") != 0) return;
         }
     }
-}
 }
 
 int main(void) {
