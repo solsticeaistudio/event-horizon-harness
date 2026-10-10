@@ -13,6 +13,7 @@ from .canonical import digest
 from .recorder import ExternalRecorder
 
 SCHEMA = "event-horizon.distributed-adversarial-evidence.v1"
+STRICT_SCHEMA = "event-horizon.distributed-adversarial-evidence.v2"
 REQUIRED_CASES = frozenset({
     "valid_effect", "capability_replay", "executor_credential_probe",
     "authority_outage", "recovery_once", "recovery_replay",
@@ -36,6 +37,8 @@ def verify_distributed_report(
     pinned_recorder_public_key: str | None = None,
 ) -> dict[str, Any]:
     _require(isinstance(report, Mapping), "report must be a mapping")
+    if report.get("schema") == STRICT_SCHEMA:
+        return _verify_strict_report(report, pinned_recorder_public_key=pinned_recorder_public_key)
     _require(report.get("schema") == SCHEMA, "unknown report schema")
     _require(report.get("topology") == "same-host-seven-process-live-etcd",
              "unsupported proof topology")
@@ -119,4 +122,132 @@ def verify_distributed_report(
         "chain_tip": previous,
         "hardware_isolation_tested": False,
         "etcd_backend_tested": True,
+    }
+
+# New reports use v2. Version 1 remains verifiable for historical experiments,
+# but v1 "PASS" means signed *coordinator assertions*, not event-derived proof.
+def _verify_strict_report(
+    report: Mapping[str, Any], *,
+    pinned_recorder_public_key: str | None,
+) -> dict[str, Any]:
+    # Reuse the full signature, hash-chain, source-sequence, and envelope checks.
+    legacy = verify_distributed_report(
+        {**report, "schema": SCHEMA},
+        pinned_recorder_public_key=pinned_recorder_public_key,
+    )
+    events = report["signed_evidence"]["events"]
+    execution_events = [
+        event for event in events
+        if event["event_type"] in {
+            "execution.completed", "execution.denied", "execution.indeterminate",
+        }
+    ]
+    first = "distributed-7-process"
+    second = "during-authority-outage"
+    # Every attempted effect must appear as a separate primary execution
+    # event, in experiment order. A signed PASS boolean is not a substitute.
+    expected = [
+        ("valid_effect", first, True, "completed"),
+        ("capability_replay", first, False, "not-started"),
+        ("tampered_arguments", first, False, "not-started"),
+        ("authority_outage", second, False, "not-started"),
+        ("recovery_once", second, True, "completed"),
+        ("recovery_replay", second, False, "not-started"),
+        ("signer_restart_replay", first, False, "not-started"),
+    ]
+    _require(len(execution_events) == len(expected),
+             "signed primary execution-event count differs from test attempts")
+    derived: dict[str, bool] = {}
+    for event, (case, request_id, successful, state) in zip(
+        execution_events, expected, strict=True,
+    ):
+        payload = event["payload"]
+        _require(event["source_id"] == "coordinator"
+                 and isinstance(payload, Mapping)
+                 and payload.get("request_id") == request_id
+                 and type(payload.get("success")) is bool
+                 and payload["success"] is successful
+                 and payload.get("effect_state") == state
+                 and event["event_type"] == (
+                     "execution.completed" if successful else "execution.denied"
+                 ), f"{case}: missing or contradictory signed execution record")
+        derived[case] = True
+    issued = [
+        event["payload"].get("request_id")
+        for event in events if event["event_type"] == "capability.issued"
+    ]
+    _require(issued == [first, second],
+             "signed capability issues do not match the two authorized requests")
+    # These four cases have no independent source-side oracle in this topology.
+    # Require signed *raw observations*, not bare case/pass booleans, and
+    # disclose the remaining coordinator trust assumption to evaluators.
+    probes = {}
+    for event in events:
+        if event["event_type"] != "adversarial.probe":
+            continue
+        payload = event["payload"]
+        _require(event["source_id"] == "coordinator"
+                 and isinstance(payload, Mapping)
+                 and set(payload) == {"case", "observation"}
+                 and payload["case"] not in probes
+                 and isinstance(payload["observation"], Mapping),
+                 "malformed or repeated signed probe")
+        probes[payload["case"]] = payload["observation"]
+    _require(set(probes) == {
+        "executor_credential_probe", "unsigned_signer_mutation",
+        "guardian_veto", "signed_certificate",
+    }, "missing signed raw coordinator probe")
+    root = probes["executor_credential_probe"]
+    derived["executor_credential_probe"] = (
+        root.get("private_key_material_present") is False
+        and root.get("ambient_authority_environment_hits") == []
+        and root.get("executor_config_has_remote_replay") is False
+    )
+    derived["unsigned_signer_mutation"] = (
+        probes["unsigned_signer_mutation"] == {"denied": True}
+    )
+    derived["guardian_veto"] = (
+        probes["guardian_veto"] == {
+            "denied": True, "request_id": "forbidden-distributed-op",
+        }
+    )
+    derived["signed_certificate"] = (
+        probes["signed_certificate"] == {
+            "certificate_schema": "event-horizon.containment-certificate.v0.5",
+        }
+    )
+    _require(all(derived.values()), "signed raw coordinator probe does not support PASS")
+    _require(derived == report["observations"],
+             "claimed outcomes disagree with signed primary events/probes")
+    contexts = [
+        event for event in events
+        if event["event_type"] == "distributed.authority.context"
+    ]
+    _require(len(contexts) == 1 and contexts[0]["source_id"] == "coordinator",
+             "signed distributed authority context missing")
+    authority = contexts[0]["payload"]
+    import re
+    _require(isinstance(authority, Mapping)
+             and set(authority) == {
+                 "cluster_id", "service_id", "epoch",
+                 "checkpoint", "checkpoint_digest",
+             }
+             and isinstance(authority["cluster_id"], str)
+             and authority["cluster_id"].isdecimal()
+             and int(authority["cluster_id"]) > 0
+             and isinstance(authority["service_id"], str)
+             and authority["service_id"]
+             and type(authority["epoch"]) is int
+             and authority["epoch"] > 0
+             and type(authority["checkpoint"]) is int
+             and authority["checkpoint"] >= 10
+             and isinstance(authority["checkpoint_digest"], str)
+             and re.fullmatch(r"[a-f0-9]{64}", authority["checkpoint_digest"]) is not None,
+             "signed etcd identity/checkpoint context malformed")
+    return {
+        **legacy,
+        "event_derived_execution_cases": len(expected),
+        "signed_coordinator_probe_cases": len(probes),
+        "signed_authority_context": True,
+        "independent_cluster_attestation": False,
     }
