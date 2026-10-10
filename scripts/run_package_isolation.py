@@ -22,6 +22,7 @@ from event_horizon.broker import CapabilityBroker  # noqa: E402
 from event_horizon.effect_boundary import DatasetEffectBoundary  # noqa: E402
 from event_horizon.canonical import digest  # noqa: E402
 from scripts.package_authority_oracle import owned_etcd_config, observe_owned_etcd  # noqa: E402
+from scripts.package_adaptive_probes import MAX_STEPS, run_model_selected_package_probes  # noqa: E402
 from event_horizon.protocol import encode_frame, read_frame  # noqa: E402
 from scripts.run_firecracker_demo import sha256_file, write_durable_json  # noqa: E402
 from scripts.run_linux_isolation import (  # noqa: E402
@@ -76,12 +77,17 @@ class GateReceiver:
 class PackageLab:
     artifact = ARTIFACT
 
-    def __init__(self, mode: str, binary: Path, worker_build: dict, *, authority_config=None):
+    def __init__(self, mode: str, binary: Path, worker_build: dict, *, authority_config=None,
+                 adaptive_model=None, adaptive_steps: int = 0):
         if mode not in {"vulnerable", "protected"}:
             raise ValueError("unknown package lab mode")
         self.mode, self.binary = mode, binary
         self.worker_build = worker_build
         self.authority_config = authority_config
+        self.adaptive_model = adaptive_model
+        self.adaptive_steps = adaptive_steps
+        if adaptive_steps and (authority_config is None or adaptive_model is None):
+            raise ValueError("adaptive package probes require a pinned distributed authority")
         self.target_events = []
         self.target_failure = None
         self.stop = threading.Event()
@@ -97,6 +103,13 @@ class PackageLab:
         if self.authority_config is not None:
             # No endpoint or transport credentials in signed public context.
             result["etcd_cluster_id"] = self.authority_config["etcd_cluster_id"]
+        if self.adaptive_model is not None:
+            result["adaptive"] = {
+                "controller": "trusted-host-supervisor",
+                "model_identifier": self.adaptive_model.model_identifier,
+                "steps": self.adaptive_steps,
+                "guest_hosted_model": False,
+            }
         return result
 
     def observe_authority(self, config, capability):
@@ -215,7 +228,21 @@ class PackageLab:
             denied = guest_effect(channel, attempt)
             if denied["success"] or denied["effect_state"] != "not-started":
                 raise RuntimeError("package retrieval authority widened")
-        return {
+        adaptive = None
+        if self.adaptive_model is not None:
+            def append_host_evidence(event_type, payload):
+                event = self.gate_receiver.recorder.append(
+                    event_type, payload, source_id="host-supervisor",
+                )
+                self.gate_receiver.receipts.append(event["receipt"])
+            adaptive = run_model_selected_package_probes(
+                model=self.adaptive_model,
+                steps=self.adaptive_steps,
+                signed_message=message,
+                send_guest_effect=lambda attempted: guest_effect(channel, attempted),
+                append_host_evidence=append_host_evidence,
+            )
+        result = {
             "mode": self.mode, "worker_sha256": sha256_file(self.binary),
             "artifact_sha256": self.artifact.sha256, "trusted_recipient_digest_verified": True,
             "service_chroot_uid_capabilities_verified": True,
@@ -227,6 +254,9 @@ class PackageLab:
             "detection_delay_ms": None, "automatic_attack_detection": False,
             "ambiguous_outcomes": [],
         }
+        if adaptive is not None:
+            result["adaptive_campaign"] = adaptive
+        return result
 
     def close(self):
         self.stopping = time.monotonic()
@@ -286,9 +316,30 @@ def main() -> int:
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--etcd-endpoint", help="Owned disposable loopback etcd cluster only")
     parser.add_argument("--etcd-cluster-id", help="Pin the actual numeric etcd cluster ID")
+    parser.add_argument("--adaptive-steps", type=int, default=0,
+                        help="Up to four model-selected fixed synthetic probes per guest session")
     args = parser.parse_args()
     if bool(args.etcd_endpoint) != bool(args.etcd_cluster_id):
         parser.error("an etcd endpoint and pinned cluster ID must be provided together")
+    if args.adaptive_steps < 0 or args.adaptive_steps > MAX_STEPS:
+        parser.error("adaptive steps must be between 0 and four")
+    if args.adaptive_steps and not args.etcd_endpoint:
+        parser.error("model-selected package probes require an explicit pinned etcd backend")
+    adaptive_model = None
+    if args.adaptive_steps:
+        from dataclasses import replace
+        from event_horizon.adaptive_adversary import (
+            AdversaryModelConfig, OpenAICompatibleAdversaryModel,
+        )
+        config = AdversaryModelConfig.from_environment()
+        # The watchdog is limited to 30 seconds: cap model turns to 2s each
+        # and leave time for meaningful VM operations and teardown.
+        config = replace(
+            config, maximum_steps=args.adaptive_steps,
+            timeout_seconds=min(config.timeout_seconds, 2.0),
+            maximum_response_bytes=min(config.maximum_response_bytes, 4_096),
+        )
+        adaptive_model = OpenAICompatibleAdversaryModel(config)
     authority = None
     if args.etcd_endpoint:
         authority = {
@@ -315,21 +366,30 @@ def main() -> int:
                 assets, manifest, broker, previous,
                 package_lab=PackageLab(
                     mode, binary, worker_build, authority_config=authority,
+                    adaptive_model=adaptive_model, adaptive_steps=args.adaptive_steps,
                 ),
             )
             if attestation_mode not in {"synthetic-fixture", "tpm2", "tpm2-unavailable"}:
                 raise RuntimeError("isolation round produced an unknown attestation mode")
             rounds.append(result)
         report = {
-            "schema": ("event-horizon.package-isolation.v2" if authority else
+            "schema": ("event-horizon.package-isolation.v3" if adaptive_model else
+                       "event-horizon.package-isolation.v2" if authority else
                        "event-horizon.package-isolation.v1"), "status": "PASS",
             "build_manifest": manifest, "worker_build": worker_build, "host_kernel": platform.release(),
             "authority": ({"backend": "etcd", "cluster_id": args.etcd_cluster_id,
                            "oracle": "host-supervisor-linearizable-etcd-read"}
                           if authority else {"backend": "sqlite"}),
+            **({"adaptive": {
+                "controller": "trusted-host-supervisor",
+                "model_identifier": adaptive_model.model_identifier,
+                "steps": args.adaptive_steps,
+                "guest_hosted_model": False,
+            }} if adaptive_model else {}),
             "rounds": rounds, "attestation": "synthetic-fixture",
             "scope": "owned deterministic probes; already-compromised service; serialized guest-root VMs; optional trusted-host etcd authority",
             "attack_budget": {"guest_commands_max": 32, "service_requests_max": 24,
+                              "model_selected_probes_per_round": args.adaptive_steps,
                               "watchdog_seconds": 30, "memory_bytes_per_cgroup": 268435456, "pids_per_cgroup": 32},
             "unknowns": ["adaptive attacks", "kernel or trusted gate compromise", "concurrent tenant VMs",
                          "real registries and package installation", "covert channels", "production attestation",
