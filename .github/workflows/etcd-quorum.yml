@@ -162,6 +162,19 @@ jobs:
           # alone would not test safety of the established service.
           docker start eh-etcd-3
           python - <<'PY'
+          import os,time
+          from tests.test_etcd_live import cluster_id
+          for _ in range(45):
+              try:
+                  if cluster_id(os.environ["EHH_ETCD_ENDPOINT"]) == os.environ["EHH_ETCD_CLUSTER_ID"]:
+                      print("PASS: restarted majority elected and serving linearizable reads")
+                      break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit("restarted two-member majority did not become healthy")
+          PY
+          python - <<'PY'
           import os, subprocess, uuid
           from event_horizon.canonical import digest
           from event_horizon.remote_replay import ReplayStateError, ReplayUnavailableError
