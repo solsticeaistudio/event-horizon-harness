@@ -197,6 +197,19 @@ def run(*, distinct_uids: bool) -> dict:
             role_observed["signer"] = {"pid": signer.pid, "uid": hello["uid"]}
             signer_public = hello["public_key"]
             key_id = hello["key_id"]
+            # Challenge the signer socket from the trusted supervisor's
+            # *different* UID. Only the configured coordinator UID may be
+            # admitted, regardless of having the pathname.
+            peer_rejected = False
+            if distinct_uids:
+                from event_horizon.isolated_authority_lab import rpc
+                attempted = rpc(str(signer_path), {
+                    "method": "challenge",
+                    "request": fixture_request().canonical_payload(),
+                })
+                peer_rejected = attempted.get("ok") is False
+                if not peer_rejected:
+                    raise AssertionError("SO_PEERCRED admitted wrong client UID")
             outcomes = []
             for scenario in SCENARIOS:
                 coordinator = _spawn(
@@ -266,6 +279,7 @@ def run(*, distinct_uids: bool) -> dict:
                 "status": "PASS",
                 "run_mode": "separate-linux-uids" if distinct_uids else "same-uid-processes",
                 "os_identity_isolation_tested": distinct_uids,
+                "wrong_uid_socket_admission_rejected": peer_rejected if distinct_uids else None,
                 "actual_processes": len(services) + len(SCENARIOS),
                 "roles": role_observed,
                 "coordinator_uid": coordinator_uid,
