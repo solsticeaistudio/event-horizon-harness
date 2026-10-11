@@ -181,6 +181,24 @@ Containment-certificate verification fails closed without `--trusted-key` or an 
 
 The [implementation-level design defense](docs/DESIGN_DEFENSE.md) maps the central security questions to the current code and trust assumptions.
 
+## Adversarial Assurance Fuzzing Engine
+
+EHH now includes [four real coverage-guided Atheris fuzz targets](docs/ADVERSARIAL_ASSURANCE_FUZZING.md)
+for framed protocol parsing, canonical JSON, signed capability verification
+and the trusted dataset-effect gateway. An independent GitHub Actions
+workflow runs short bounded libFuzzer campaigns and uploads reproducible
+inputs. It also runs deterministic smoke regressions, which are
+**not** mislabeled as coverage-guided testing. All fuzzed effects are
+local synthetic reads; no Docker, KVM, etcd or real network target is
+needed. This improves *software-boundary assurance*, not proof of
+compromise-resistant production containment.
+
+```bash
+python -m pip install -e ".[test,fuzz]"
+python scripts/run_ehh_fuzz.py --target all --smoke
+python scripts/run_ehh_fuzz.py --target gateway --seconds 300
+```
+
 ## Attack the harness
 
 Start with [RED_TEAM.md](RED_TEAM.md) and [SECURITY.md](SECURITY.md). Public testing is limited to owned synthetic environments. Useful targets include authority widening, replay, executor transfer, nonce reuse, hardware-trust forgery, evidence-chain alteration, and persistence after verified teardown.
