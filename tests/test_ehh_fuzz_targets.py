@@ -69,7 +69,7 @@ class FuzzTargetsTests(unittest.TestCase):
                 with self.subTest(mode=mode):
                     self.assertEqual(engine.exercise(bytes((0xF0, mode))), "denied")
             self.assertEqual(engine.recorder.counts["execution.completed"], 1)
-            self.assertEqual(engine.exercise(b'{"request":{},"capability":{}}'), "denied")
+            self.assertEqual(engine.exercise(b'{"capability":{},"request":{}}'), "denied")
             self.assertEqual(engine.recorder.counts["execution.completed"], 1)
         finally:
             engine.close()
