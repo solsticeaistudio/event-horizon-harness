@@ -32,7 +32,9 @@ from event_horizon.broker import CapabilityVerifier
 from event_horizon.canonical import canonical_bytes, digest
 from event_horizon.component_ids import REQUIRED_GUARDIANS
 from event_horizon.models import IssuedCapability
-from event_horizon.isolated_authority_lab import fixture_request
+from event_horizon.isolated_authority_lab import (
+    fixture_request, wrong_uid_probe, confirm_wrong_uid_rejection,
+)
 from scripts.capability_fixture_support import authority_context, verify_options
 
 SCENARIOS = (
@@ -203,13 +205,10 @@ def run(*, distinct_uids: bool) -> dict:
             peer_rejected = False
             if distinct_uids:
                 from event_horizon.isolated_authority_lab import rpc
-                attempted = rpc(str(signer_path), {
+                peer_observation = wrong_uid_probe(lambda: rpc(str(signer_path), {
                     "method": "challenge",
                     "request": fixture_request().canonical_payload(),
-                })
-                peer_rejected = attempted.get("ok") is False
-                if not peer_rejected:
-                    raise AssertionError("SO_PEERCRED admitted wrong client UID")
+                }))
             outcomes = []
             for scenario in SCENARIOS:
                 coordinator = _spawn(
@@ -245,6 +244,11 @@ def run(*, distinct_uids: bool) -> dict:
                     if not (details.get("issued") is True
                             and details.get("replay_denied") is True):
                         raise AssertionError("legitimate capability or replay control failed")
+                    if distinct_uids:
+                        peer_rejected = confirm_wrong_uid_rejection(
+                            peer_observation, alive=signer.poll() is None,
+                            authorized_succeeded=details.get("issued") is True,
+                        )
                     cap = IssuedCapability.from_dict(details["capability"])
                     context = authority_context(fixture_request(), reference_time)
                     verified = CapabilityVerifier(signer_public, key_id).verify_and_consume(

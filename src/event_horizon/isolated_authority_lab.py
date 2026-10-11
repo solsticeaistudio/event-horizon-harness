@@ -84,6 +84,29 @@ def rpc(path: str, payload: dict) -> dict:
     return answer
 
 
+def wrong_uid_probe(call):
+    """Only a known wrong-UID probe may classify an early disconnect.
+
+    The caller MUST subsequently require process liveness and a successful
+    authorized request via confirm_wrong_uid_rejection. No timeout/EOF or
+    arbitrary transport error is swallowed.
+    """
+    try:
+        answer = call()
+    except (BrokenPipeError, ConnectionResetError):
+        return "early-peer-disconnect"
+    if answer != {"ok": False, "result": {"error": "denied"}}:
+        raise RuntimeError("wrong UID was not explicitly rejected")
+    return "structured-denial"
+
+
+def confirm_wrong_uid_rejection(observation, *, alive, authorized_succeeded):
+    if (observation not in {"early-peer-disconnect", "structured-denial"}
+            or alive is not True or authorized_succeeded is not True):
+        raise RuntimeError("peer rejection lacks subsequent healthy authorized control")
+    return True
+
+
 def serve(listener_fd: int, coordinator_uid: int, callback) -> None:
     """Bounded one-request sockets; SO_PEERCRED checked at connection time."""
     listener = socket.socket(fileno=listener_fd)
