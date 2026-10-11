@@ -12,6 +12,7 @@ not expose CapabilityBroker.issue to the coordinator.
 from __future__ import annotations
 
 import base64
+import binascii
 import re
 import secrets
 import threading
@@ -159,7 +160,7 @@ class PinnedGuardianVerifier:
                 self._keys[identity].verify(
                     signature, DOMAIN + canonical_bytes(payload),
                 )
-            except (InvalidSignature, ValueError, TypeError, KeyError) as exc:
+            except (InvalidSignature, ValueError, TypeError, KeyError, binascii.Error) as exc:
                 raise GuardianAuthorityError("guardian signature verification failed") from exc
             if payload["allowed"] is not True:
                 raise GuardianAuthorityError("guardian veto")
@@ -198,7 +199,14 @@ class PinnedGuardianCapabilityIssuer:
             raise GuardianAuthorityError("invalid signer challenge request")
         nonce = secrets.token_hex(16)
         with self._lock:
-            self._pending[nonce] = (request.request_digest, time.monotonic() + self.ttl)
+            now = time.monotonic()
+            self._pending = {
+                key: record for key, record in self._pending.items()
+                if record[1] > now
+            }
+            if len(self._pending) >= 4096:
+                raise GuardianAuthorityError("signer challenge capacity exhausted")
+            self._pending[nonce] = (request.request_digest, now + self.ttl)
         return nonce
 
     def issue(
