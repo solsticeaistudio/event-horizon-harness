@@ -96,8 +96,12 @@ end-to-end malicious-agent KVM run.
 
 `tests/test_isolated_authority_lab.py` runs the same **real subprocess**
 campaign rootlessly on CI, and the Python CI job uploads its JSON report.
-The distinct-UID mode requires actual operator execution and must not be
-inferred from rootless CI success.
+The CI workflow also explicitly runs the separate-UID mode with `sudo -n`
+on its **ephemeral owned Ubuntu runner**, and uploads the distinct-UID
+report separately. This is a real Linux UID isolation observation within
+GitHub's temporary CI host, **not** an independently administered
+production deployment or a KVM/guest-root result. An operator can repeat
+the same run locally on a supported Linux machine.
 
 ## Security boundaries still missing
 
