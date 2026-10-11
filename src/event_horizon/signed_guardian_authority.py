@@ -228,7 +228,7 @@ class PinnedGuardianCapabilityIssuer:
         compiled_ceiling.verify_integrity()
         if not compiled_ceiling.permits(request):
             raise GuardianAuthorityError("compiled ceiling rejects requested operation")
-        if compiled_ceiling.policy_version != self.policy.policy_digest:
+        if compiled_ceiling.policy_version != self.policy.policy_id:
             # The compiled ceiling actually binds an immutable compiler policy
             # version, not a coordinator-provided authorization string.
             raise GuardianAuthorityError("compiled ceiling policy version mismatch")
@@ -252,7 +252,7 @@ class PinnedGuardianCapabilityIssuer:
             observed_attestation = attestation.get("attestation_result")
             if not isinstance(observed_attestation, Mapping):
                 raise GuardianAuthorityError("signed attestation result missing")
-            expected_trust = ProviderTrustState.from_attestation(observed_attestation)
+            expected_trust = ProviderTrustState.from_attestation(\n                observed_attestation, requested_trust=trust.requested_trust,\n            )
             if trust.to_dict() != expected_trust.to_dict():
                 raise GuardianAuthorityError("guardian trust assertion mismatches signed attestation evidence")
         except (TypeError, ValueError) as exc:
