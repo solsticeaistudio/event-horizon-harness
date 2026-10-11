@@ -32,7 +32,7 @@ from .component_ids import (
 )
 from .models import ActionRequest, GuardianDecision, IssuedCapability
 from .policy import StaticPolicy
-from .task_policy import CompiledTaskPolicyCeiling, ProviderTrustState
+from .task_policy import CompiledTaskPolicyCeiling, ProviderTrustState, PolicyCompilationError
 
 SCHEMA = "event-horizon.guardian-approval.v1"
 DOMAIN = b"event-horizon/guardian-approval/v1\0"
@@ -233,8 +233,12 @@ class PinnedGuardianCapabilityIssuer:
         # A compromised coordinator cannot smuggle an enlarged ceiling.
         if not isinstance(compiled_ceiling, CompiledTaskPolicyCeiling):
             raise GuardianAuthorityError("compiled authority ceiling invalid")
-        compiled_ceiling.verify_integrity()
-        if not compiled_ceiling.permits(request):
+        try:
+            compiled_ceiling.verify_integrity()
+            permitted = compiled_ceiling.permits(request)
+        except (PolicyCompilationError, ValueError, TypeError) as exc:
+            raise GuardianAuthorityError("compiled ceiling failed integrity verification") from exc
+        if not permitted:
             raise GuardianAuthorityError("compiled ceiling rejects requested operation")
         if compiled_ceiling.policy_version != self.policy.policy_id:
             # The compiled ceiling actually binds an immutable compiler policy
