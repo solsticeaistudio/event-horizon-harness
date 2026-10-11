@@ -199,6 +199,20 @@ python scripts/run_ehh_fuzz.py --target all --smoke
 python scripts/run_ehh_fuzz.py --target gateway --seconds 300
 ```
 
+## Guardian signature isolation (opt-in research signer contract)
+
+The [pinned guardian-signature signer facade](docs/SIGNED_GUARDIAN_AUTHORITY.md)
+requires a unique Ed25519 key for each required guardian, request-bound
+one-use challenges, complete signed unanimous approvals, independent
+signer-side policy evaluation and compiled-ceiling/attestation consistency
+checks. These are CI-tested against forged coordinator approvals.
+
+**This is an opt-in cryptographic contract, not a deployed separate-host
+signer.** The existing research `GuardianQuorum` is still unsigned and
+the existing developer capability broker is not yet protected against
+compromise of its entire trusted host process. Key and signer isolation
+must be deployed and independently tested before production claims.
+
 ## Attack the harness
 
 Start with [RED_TEAM.md](RED_TEAM.md) and [SECURITY.md](SECURITY.md). Public testing is limited to owned synthetic environments. Useful targets include authority widening, replay, executor transfer, nonce reuse, hardware-trust forgery, evidence-chain alteration, and persistence after verified teardown.
