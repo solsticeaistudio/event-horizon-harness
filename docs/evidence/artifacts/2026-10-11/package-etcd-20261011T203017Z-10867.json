@@ -1,0 +1,1711 @@
+{
+  "attack_budget": {
+    "guest_commands_max": 32,
+    "memory_bytes_per_cgroup": 268435456,
+    "model_selected_probes_per_round": 0,
+    "pids_per_cgroup": 32,
+    "service_requests_max": 24,
+    "watchdog_seconds": 30
+  },
+  "attestation": "synthetic-fixture",
+  "authority": {
+    "backend": "etcd",
+    "cluster_id": "15411549680087618151",
+    "oracle": "host-supervisor-linearizable-etcd-read"
+  },
+  "build_manifest": {
+    "artifacts": {
+      "firecracker": "7e8b57e88c459396d4680d83dcdd8c7f72305447cb55b11f4ac98ad70a3f7825",
+      "initramfs.cpio.gz": "d54f16511fd3941b69723cb6a7c6fe2a4e9fd1faafb15cc5f2f001f725aef5db",
+      "jailer": "4830a9b1fc6cece036d8992ff12f1fe9c5247aacad77f42c7aba683c7a08622e",
+      "vmlinux": "e20e46d0c36c55c0d1014eb20576171b3f3d922260d9f792017aeff53af3d4f2"
+    },
+    "asset_lock": {
+      "archive_sha256": "d4a32ab2322d887ca1bc4a4e7afa9cc35393e6362dfc2b3becb389d362e4275a",
+      "archive_url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.15.1/firecracker-v1.15.1-x86_64.tgz",
+      "firecracker_sha256": "7e8b57e88c459396d4680d83dcdd8c7f72305447cb55b11f4ac98ad70a3f7825",
+      "firecracker_version": "1.15.1",
+      "jailer_sha256": "4830a9b1fc6cece036d8992ff12f1fe9c5247aacad77f42c7aba683c7a08622e",
+      "kernel_sha256": "e20e46d0c36c55c0d1014eb20576171b3f3d922260d9f792017aeff53af3d4f2",
+      "kernel_url": "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/x86_64/vmlinux-6.1.155"
+    },
+    "compiler_sha256": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+    "compiler_version": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "guest_source_sha256": "f51806c1def3cd371f7c79a606fd976993755bd88d36a3a107bcdaa9e83bca36",
+    "reproducibility_scope": "identical guest source, compiler/static libc, Python and zlib toolchain",
+    "schema": "event-horizon.isolation-build.v1",
+    "toolchain": "system-gcc",
+    "tpm2_enabled": false
+  },
+  "host_kernel": "6.6.87.2-microsoft-standard-WSL2",
+  "rounds": [
+    {
+      "events": [
+        {
+          "event_hash": "860d1bc666f2a4d43ab9643e42d208b57be538d2110598f934ea9fc9773748a2",
+          "event_type": "isolation.context",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "build_manifest_digest": "8b4b7fbf1c0c8fbf8415ff02c27128b4680b492bb9996863d65fd2801c30c623",
+            "capability_id": "cap_fd73c90e5bbd9332b862db65",
+            "configuration_digest": "55e60b9fe69fe7e319bc7dab06811361901b5785db6e3f5357bdeabcfe1709fb",
+            "host_kernel": "6.6.87.2-microsoft-standard-WSL2",
+            "package_context": {
+              "artifact_sha256": "e12c07a3e0fa3eafbf53932e37d46db5f4612b8bce19adafd1f08137ebcf08ca",
+              "authority_backend": "etcd",
+              "etcd_cluster_id": "15411549680087618151",
+              "fixture_authority": "service-owned",
+              "mode": "vulnerable",
+              "network": "empty namespace; synthetic Unix target only",
+              "worker_build": {
+                "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+                "source_sha256": "d02bd7f55c5c02d57c80d3a4b6ee0562df316ff7db45807e71de729853f4edb0",
+                "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+              }
+            },
+            "session_id": "ehk-t2ac72lr"
+          },
+          "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sequence": 1,
+          "source_id": "host-supervisor",
+          "source_sequence": 1,
+          "timestamp": 1791750618.1834097
+        },
+        {
+          "event_hash": "5cb5262727b776efe41fc41e2e8128f35f443f3e5eccc29110ba572774d18a52",
+          "event_type": "attestation.assessed",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "session_id": "ehk-t2ac72lr"
+          },
+          "previous_hash": "860d1bc666f2a4d43ab9643e42d208b57be538d2110598f934ea9fc9773748a2",
+          "sequence": 2,
+          "source_id": "host-supervisor",
+          "source_sequence": 2,
+          "timestamp": 1791750618.7240894
+        },
+        {
+          "event_hash": "e4cbde9ae9fbef590cbc4cb2497bc7bf76321edfaefebb17a8a10f82f3cd6b13",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "5cb5262727b776efe41fc41e2e8128f35f443f3e5eccc29110ba572774d18a52",
+          "sequence": 3,
+          "source_id": "host-effect-service",
+          "source_sequence": 1,
+          "timestamp": 1791750618.7477696
+        },
+        {
+          "event_hash": "4efc24c9c05a8379280e7727772fe9ac36e136c9b66ac8cc9ec71edfaddcc8b3",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "e4cbde9ae9fbef590cbc4cb2497bc7bf76321edfaefebb17a8a10f82f3cd6b13",
+          "sequence": 4,
+          "source_id": "host-effect-service",
+          "source_sequence": 2,
+          "timestamp": 1791750618.7532063
+        },
+        {
+          "event_hash": "52b259147ef924e22679f6b58aa72f6a1011a430110f3a7223b70b2f861f2539",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "4efc24c9c05a8379280e7727772fe9ac36e136c9b66ac8cc9ec71edfaddcc8b3",
+          "sequence": 5,
+          "source_id": "host-effect-service",
+          "source_sequence": 3,
+          "timestamp": 1791750618.758996
+        },
+        {
+          "event_hash": "d3b5ca52396839549a5301ba383be04e824e19996db02d512707806636d136fa",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "52b259147ef924e22679f6b58aa72f6a1011a430110f3a7223b70b2f861f2539",
+          "sequence": 6,
+          "source_id": "host-effect-service",
+          "source_sequence": 4,
+          "timestamp": 1791750618.763525
+        },
+        {
+          "event_hash": "9da168aa193212eb5f97ecda41bb74093221b3b38541b101c0f819c54d4d961d",
+          "event_type": "execution.authorized",
+          "payload": {
+            "capability_id": "cap_fd73c90e5bbd9332b862db65",
+            "request_digest": "987fc4ad4f67a56145981916cd305d9cc581deea0682260d74e2ecfbf9d41813",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "d3b5ca52396839549a5301ba383be04e824e19996db02d512707806636d136fa",
+          "sequence": 7,
+          "source_id": "host-effect-service",
+          "source_sequence": 5,
+          "timestamp": 1791750618.7789304
+        },
+        {
+          "event_hash": "10bed776a862a90e3b2a8b11cf05aa6685c15de9bf5627d176ab8d95e705b1fd",
+          "event_type": "execution.completed",
+          "payload": {
+            "capability_id": "cap_fd73c90e5bbd9332b862db65",
+            "effect_state": "completed",
+            "output_bytes": 74,
+            "request_id": "dataset-read",
+            "success": true
+          },
+          "previous_hash": "9da168aa193212eb5f97ecda41bb74093221b3b38541b101c0f819c54d4d961d",
+          "sequence": 8,
+          "source_id": "host-effect-service",
+          "source_sequence": 6,
+          "timestamp": 1791750618.7819583
+        },
+        {
+          "event_hash": "5f83a23a462e6578ecdafbe684cf30c063c3f3aa17e8265fe969543a6bee3720",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "10bed776a862a90e3b2a8b11cf05aa6685c15de9bf5627d176ab8d95e705b1fd",
+          "sequence": 9,
+          "source_id": "host-effect-service",
+          "source_sequence": 7,
+          "timestamp": 1791750618.793197
+        },
+        {
+          "event_hash": "0f56ff8bee20b22ff510e003cdda52b6e2e7410a21fc0af54a7fd5a652e90ca7",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "5f83a23a462e6578ecdafbe684cf30c063c3f3aa17e8265fe969543a6bee3720",
+          "sequence": 10,
+          "source_id": "host-effect-service",
+          "source_sequence": 8,
+          "timestamp": 1791750618.7985506
+        },
+        {
+          "event_hash": "ab2cbf477b087262decbeeea8ef22069333eaa807eec21d656b0a999629e8ae9",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "0f56ff8bee20b22ff510e003cdda52b6e2e7410a21fc0af54a7fd5a652e90ca7",
+          "sequence": 11,
+          "source_id": "host-effect-service",
+          "source_sequence": 9,
+          "timestamp": 1791750618.8037033
+        },
+        {
+          "event_hash": "5630e2053144ce5f00a95691221d50ce1ae32807ee361b0ca961e40b5d214a6a",
+          "event_type": "isolation.observed",
+          "payload": {
+            "authoritative_state_read_write_denials": true,
+            "authority_oracle": {
+              "backend": "etcd",
+              "capability_id": "cap_fd73c90e5bbd9332b862db65",
+              "claims_digest": "d0d3e2e2912bbf119cbe232d2d8e89a675a005f13bd80ead0a8061ae56400880",
+              "cluster_id": "15411549680087618151",
+              "expires_at": 1791750678169,
+              "raft_term": 2,
+              "record_count": 1,
+              "record_integrity_checked": true,
+              "revision": 2,
+              "source": "host-supervisor-linearizable-etcd-read"
+            },
+            "denied_cases": [
+              "missing_capability",
+              "forged_signature",
+              "argument_substitution",
+              "unauthorized_operation"
+            ],
+            "forbidden_vsock_port_diagnostic": {
+              "connected": false
+            },
+            "fresh_scratch_diagnostic": true,
+            "guest_root_diagnostic": {
+              "authority_environment": 0,
+              "authority_files": 0,
+              "package_manager": false,
+              "uid": 0
+            },
+            "host_consumption_count": 1,
+            "host_effect_uid": 60001,
+            "host_principal_file_denials": true,
+            "host_resource_limits_verified": {
+              "cpu_quota_percent": 100,
+              "memory_bytes_per_service": 268435456,
+              "pids_per_service": 32
+            },
+            "host_vm_uid": 60000,
+            "metadata_configured": false,
+            "network_interfaces_configured": 0,
+            "package": {
+              "active_workload_ms": 695.8674310008064,
+              "ambiguous_outcomes": [],
+              "artifact_sha256": "e12c07a3e0fa3eafbf53932e37d46db5f4612b8bce19adafd1f08137ebcf08ca",
+              "authoritative_evidence_outside_service_root": true,
+              "automatic_attack_detection": false,
+              "detection_delay_ms": null,
+              "forbidden_effects": {
+                "credential_reuse": true,
+                "cross_session_message": true,
+                "durable_shared_state": true,
+                "fixture_evidence_tamper": true,
+                "relay": true
+              },
+              "gate_url_and_budget_widening_denied": true,
+              "mode": "vulnerable",
+              "persistence_child_observed": true,
+              "post_kill_cleanup_ms": 61.334539990639314,
+              "requested_teardown_latency_ms": 286.97131300577894,
+              "service_chroot_uid_capabilities_verified": true,
+              "service_scratch_removed": true,
+              "service_scratch_write_observed": true,
+              "substituted_success_output_rejected": true,
+              "target_events": [
+                {
+                  "elapsed_ms": 623.8944020005874,
+                  "kind": "relay"
+                },
+                {
+                  "elapsed_ms": 626.4373000012711,
+                  "kind": "credential_reuse"
+                }
+              ],
+              "total_round_ms": 1038.736689981306,
+              "trusted_recipient_digest_verified": true,
+              "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+            },
+            "replay_denied": true,
+            "retired_effect_endpoint_unreachable": true,
+            "scratch_write_independently_observed": true,
+            "separate_network_namespaces": true,
+            "tpm_attestation_error": "TPM2 not enabled in guest build",
+            "unredeemed_capability_at_teardown": "cap_3037f3d2eba989907e868df2",
+            "useful_package_read_and_summary": true,
+            "vm_chroot_verified": true,
+            "vm_seccomp_verified": true
+          },
+          "previous_hash": "ab2cbf477b087262decbeeea8ef22069333eaa807eec21d656b0a999629e8ae9",
+          "sequence": 12,
+          "source_id": "host-supervisor",
+          "source_sequence": 3,
+          "timestamp": 1791750619.1513681
+        },
+        {
+          "event_hash": "d77f3c6563833435f2345aaecfd221985c9af70596e0aec18b1620f2dd1543e1",
+          "event_type": "teardown.verified",
+          "payload": {
+            "authority_revoked_by_endpoint_shutdown": true,
+            "config_removed": true,
+            "effect_endpoint_removed": true,
+            "process_groups_empty": true,
+            "scratch_removed": true,
+            "trigger": "requested-stop",
+            "vsock_removed": true
+          },
+          "previous_hash": "5630e2053144ce5f00a95691221d50ce1ae32807ee361b0ca961e40b5d214a6a",
+          "sequence": 13,
+          "source_id": "host-supervisor",
+          "source_sequence": 4,
+          "timestamp": 1791750619.1575222
+        }
+      ],
+      "evidence_chain_tip": "d77f3c6563833435f2345aaecfd221985c9af70596e0aec18b1620f2dd1543e1",
+      "observations": {
+        "authoritative_state_read_write_denials": true,
+        "authority_oracle": {
+          "backend": "etcd",
+          "capability_id": "cap_fd73c90e5bbd9332b862db65",
+          "claims_digest": "d0d3e2e2912bbf119cbe232d2d8e89a675a005f13bd80ead0a8061ae56400880",
+          "cluster_id": "15411549680087618151",
+          "expires_at": 1791750678169,
+          "raft_term": 2,
+          "record_count": 1,
+          "record_integrity_checked": true,
+          "revision": 2,
+          "source": "host-supervisor-linearizable-etcd-read"
+        },
+        "denied_cases": [
+          "missing_capability",
+          "forged_signature",
+          "argument_substitution",
+          "unauthorized_operation"
+        ],
+        "forbidden_vsock_port_diagnostic": {
+          "connected": false
+        },
+        "fresh_scratch_diagnostic": true,
+        "guest_root_diagnostic": {
+          "authority_environment": 0,
+          "authority_files": 0,
+          "package_manager": false,
+          "uid": 0
+        },
+        "host_consumption_count": 1,
+        "host_effect_uid": 60001,
+        "host_principal_file_denials": true,
+        "host_resource_limits_verified": {
+          "cpu_quota_percent": 100,
+          "memory_bytes_per_service": 268435456,
+          "pids_per_service": 32
+        },
+        "host_vm_uid": 60000,
+        "metadata_configured": false,
+        "network_interfaces_configured": 0,
+        "package": {
+          "active_workload_ms": 695.8674310008064,
+          "ambiguous_outcomes": [],
+          "artifact_sha256": "e12c07a3e0fa3eafbf53932e37d46db5f4612b8bce19adafd1f08137ebcf08ca",
+          "authoritative_evidence_outside_service_root": true,
+          "automatic_attack_detection": false,
+          "detection_delay_ms": null,
+          "forbidden_effects": {
+            "credential_reuse": true,
+            "cross_session_message": true,
+            "durable_shared_state": true,
+            "fixture_evidence_tamper": true,
+            "relay": true
+          },
+          "gate_url_and_budget_widening_denied": true,
+          "mode": "vulnerable",
+          "persistence_child_observed": true,
+          "post_kill_cleanup_ms": 61.334539990639314,
+          "requested_teardown_latency_ms": 286.97131300577894,
+          "service_chroot_uid_capabilities_verified": true,
+          "service_scratch_removed": true,
+          "service_scratch_write_observed": true,
+          "substituted_success_output_rejected": true,
+          "target_events": [
+            {
+              "elapsed_ms": 623.8944020005874,
+              "kind": "relay"
+            },
+            {
+              "elapsed_ms": 626.4373000012711,
+              "kind": "credential_reuse"
+            }
+          ],
+          "total_round_ms": 1038.736689981306,
+          "trusted_recipient_digest_verified": true,
+          "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+        },
+        "replay_denied": true,
+        "retired_effect_endpoint_unreachable": true,
+        "scratch_write_independently_observed": true,
+        "separate_network_namespaces": true,
+        "tpm_attestation_error": "TPM2 not enabled in guest build",
+        "unredeemed_capability_at_teardown": "cap_3037f3d2eba989907e868df2",
+        "useful_package_read_and_summary": true,
+        "vm_chroot_verified": true,
+        "vm_seccomp_verified": true
+      },
+      "receipts": [
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "860d1bc666f2a4d43ab9643e42d208b57be538d2110598f934ea9fc9773748a2",
+            "issued_at": 1791750618.1898296,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 1,
+            "source_id": "host-supervisor",
+            "source_sequence": 1
+          },
+          "signature": "5TaBmynH-P-soEZBAnjRsgEuPK3C5oIx7aTFE_ToZ9HATAaiu9CUESbM-ax5G4UMFsiPlqor9MM6jtvjkLG1Bg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "5cb5262727b776efe41fc41e2e8128f35f443f3e5eccc29110ba572774d18a52",
+            "issued_at": 1791750618.727019,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 2,
+            "source_id": "host-supervisor",
+            "source_sequence": 2
+          },
+          "signature": "XpDXnQ28v88Fz30kWOT8Pza0xVmI2TotleuyyBVcD3cnErpvn8RjpWDYkKIgWMwMgOu6NJiCOCBORG05GJ5jCA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "e4cbde9ae9fbef590cbc4cb2497bc7bf76321edfaefebb17a8a10f82f3cd6b13",
+            "issued_at": 1791750618.749575,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 3,
+            "source_id": "host-effect-service",
+            "source_sequence": 1
+          },
+          "signature": "sBvtzpNYa57uhGqurGFW1pz8_BGXTKg7dzLZdbT1pv0LlLTA4bGmSGj9jQyAtkQUXbLxI3v3m60W1VYkcSZeAA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "4efc24c9c05a8379280e7727772fe9ac36e136c9b66ac8cc9ec71edfaddcc8b3",
+            "issued_at": 1791750618.7557268,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 4,
+            "source_id": "host-effect-service",
+            "source_sequence": 2
+          },
+          "signature": "22aXZgJayr1qv5kbI5YbGosEGdSuYFg0L8uWrtR01dqj0lDxPVpUARpEcRa-E9PdVL-aHxSU3TQXv1xUz_75DQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "52b259147ef924e22679f6b58aa72f6a1011a430110f3a7223b70b2f861f2539",
+            "issued_at": 1791750618.7613785,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 5,
+            "source_id": "host-effect-service",
+            "source_sequence": 3
+          },
+          "signature": "4CF2fiN3W22WEjgseuTsl7zOTkUWRuLqArWavv31KwrjIyEpQyA_Mwn229cQ0yMr-eKaMyHAEJhC_Bba0dN9BA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "d3b5ca52396839549a5301ba383be04e824e19996db02d512707806636d136fa",
+            "issued_at": 1791750618.7661364,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 6,
+            "source_id": "host-effect-service",
+            "source_sequence": 4
+          },
+          "signature": "mbFTw-sbSKQubvFdw-6UzFqktnQukTfz-nt0HnhdciSALxJpYZftWaANZthThkSbXiyxzUg-EfcZuORQyYS9Bw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "9da168aa193212eb5f97ecda41bb74093221b3b38541b101c0f819c54d4d961d",
+            "issued_at": 1791750618.7812707,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 7,
+            "source_id": "host-effect-service",
+            "source_sequence": 5
+          },
+          "signature": "hzeM69vmrWjq-44exYTEwyHBVvCoc_gqhuPLWdv5i8tnLsxfBZGwJ797vvFrOuAfDPZnU88BgIqjYdz13TcqCQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "10bed776a862a90e3b2a8b11cf05aa6685c15de9bf5627d176ab8d95e705b1fd",
+            "issued_at": 1791750618.7841156,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 8,
+            "source_id": "host-effect-service",
+            "source_sequence": 6
+          },
+          "signature": "kDvFqUm_gnUWp8Vj7gO5CcfwlIRfPIh4RFtdR05WhRhVEs5pYAULIt46bwWk4xiCklSKOLk5qSeQ6EKymcT_Ag"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "5f83a23a462e6578ecdafbe684cf30c063c3f3aa17e8265fe969543a6bee3720",
+            "issued_at": 1791750618.7953765,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 9,
+            "source_id": "host-effect-service",
+            "source_sequence": 7
+          },
+          "signature": "SUY4yfnE2L-0nHqVi6CfttV9yNPJ7AOR1GaV3MhjY2ADVS0-Se1ovZ326yQW15grVr9HySpRGV11z65ba2hvBw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "0f56ff8bee20b22ff510e003cdda52b6e2e7410a21fc0af54a7fd5a652e90ca7",
+            "issued_at": 1791750618.8007035,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 10,
+            "source_id": "host-effect-service",
+            "source_sequence": 8
+          },
+          "signature": "sCDyhWCi0SxrF9QzHCtgpVDQiRouT5PkR2D8pVY95AatKgowg3vL6MGbfqWDev4taJy97t3VlOpEW5WFcd_UBA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "ab2cbf477b087262decbeeea8ef22069333eaa807eec21d656b0a999629e8ae9",
+            "issued_at": 1791750618.8062289,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 11,
+            "source_id": "host-effect-service",
+            "source_sequence": 9
+          },
+          "signature": "hPO-RQQM9EIeT4SatCwJ6hg0i0xqVbO06pDi-dr_g36L_7noq_hmAKKD8LKKt4J4G3xd7WsAKRlwzjA3IfFGCA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "5630e2053144ce5f00a95691221d50ce1ae32807ee361b0ca961e40b5d214a6a",
+            "issued_at": 1791750619.1564734,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 12,
+            "source_id": "host-supervisor",
+            "source_sequence": 3
+          },
+          "signature": "qw_vE_6y3QlSD8nEIJ5dyjA6G8-C5ACcqm4PTndpRPj6ejvRsAlJH21Yokd1b_Uz8YQZSF-a4FBZ8gNFhNI1Cg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "d77f3c6563833435f2345aaecfd221985c9af70596e0aec18b1620f2dd1543e1",
+            "issued_at": 1791750619.1597333,
+            "key_id": "ed25519:6d123811395e17d9e5701a4238ab4f75",
+            "sequence": 13,
+            "source_id": "host-supervisor",
+            "source_sequence": 4
+          },
+          "signature": "esOLLgYIRv4VuIwcWRkGxv6WOxVWhs8PGyXiXWDN8xMQ0Cg6aeiWck3Ts6tCKomdyj17jnODwrvOP9V2zp9kBw"
+        }
+      ],
+      "recorder_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAFFVp6J5d42BKw6ywnlCOvEDAWASkA8rb2GOpZrMS2TI=\n-----END PUBLIC KEY-----\n",
+      "run_directory": "/var/tmp/ehk-t2ac72lr",
+      "teardown": {
+        "authority_revoked_by_endpoint_shutdown": true,
+        "config_removed": true,
+        "effect_endpoint_removed": true,
+        "process_groups_empty": true,
+        "scratch_removed": true,
+        "trigger": "requested-stop",
+        "vsock_removed": true
+      }
+    },
+    {
+      "events": [
+        {
+          "event_hash": "ca83ebbe4d83550815f913107bd472390ccddd2bf20c2d6d2d6d653ef9043a3a",
+          "event_type": "isolation.context",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "build_manifest_digest": "8b4b7fbf1c0c8fbf8415ff02c27128b4680b492bb9996863d65fd2801c30c623",
+            "capability_id": "cap_6aa94536ea8cc6db07ab1fa6",
+            "configuration_digest": "55e60b9fe69fe7e319bc7dab06811361901b5785db6e3f5357bdeabcfe1709fb",
+            "host_kernel": "6.6.87.2-microsoft-standard-WSL2",
+            "package_context": {
+              "artifact_sha256": "e12c07a3e0fa3eafbf53932e37d46db5f4612b8bce19adafd1f08137ebcf08ca",
+              "authority_backend": "etcd",
+              "etcd_cluster_id": "15411549680087618151",
+              "fixture_authority": "root-only",
+              "mode": "protected",
+              "network": "empty namespace; synthetic Unix target only",
+              "worker_build": {
+                "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+                "source_sha256": "d02bd7f55c5c02d57c80d3a4b6ee0562df316ff7db45807e71de729853f4edb0",
+                "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+              }
+            },
+            "session_id": "ehk-347xgdo4"
+          },
+          "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sequence": 1,
+          "source_id": "host-supervisor",
+          "source_sequence": 1,
+          "timestamp": 1791750619.2066364
+        },
+        {
+          "event_hash": "9e4e809cbca8f0aa80bf7a0a9acce677e3b025713375a0aa217e4e9e9dc03f28",
+          "event_type": "attestation.assessed",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "session_id": "ehk-347xgdo4"
+          },
+          "previous_hash": "ca83ebbe4d83550815f913107bd472390ccddd2bf20c2d6d2d6d653ef9043a3a",
+          "sequence": 2,
+          "source_id": "host-supervisor",
+          "source_sequence": 2,
+          "timestamp": 1791750619.6457605
+        },
+        {
+          "event_hash": "0cb23011ff6cb8e07552300eb5672a8d5d07853ae1bc62ce8385a643eab794af",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "9e4e809cbca8f0aa80bf7a0a9acce677e3b025713375a0aa217e4e9e9dc03f28",
+          "sequence": 3,
+          "source_id": "host-effect-service",
+          "source_sequence": 1,
+          "timestamp": 1791750619.6604772
+        },
+        {
+          "event_hash": "f3b383536cbe75af93327b5c5a120d865028ac605f10206933639775f14adda5",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "0cb23011ff6cb8e07552300eb5672a8d5d07853ae1bc62ce8385a643eab794af",
+          "sequence": 4,
+          "source_id": "host-effect-service",
+          "source_sequence": 2,
+          "timestamp": 1791750619.6655092
+        },
+        {
+          "event_hash": "b34cb20316721c0a98cf3c8dcce86f8258140dd4d5d6793b08dc1c4af84efaa2",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "f3b383536cbe75af93327b5c5a120d865028ac605f10206933639775f14adda5",
+          "sequence": 5,
+          "source_id": "host-effect-service",
+          "source_sequence": 3,
+          "timestamp": 1791750619.6709008
+        },
+        {
+          "event_hash": "ae4fb0e1ff1d1acd0d61a69efc9765b788c6c92b2c3d0b82b67483fad20b4443",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "b34cb20316721c0a98cf3c8dcce86f8258140dd4d5d6793b08dc1c4af84efaa2",
+          "sequence": 6,
+          "source_id": "host-effect-service",
+          "source_sequence": 4,
+          "timestamp": 1791750619.6754177
+        },
+        {
+          "event_hash": "256ac8eea797f87703c1a5fa889e56f2451449cc661d89e92bc651ae2e3f6bff",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "ae4fb0e1ff1d1acd0d61a69efc9765b788c6c92b2c3d0b82b67483fad20b4443",
+          "sequence": 7,
+          "source_id": "host-effect-service",
+          "source_sequence": 5,
+          "timestamp": 1791750619.6797414
+        },
+        {
+          "event_hash": "0ba41a5665a67c1b5ac27efdb95bbb978eced93fdc29cf8e5e418a59b23c70d0",
+          "event_type": "execution.authorized",
+          "payload": {
+            "capability_id": "cap_6aa94536ea8cc6db07ab1fa6",
+            "request_digest": "1091c4f6de6a374fba6cf9768263f1af78cf5e652975c76350be515d37b36f8e",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "256ac8eea797f87703c1a5fa889e56f2451449cc661d89e92bc651ae2e3f6bff",
+          "sequence": 8,
+          "source_id": "host-effect-service",
+          "source_sequence": 6,
+          "timestamp": 1791750619.6921666
+        },
+        {
+          "event_hash": "5060750e47f5cd39dfc5493067349dffa980a4a6dbf2af4bff27142cfa77b4f8",
+          "event_type": "execution.completed",
+          "payload": {
+            "capability_id": "cap_6aa94536ea8cc6db07ab1fa6",
+            "effect_state": "completed",
+            "output_bytes": 74,
+            "request_id": "dataset-read",
+            "success": true
+          },
+          "previous_hash": "0ba41a5665a67c1b5ac27efdb95bbb978eced93fdc29cf8e5e418a59b23c70d0",
+          "sequence": 9,
+          "source_id": "host-effect-service",
+          "source_sequence": 7,
+          "timestamp": 1791750619.695023
+        },
+        {
+          "event_hash": "0d8601cdbfa266fc778cea08023de351ebbbb47d063487453a78c8d5dea08ff8",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "5060750e47f5cd39dfc5493067349dffa980a4a6dbf2af4bff27142cfa77b4f8",
+          "sequence": 10,
+          "source_id": "host-effect-service",
+          "source_sequence": 8,
+          "timestamp": 1791750619.7052853
+        },
+        {
+          "event_hash": "52cfb80d136495b6c6e87a7fa27b8a7d0e17cfb4098964422a6440e7b2a260b8",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "0d8601cdbfa266fc778cea08023de351ebbbb47d063487453a78c8d5dea08ff8",
+          "sequence": 11,
+          "source_id": "host-effect-service",
+          "source_sequence": 9,
+          "timestamp": 1791750619.7111828
+        },
+        {
+          "event_hash": "6d7fcb3a9d592cc8596a9d35796fd1b77f6ec18f0a573468688b673e686abe6e",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "52cfb80d136495b6c6e87a7fa27b8a7d0e17cfb4098964422a6440e7b2a260b8",
+          "sequence": 12,
+          "source_id": "host-effect-service",
+          "source_sequence": 10,
+          "timestamp": 1791750619.7157154
+        },
+        {
+          "event_hash": "d329a32ecc5e27d3c5e1d7ab1b1205572dd27184315bcd2e25439f1842dbc753",
+          "event_type": "isolation.observed",
+          "payload": {
+            "authoritative_state_read_write_denials": true,
+            "authority_oracle": {
+              "backend": "etcd",
+              "capability_id": "cap_6aa94536ea8cc6db07ab1fa6",
+              "claims_digest": "edbeb07a132c1ff1c605d6cdc1273cc9f6c962a78e63b0615070c7e7a25df9f9",
+              "cluster_id": "15411549680087618151",
+              "expires_at": 1791750679200,
+              "raft_term": 2,
+              "record_count": 1,
+              "record_integrity_checked": true,
+              "revision": 3,
+              "source": "host-supervisor-linearizable-etcd-read"
+            },
+            "denied_cases": [
+              "missing_capability",
+              "forged_signature",
+              "argument_substitution",
+              "unauthorized_operation",
+              "prior_session_capability"
+            ],
+            "forbidden_vsock_port_diagnostic": {
+              "connected": false
+            },
+            "fresh_scratch_diagnostic": true,
+            "guest_root_diagnostic": {
+              "authority_environment": 0,
+              "authority_files": 0,
+              "package_manager": false,
+              "uid": 0
+            },
+            "host_consumption_count": 1,
+            "host_effect_uid": 60001,
+            "host_principal_file_denials": true,
+            "host_resource_limits_verified": {
+              "cpu_quota_percent": 100,
+              "memory_bytes_per_service": 268435456,
+              "pids_per_service": 32
+            },
+            "host_vm_uid": 60000,
+            "metadata_configured": false,
+            "network_interfaces_configured": 0,
+            "package": {
+              "active_workload_ms": 555.2446100045927,
+              "ambiguous_outcomes": [],
+              "artifact_sha256": "e12c07a3e0fa3eafbf53932e37d46db5f4612b8bce19adafd1f08137ebcf08ca",
+              "authoritative_evidence_outside_service_root": true,
+              "automatic_attack_detection": false,
+              "detection_delay_ms": null,
+              "forbidden_effects": {
+                "credential_reuse": false,
+                "cross_session_message": false,
+                "durable_shared_state": false,
+                "fixture_evidence_tamper": false,
+                "relay": false
+              },
+              "gate_url_and_budget_widening_denied": true,
+              "mode": "protected",
+              "persistence_child_observed": true,
+              "post_kill_cleanup_ms": 63.01482499111444,
+              "requested_teardown_latency_ms": 290.12551202322356,
+              "service_chroot_uid_capabilities_verified": true,
+              "service_scratch_removed": true,
+              "service_scratch_write_observed": true,
+              "substituted_success_output_rejected": true,
+              "target_events": [],
+              "total_round_ms": 898.950014001457,
+              "trusted_recipient_digest_verified": true,
+              "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+            },
+            "replay_denied": true,
+            "retired_effect_endpoint_unreachable": true,
+            "scratch_write_independently_observed": true,
+            "separate_network_namespaces": true,
+            "tpm_attestation_error": "TPM2 not enabled in guest build",
+            "unredeemed_capability_at_teardown": "cap_14cb0fecce1a667e0cb09bd2",
+            "useful_package_read_and_summary": true,
+            "vm_chroot_verified": true,
+            "vm_seccomp_verified": true
+          },
+          "previous_hash": "6d7fcb3a9d592cc8596a9d35796fd1b77f6ec18f0a573468688b673e686abe6e",
+          "sequence": 13,
+          "source_id": "host-supervisor",
+          "source_sequence": 3,
+          "timestamp": 1791750620.0637462
+        },
+        {
+          "event_hash": "e145d75758cb2b15e7ceac0eef9f3df3fc1b6bd66a675ed43116cedb4781b92a",
+          "event_type": "teardown.verified",
+          "payload": {
+            "authority_revoked_by_endpoint_shutdown": true,
+            "config_removed": true,
+            "effect_endpoint_removed": true,
+            "process_groups_empty": true,
+            "scratch_removed": true,
+            "trigger": "requested-stop",
+            "vsock_removed": true
+          },
+          "previous_hash": "d329a32ecc5e27d3c5e1d7ab1b1205572dd27184315bcd2e25439f1842dbc753",
+          "sequence": 14,
+          "source_id": "host-supervisor",
+          "source_sequence": 4,
+          "timestamp": 1791750620.0684505
+        }
+      ],
+      "evidence_chain_tip": "e145d75758cb2b15e7ceac0eef9f3df3fc1b6bd66a675ed43116cedb4781b92a",
+      "observations": {
+        "authoritative_state_read_write_denials": true,
+        "authority_oracle": {
+          "backend": "etcd",
+          "capability_id": "cap_6aa94536ea8cc6db07ab1fa6",
+          "claims_digest": "edbeb07a132c1ff1c605d6cdc1273cc9f6c962a78e63b0615070c7e7a25df9f9",
+          "cluster_id": "15411549680087618151",
+          "expires_at": 1791750679200,
+          "raft_term": 2,
+          "record_count": 1,
+          "record_integrity_checked": true,
+          "revision": 3,
+          "source": "host-supervisor-linearizable-etcd-read"
+        },
+        "denied_cases": [
+          "missing_capability",
+          "forged_signature",
+          "argument_substitution",
+          "unauthorized_operation",
+          "prior_session_capability"
+        ],
+        "forbidden_vsock_port_diagnostic": {
+          "connected": false
+        },
+        "fresh_scratch_diagnostic": true,
+        "guest_root_diagnostic": {
+          "authority_environment": 0,
+          "authority_files": 0,
+          "package_manager": false,
+          "uid": 0
+        },
+        "host_consumption_count": 1,
+        "host_effect_uid": 60001,
+        "host_principal_file_denials": true,
+        "host_resource_limits_verified": {
+          "cpu_quota_percent": 100,
+          "memory_bytes_per_service": 268435456,
+          "pids_per_service": 32
+        },
+        "host_vm_uid": 60000,
+        "metadata_configured": false,
+        "network_interfaces_configured": 0,
+        "package": {
+          "active_workload_ms": 555.2446100045927,
+          "ambiguous_outcomes": [],
+          "artifact_sha256": "e12c07a3e0fa3eafbf53932e37d46db5f4612b8bce19adafd1f08137ebcf08ca",
+          "authoritative_evidence_outside_service_root": true,
+          "automatic_attack_detection": false,
+          "detection_delay_ms": null,
+          "forbidden_effects": {
+            "credential_reuse": false,
+            "cross_session_message": false,
+            "durable_shared_state": false,
+            "fixture_evidence_tamper": false,
+            "relay": false
+          },
+          "gate_url_and_budget_widening_denied": true,
+          "mode": "protected",
+          "persistence_child_observed": true,
+          "post_kill_cleanup_ms": 63.01482499111444,
+          "requested_teardown_latency_ms": 290.12551202322356,
+          "service_chroot_uid_capabilities_verified": true,
+          "service_scratch_removed": true,
+          "service_scratch_write_observed": true,
+          "substituted_success_output_rejected": true,
+          "target_events": [],
+          "total_round_ms": 898.950014001457,
+          "trusted_recipient_digest_verified": true,
+          "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+        },
+        "replay_denied": true,
+        "retired_effect_endpoint_unreachable": true,
+        "scratch_write_independently_observed": true,
+        "separate_network_namespaces": true,
+        "tpm_attestation_error": "TPM2 not enabled in guest build",
+        "unredeemed_capability_at_teardown": "cap_14cb0fecce1a667e0cb09bd2",
+        "useful_package_read_and_summary": true,
+        "vm_chroot_verified": true,
+        "vm_seccomp_verified": true
+      },
+      "receipts": [
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "ca83ebbe4d83550815f913107bd472390ccddd2bf20c2d6d2d6d653ef9043a3a",
+            "issued_at": 1791750619.2095122,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 1,
+            "source_id": "host-supervisor",
+            "source_sequence": 1
+          },
+          "signature": "Kvqjk7aWOW2SquK-WxSmjtnNeAX9KVI9i7PPxpFsj8ihpXGslMl9xBrVVNAVJe-JpeMs6I2fWBaLQEZfpms4BA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "9e4e809cbca8f0aa80bf7a0a9acce677e3b025713375a0aa217e4e9e9dc03f28",
+            "issued_at": 1791750619.6491656,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 2,
+            "source_id": "host-supervisor",
+            "source_sequence": 2
+          },
+          "signature": "fEflTnW10Lv7F2_HA3hTARF7LDLQ2uRcR62vVytNDM7xR3yTx6ONHBbaNCBcgqYuUCOvPyLQN922Tb9dZvVdAA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "0cb23011ff6cb8e07552300eb5672a8d5d07853ae1bc62ce8385a643eab794af",
+            "issued_at": 1791750619.662553,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 3,
+            "source_id": "host-effect-service",
+            "source_sequence": 1
+          },
+          "signature": "5ybQVubrwBijzD2rnmbQY4F5mWpFNUKJvunb8vXschhhQJYyzvO0OyTRdVtr97M5se3XmvgQ6k5eet4o_HuSCQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "f3b383536cbe75af93327b5c5a120d865028ac605f10206933639775f14adda5",
+            "issued_at": 1791750619.6675532,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 4,
+            "source_id": "host-effect-service",
+            "source_sequence": 2
+          },
+          "signature": "LD-Fdf0-1nOcorOEfF4ZUEdZdt5cjLyF5Dcgo1hYZR9XONq8KmbeMm0xwEQffMLnayGzMwQuN1QRqFBgg3BsCw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "b34cb20316721c0a98cf3c8dcce86f8258140dd4d5d6793b08dc1c4af84efaa2",
+            "issued_at": 1791750619.6733117,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 5,
+            "source_id": "host-effect-service",
+            "source_sequence": 3
+          },
+          "signature": "d0wlcyUwP2ZBoywA5mBfkraivo-DOPDWdQFlxY4mJh98tqdze1bjZZ5vW8aLGi-bsS-E34on3mTNeD4uGslZAg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "ae4fb0e1ff1d1acd0d61a69efc9765b788c6c92b2c3d0b82b67483fad20b4443",
+            "issued_at": 1791750619.6777163,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 6,
+            "source_id": "host-effect-service",
+            "source_sequence": 4
+          },
+          "signature": "die5WBL-aZDSJ8qW7fF5TalFeE6aACb2TdUr03Q8UDYAzwRhG92NS1V17xnNMvzeJygFy9ABL7wfkaKeGJJUAQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "256ac8eea797f87703c1a5fa889e56f2451449cc661d89e92bc651ae2e3f6bff",
+            "issued_at": 1791750619.6818533,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 7,
+            "source_id": "host-effect-service",
+            "source_sequence": 5
+          },
+          "signature": "Rp6tHQdKldzMncs7eiKj6m2jrdObEUYVxFoZBY9mNHI8jHezxcteBpxOumoxVLzH80kdJaPvJ0Kom7t9APpIAw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "0ba41a5665a67c1b5ac27efdb95bbb978eced93fdc29cf8e5e418a59b23c70d0",
+            "issued_at": 1791750619.6941838,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 8,
+            "source_id": "host-effect-service",
+            "source_sequence": 6
+          },
+          "signature": "FkTAe-mJXQRwW0vjDKDZxMXwhEbUIX3EIfOEqcJkwOHc92JMOGuzbjEnYqfhJabARQ_sAE1iOAqeGDjmD_oACA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "5060750e47f5cd39dfc5493067349dffa980a4a6dbf2af4bff27142cfa77b4f8",
+            "issued_at": 1791750619.6970892,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 9,
+            "source_id": "host-effect-service",
+            "source_sequence": 7
+          },
+          "signature": "VXH1mosiaIdMTQGkd6q7eDmBUJ9P2AQ4_NR_VBXmCLCaqHfs74u0arIxnkHa1LxjeGWLDNMsfsJQTlwx5_jMBA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "0d8601cdbfa266fc778cea08023de351ebbbb47d063487453a78c8d5dea08ff8",
+            "issued_at": 1791750619.7077305,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 10,
+            "source_id": "host-effect-service",
+            "source_sequence": 8
+          },
+          "signature": "LqaHMdjjRZMlHPqmaEjOFsxenGPg1OpToj6PVN4BYViFQq2EMM6agx5OS6XRgXheh2OGYGt_d6aPrDMZHwahAQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "52cfb80d136495b6c6e87a7fa27b8a7d0e17cfb4098964422a6440e7b2a260b8",
+            "issued_at": 1791750619.7134285,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 11,
+            "source_id": "host-effect-service",
+            "source_sequence": 9
+          },
+          "signature": "0xtuC9XWYn_vxpWctSXdzukcEk6QJL4sS_HLVSFTGhu5TvAkX88g6cczu_yIYoyi4vXbg1B73y1umT-4rlztAA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "6d7fcb3a9d592cc8596a9d35796fd1b77f6ec18f0a573468688b673e686abe6e",
+            "issued_at": 1791750619.7180052,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 12,
+            "source_id": "host-effect-service",
+            "source_sequence": 10
+          },
+          "signature": "XpWpeljhIEUqf6Lu26_PZ-TS8oV-xembvng5nSZRM_Jq1HJiPsC1ZJl58DQX3hT042UmnkTcjTcvv7gy4-gQDw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "d329a32ecc5e27d3c5e1d7ab1b1205572dd27184315bcd2e25439f1842dbc753",
+            "issued_at": 1791750620.0673513,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 13,
+            "source_id": "host-supervisor",
+            "source_sequence": 3
+          },
+          "signature": "NKdtmc8G91yM9f-sQ-avAxrF1Gp7Pf6FvZ9KDFJEidzvBxpMTyM2XoxVVd4lMxGL47JJfA-g7P2HhY8j-5MNDA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "e145d75758cb2b15e7ceac0eef9f3df3fc1b6bd66a675ed43116cedb4781b92a",
+            "issued_at": 1791750620.0715744,
+            "key_id": "ed25519:ee4aa4d21221acbcc97cfa310d52492c",
+            "sequence": 14,
+            "source_id": "host-supervisor",
+            "source_sequence": 4
+          },
+          "signature": "tbrSymr9R2HkU7N0CLHq6iUAYmnvf65QyxyIy9N3Zwo8W0jkJx3HuScgBI9C80C06nCs29yj7ZE6h6joGaBPAw"
+        }
+      ],
+      "recorder_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA28WLWg8N01PWOr79PQkUfwoXjzVCYHBI3mNMgU2b1Lc=\n-----END PUBLIC KEY-----\n",
+      "run_directory": "/var/tmp/ehk-347xgdo4",
+      "teardown": {
+        "authority_revoked_by_endpoint_shutdown": true,
+        "config_removed": true,
+        "effect_endpoint_removed": true,
+        "process_groups_empty": true,
+        "scratch_removed": true,
+        "trigger": "requested-stop",
+        "vsock_removed": true
+      }
+    },
+    {
+      "events": [
+        {
+          "event_hash": "649540e88b99985005bd8290469c16dcc2b12814d89597f330855c703099d042",
+          "event_type": "isolation.context",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "build_manifest_digest": "8b4b7fbf1c0c8fbf8415ff02c27128b4680b492bb9996863d65fd2801c30c623",
+            "capability_id": "cap_3687711bde61b74bd1f25364",
+            "configuration_digest": "55e60b9fe69fe7e319bc7dab06811361901b5785db6e3f5357bdeabcfe1709fb",
+            "host_kernel": "6.6.87.2-microsoft-standard-WSL2",
+            "package_context": {
+              "artifact_sha256": "e12c07a3e0fa3eafbf53932e37d46db5f4612b8bce19adafd1f08137ebcf08ca",
+              "authority_backend": "etcd",
+              "etcd_cluster_id": "15411549680087618151",
+              "fixture_authority": "root-only",
+              "mode": "protected",
+              "network": "empty namespace; synthetic Unix target only",
+              "worker_build": {
+                "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+                "source_sha256": "d02bd7f55c5c02d57c80d3a4b6ee0562df316ff7db45807e71de729853f4edb0",
+                "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+              }
+            },
+            "session_id": "ehk-eth0tlma"
+          },
+          "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "sequence": 1,
+          "source_id": "host-supervisor",
+          "source_sequence": 1,
+          "timestamp": 1791750620.1142154
+        },
+        {
+          "event_hash": "1a476685db8fac32253e53c30d1d19ff972915818b74ef822601e9ef36ace7af",
+          "event_type": "attestation.assessed",
+          "payload": {
+            "attestation_mode": "synthetic-fixture",
+            "session_id": "ehk-eth0tlma"
+          },
+          "previous_hash": "649540e88b99985005bd8290469c16dcc2b12814d89597f330855c703099d042",
+          "sequence": 2,
+          "source_id": "host-supervisor",
+          "source_sequence": 2,
+          "timestamp": 1791750620.622922
+        },
+        {
+          "event_hash": "ae352c143e122a58c89f9db10e2f77550872e2107f96110851d9488175997cf8",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "1a476685db8fac32253e53c30d1d19ff972915818b74ef822601e9ef36ace7af",
+          "sequence": 3,
+          "source_id": "host-effect-service",
+          "source_sequence": 1,
+          "timestamp": 1791750620.6412659
+        },
+        {
+          "event_hash": "f74e2cda930d348ec87100d583398c28acdc09e3c2d4103e15560360c0dd8af6",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "ae352c143e122a58c89f9db10e2f77550872e2107f96110851d9488175997cf8",
+          "sequence": 4,
+          "source_id": "host-effect-service",
+          "source_sequence": 2,
+          "timestamp": 1791750620.6461039
+        },
+        {
+          "event_hash": "97976f3c81783430f3c27427e65dc1a5a7e5cb57ec21f25f25aed006bae96863",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "f74e2cda930d348ec87100d583398c28acdc09e3c2d4103e15560360c0dd8af6",
+          "sequence": 5,
+          "source_id": "host-effect-service",
+          "source_sequence": 3,
+          "timestamp": 1791750620.6508114
+        },
+        {
+          "event_hash": "1fd256ecc10a61a5672415a1c06a9f679be935fe45935c26248a9500a8dac50a",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "97976f3c81783430f3c27427e65dc1a5a7e5cb57ec21f25f25aed006bae96863",
+          "sequence": 6,
+          "source_id": "host-effect-service",
+          "source_sequence": 4,
+          "timestamp": 1791750620.6555495
+        },
+        {
+          "event_hash": "b3367d5ec13f5d53cefec0466f2f3efce8ceb411f9018d89794cfdcce6f5c463",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "1fd256ecc10a61a5672415a1c06a9f679be935fe45935c26248a9500a8dac50a",
+          "sequence": 7,
+          "source_id": "host-effect-service",
+          "source_sequence": 5,
+          "timestamp": 1791750620.6599562
+        },
+        {
+          "event_hash": "ed46843f3278670ad2248fdb8f0625c572970a36170594a614830c9b341f0a04",
+          "event_type": "execution.authorized",
+          "payload": {
+            "capability_id": "cap_3687711bde61b74bd1f25364",
+            "request_digest": "3f4133da683cdd8dbf6c464f227141ea4dd50499332862a193cea589c27d5c56",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "b3367d5ec13f5d53cefec0466f2f3efce8ceb411f9018d89794cfdcce6f5c463",
+          "sequence": 8,
+          "source_id": "host-effect-service",
+          "source_sequence": 6,
+          "timestamp": 1791750620.6737363
+        },
+        {
+          "event_hash": "b855e99dcc67a6bb3bdfa02a145155cf880dfa27160ac3bd8d3c77d817ab024d",
+          "event_type": "execution.completed",
+          "payload": {
+            "capability_id": "cap_3687711bde61b74bd1f25364",
+            "effect_state": "completed",
+            "output_bytes": 74,
+            "request_id": "dataset-read",
+            "success": true
+          },
+          "previous_hash": "ed46843f3278670ad2248fdb8f0625c572970a36170594a614830c9b341f0a04",
+          "sequence": 9,
+          "source_id": "host-effect-service",
+          "source_sequence": 7,
+          "timestamp": 1791750620.6767178
+        },
+        {
+          "event_hash": "8dbd932b8b32a6bdcd68236dc97bd92eb6a0378391dc0c871fd4dc0e72fe887b",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "error_class": "authority-denied",
+            "request_id": "dataset-read"
+          },
+          "previous_hash": "b855e99dcc67a6bb3bdfa02a145155cf880dfa27160ac3bd8d3c77d817ab024d",
+          "sequence": 10,
+          "source_id": "host-effect-service",
+          "source_sequence": 8,
+          "timestamp": 1791750620.6905713
+        },
+        {
+          "event_hash": "85308ee80297c10b96a213dd55b3e2336711ec526dd04769be0f882e6d356d91",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "8dbd932b8b32a6bdcd68236dc97bd92eb6a0378391dc0c871fd4dc0e72fe887b",
+          "sequence": 11,
+          "source_id": "host-effect-service",
+          "source_sequence": 9,
+          "timestamp": 1791750620.6964362
+        },
+        {
+          "event_hash": "63dacceb90944430217834e99d0e81ec9295e131f925386b08278ec144e4e570",
+          "event_type": "execution.denied",
+          "payload": {
+            "effect_state": "not-started",
+            "source": "effect-boundary"
+          },
+          "previous_hash": "85308ee80297c10b96a213dd55b3e2336711ec526dd04769be0f882e6d356d91",
+          "sequence": 12,
+          "source_id": "host-effect-service",
+          "source_sequence": 10,
+          "timestamp": 1791750620.701295
+        },
+        {
+          "event_hash": "d3989b82ccc950f4152e8074f4880a1e5b80d6b203b0cbaf9f73466ab9a95e80",
+          "event_type": "isolation.observed",
+          "payload": {
+            "authoritative_state_read_write_denials": true,
+            "authority_oracle": {
+              "backend": "etcd",
+              "capability_id": "cap_3687711bde61b74bd1f25364",
+              "claims_digest": "6745880b1e7a5e39659ed55fc94a4f1376402a434893ccb3c250dd43ff7b474a",
+              "cluster_id": "15411549680087618151",
+              "expires_at": 1791750680109,
+              "raft_term": 2,
+              "record_count": 1,
+              "record_integrity_checked": true,
+              "revision": 4,
+              "source": "host-supervisor-linearizable-etcd-read"
+            },
+            "denied_cases": [
+              "missing_capability",
+              "forged_signature",
+              "argument_substitution",
+              "unauthorized_operation",
+              "prior_session_capability"
+            ],
+            "forbidden_vsock_port_diagnostic": {
+              "connected": false
+            },
+            "fresh_scratch_diagnostic": true,
+            "guest_root_diagnostic": {
+              "authority_environment": 0,
+              "authority_files": 0,
+              "package_manager": false,
+              "uid": 0
+            },
+            "host_consumption_count": 1,
+            "host_effect_uid": 60001,
+            "host_principal_file_denials": true,
+            "host_resource_limits_verified": {
+              "cpu_quota_percent": 100,
+              "memory_bytes_per_service": 268435456,
+              "pids_per_service": 32
+            },
+            "host_vm_uid": 60000,
+            "metadata_configured": false,
+            "network_interfaces_configured": 0,
+            "package": {
+              "active_workload_ms": 628.382854978554,
+              "ambiguous_outcomes": [],
+              "artifact_sha256": "e12c07a3e0fa3eafbf53932e37d46db5f4612b8bce19adafd1f08137ebcf08ca",
+              "authoritative_evidence_outside_service_root": true,
+              "automatic_attack_detection": false,
+              "detection_delay_ms": null,
+              "forbidden_effects": {
+                "credential_reuse": false,
+                "cross_session_message": false,
+                "durable_shared_state": false,
+                "fixture_evidence_tamper": false,
+                "relay": false
+              },
+              "gate_url_and_budget_widening_denied": true,
+              "mode": "protected",
+              "persistence_child_observed": true,
+              "post_kill_cleanup_ms": 71.80897999205627,
+              "requested_teardown_latency_ms": 295.69222099962644,
+              "service_chroot_uid_capabilities_verified": true,
+              "service_scratch_removed": true,
+              "service_scratch_write_observed": true,
+              "substituted_success_output_rejected": true,
+              "target_events": [],
+              "total_round_ms": 985.6868749775458,
+              "trusted_recipient_digest_verified": true,
+              "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+            },
+            "replay_denied": true,
+            "retired_effect_endpoint_unreachable": true,
+            "scratch_write_independently_observed": true,
+            "separate_network_namespaces": true,
+            "tpm_attestation_error": "TPM2 not enabled in guest build",
+            "unredeemed_capability_at_teardown": "cap_2e0667819115fb1fea8eb676",
+            "useful_package_read_and_summary": true,
+            "vm_chroot_verified": true,
+            "vm_seccomp_verified": true
+          },
+          "previous_hash": "63dacceb90944430217834e99d0e81ec9295e131f925386b08278ec144e4e570",
+          "sequence": 13,
+          "source_id": "host-supervisor",
+          "source_sequence": 3,
+          "timestamp": 1791750621.0628638
+        },
+        {
+          "event_hash": "17626aee84eb3b90f53b708c8d44ac4ed56a39baef62213d61e4fb8aa2de086a",
+          "event_type": "teardown.verified",
+          "payload": {
+            "authority_revoked_by_endpoint_shutdown": true,
+            "config_removed": true,
+            "effect_endpoint_removed": true,
+            "process_groups_empty": true,
+            "scratch_removed": true,
+            "trigger": "requested-stop",
+            "vsock_removed": true
+          },
+          "previous_hash": "d3989b82ccc950f4152e8074f4880a1e5b80d6b203b0cbaf9f73466ab9a95e80",
+          "sequence": 14,
+          "source_id": "host-supervisor",
+          "source_sequence": 4,
+          "timestamp": 1791750621.066463
+        }
+      ],
+      "evidence_chain_tip": "17626aee84eb3b90f53b708c8d44ac4ed56a39baef62213d61e4fb8aa2de086a",
+      "observations": {
+        "authoritative_state_read_write_denials": true,
+        "authority_oracle": {
+          "backend": "etcd",
+          "capability_id": "cap_3687711bde61b74bd1f25364",
+          "claims_digest": "6745880b1e7a5e39659ed55fc94a4f1376402a434893ccb3c250dd43ff7b474a",
+          "cluster_id": "15411549680087618151",
+          "expires_at": 1791750680109,
+          "raft_term": 2,
+          "record_count": 1,
+          "record_integrity_checked": true,
+          "revision": 4,
+          "source": "host-supervisor-linearizable-etcd-read"
+        },
+        "denied_cases": [
+          "missing_capability",
+          "forged_signature",
+          "argument_substitution",
+          "unauthorized_operation",
+          "prior_session_capability"
+        ],
+        "forbidden_vsock_port_diagnostic": {
+          "connected": false
+        },
+        "fresh_scratch_diagnostic": true,
+        "guest_root_diagnostic": {
+          "authority_environment": 0,
+          "authority_files": 0,
+          "package_manager": false,
+          "uid": 0
+        },
+        "host_consumption_count": 1,
+        "host_effect_uid": 60001,
+        "host_principal_file_denials": true,
+        "host_resource_limits_verified": {
+          "cpu_quota_percent": 100,
+          "memory_bytes_per_service": 268435456,
+          "pids_per_service": 32
+        },
+        "host_vm_uid": 60000,
+        "metadata_configured": false,
+        "network_interfaces_configured": 0,
+        "package": {
+          "active_workload_ms": 628.382854978554,
+          "ambiguous_outcomes": [],
+          "artifact_sha256": "e12c07a3e0fa3eafbf53932e37d46db5f4612b8bce19adafd1f08137ebcf08ca",
+          "authoritative_evidence_outside_service_root": true,
+          "automatic_attack_detection": false,
+          "detection_delay_ms": null,
+          "forbidden_effects": {
+            "credential_reuse": false,
+            "cross_session_message": false,
+            "durable_shared_state": false,
+            "fixture_evidence_tamper": false,
+            "relay": false
+          },
+          "gate_url_and_budget_widening_denied": true,
+          "mode": "protected",
+          "persistence_child_observed": true,
+          "post_kill_cleanup_ms": 71.80897999205627,
+          "requested_teardown_latency_ms": 295.69222099962644,
+          "service_chroot_uid_capabilities_verified": true,
+          "service_scratch_removed": true,
+          "service_scratch_write_observed": true,
+          "substituted_success_output_rejected": true,
+          "target_events": [],
+          "total_round_ms": 985.6868749775458,
+          "trusted_recipient_digest_verified": true,
+          "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+        },
+        "replay_denied": true,
+        "retired_effect_endpoint_unreachable": true,
+        "scratch_write_independently_observed": true,
+        "separate_network_namespaces": true,
+        "tpm_attestation_error": "TPM2 not enabled in guest build",
+        "unredeemed_capability_at_teardown": "cap_2e0667819115fb1fea8eb676",
+        "useful_package_read_and_summary": true,
+        "vm_chroot_verified": true,
+        "vm_seccomp_verified": true
+      },
+      "receipts": [
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "649540e88b99985005bd8290469c16dcc2b12814d89597f330855c703099d042",
+            "issued_at": 1791750620.120018,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 1,
+            "source_id": "host-supervisor",
+            "source_sequence": 1
+          },
+          "signature": "RA3jkA7ouWMA1SqN7NvXvJWdZ_l1LbZsyjueLJKac_GOjZlJz5JD-APSU4L3gJiwAIXjtDDLH-RcW2Tt8_M7AQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "1a476685db8fac32253e53c30d1d19ff972915818b74ef822601e9ef36ace7af",
+            "issued_at": 1791750620.630374,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 2,
+            "source_id": "host-supervisor",
+            "source_sequence": 2
+          },
+          "signature": "VWJOZyXGtdZVAdUphtV7uYhVMr40lFrMY6E2P6e9KxWrbxUsxKNjrWQA4PniXLZaX8EktmAoA1Tt8Cso_Dl4AQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "ae352c143e122a58c89f9db10e2f77550872e2107f96110851d9488175997cf8",
+            "issued_at": 1791750620.6431203,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 3,
+            "source_id": "host-effect-service",
+            "source_sequence": 1
+          },
+          "signature": "2J8DK1aSdJ_qNbq30wodvFOQ_eixpOna-_OnnCChh3FAtAjaEcL1Tr7vMGZ67a5t3D3AH-Q2m8oIKn56S4f5Ag"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "f74e2cda930d348ec87100d583398c28acdc09e3c2d4103e15560360c0dd8af6",
+            "issued_at": 1791750620.6481667,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 4,
+            "source_id": "host-effect-service",
+            "source_sequence": 2
+          },
+          "signature": "t5vSe46AL0W9dTIzV5DVSm_r7viLUG-sFKu5vsh5I50ANQpSB-9axiE01gmm-9D847q2Omd5h3vj42Db7Ky5Cg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "97976f3c81783430f3c27427e65dc1a5a7e5cb57ec21f25f25aed006bae96863",
+            "issued_at": 1791750620.6533875,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 5,
+            "source_id": "host-effect-service",
+            "source_sequence": 3
+          },
+          "signature": "yoYfmOicq4yV0QLkn1IEwFkE11KEDeZAIximzJ_hs3kJT0w4fMP09N6CvirSjGpKVSq1jsIdgqIFKBBXdGrbCA"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "1fd256ecc10a61a5672415a1c06a9f679be935fe45935c26248a9500a8dac50a",
+            "issued_at": 1791750620.657914,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 6,
+            "source_id": "host-effect-service",
+            "source_sequence": 4
+          },
+          "signature": "K1W-f5lmDey0M5f-8b4GzvQ1HjzZuIyQf_7BfBI_0-HbvcDrTovw8jlB-el0dnUFzAuGpIsNjECZ822oUe7SDQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "b3367d5ec13f5d53cefec0466f2f3efce8ceb411f9018d89794cfdcce6f5c463",
+            "issued_at": 1791750620.6622531,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 7,
+            "source_id": "host-effect-service",
+            "source_sequence": 5
+          },
+          "signature": "LsS0xv-0hcNRYDav1M1h94grwDvGgiBybCsqo6Mm4jOI9PjqSi5074ecUYgUbZI-YCdrByhQQHE9x9HBe5UTBQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "ed46843f3278670ad2248fdb8f0625c572970a36170594a614830c9b341f0a04",
+            "issued_at": 1791750620.675946,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 8,
+            "source_id": "host-effect-service",
+            "source_sequence": 6
+          },
+          "signature": "J-WI3eZub_OsT8pI_5KlapgriwCM1ZtAjqVwdiYm6ggwAJzUrh73KHSX7wqVTM8PHrHaWgWRXGWr5HKJkaKTAg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "b855e99dcc67a6bb3bdfa02a145155cf880dfa27160ac3bd8d3c77d817ab024d",
+            "issued_at": 1791750620.6787033,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 9,
+            "source_id": "host-effect-service",
+            "source_sequence": 7
+          },
+          "signature": "7DnU2PlAZ_LPNoIge5m7HGnBdbo6h4K7CHKTK_xPhM2URqJsJHnDalSc0jFaK1Ull8ce9E-ueDesMDoFNeldCg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "8dbd932b8b32a6bdcd68236dc97bd92eb6a0378391dc0c871fd4dc0e72fe887b",
+            "issued_at": 1791750620.6926255,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 10,
+            "source_id": "host-effect-service",
+            "source_sequence": 8
+          },
+          "signature": "bsfP-Pnb-IGJMAJzBbNmqRskNjzMv91LVW5jWgl94HqunUtrM1Rx4rd24UuhxUwMoRbCKb43psHOR430KLK7AQ"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "85308ee80297c10b96a213dd55b3e2336711ec526dd04769be0f882e6d356d91",
+            "issued_at": 1791750620.6987207,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 11,
+            "source_id": "host-effect-service",
+            "source_sequence": 9
+          },
+          "signature": "v2NBqbK_YIbtQcMX0ZRCsoVBeLKmolY0YuyjVET9fFJ_aS2K0zZw7FYvYfp3SLtWCtAzNVxMxW00iRKHPPxLAg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "63dacceb90944430217834e99d0e81ec9295e131f925386b08278ec144e4e570",
+            "issued_at": 1791750620.7033277,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 12,
+            "source_id": "host-effect-service",
+            "source_sequence": 10
+          },
+          "signature": "bf-Y6zzCuJ5DrzQC5PzC66w5EEVJCLVkgYF3vF9uy-2J-Esl_UyRBpQyCb_C2TSEja137wvNlEZTOr43-6INBg"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "d3989b82ccc950f4152e8074f4880a1e5b80d6b203b0cbaf9f73466ab9a95e80",
+            "issued_at": 1791750621.0654113,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 13,
+            "source_id": "host-supervisor",
+            "source_sequence": 3
+          },
+          "signature": "IglIkJ_0ngY2OI4Eu5IYqdNoabb3hWNf-n0RW1I8iaxXgcFYiu9R3GpOG3X-f8lMRt9E-N_6WDgnBjeeR4eVAw"
+        },
+        {
+          "algorithm": "Ed25519",
+          "payload": {
+            "event_hash": "17626aee84eb3b90f53b708c8d44ac4ed56a39baef62213d61e4fb8aa2de086a",
+            "issued_at": 1791750621.069716,
+            "key_id": "ed25519:d124caf10a5485867113346ef99907e0",
+            "sequence": 14,
+            "source_id": "host-supervisor",
+            "source_sequence": 4
+          },
+          "signature": "iLABBYrg59iyBkmLlJYl3KdlbSnUba2BIukpCoW3AHNat7iJDHTXBDSVncmY2p_mY9mOlOyJGmH6fAWCTUn7AA"
+        }
+      ],
+      "recorder_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA9GhXHhFFE8UvTbusWwYGlSoo5vvFCNGhovaRQIEpxbc=\n-----END PUBLIC KEY-----\n",
+      "run_directory": "/var/tmp/ehk-eth0tlma",
+      "teardown": {
+        "authority_revoked_by_endpoint_shutdown": true,
+        "config_removed": true,
+        "effect_endpoint_removed": true,
+        "process_groups_empty": true,
+        "scratch_removed": true,
+        "trigger": "requested-stop",
+        "vsock_removed": true
+      }
+    }
+  ],
+  "schema": "event-horizon.package-isolation.v2",
+  "scope": "owned deterministic probes; already-compromised service; serialized guest-root VMs; optional trusted-host etcd authority",
+  "status": "PASS",
+  "unknowns": [
+    "adaptive attacks",
+    "kernel or trusted gate compromise",
+    "concurrent tenant VMs",
+    "real registries and package installation",
+    "covert channels",
+    "production attestation",
+    "automatic detection latency",
+    "statistical performance overhead"
+  ],
+  "worker_build": {
+    "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "source_sha256": "d02bd7f55c5c02d57c80d3a4b6ee0562df316ff7db45807e71de729853f4edb0",
+    "worker_sha256": "36592dc743d59151f289ff373e59ba797efcee030ccd91e0db48ee8a076a65bc"
+  }
+}
