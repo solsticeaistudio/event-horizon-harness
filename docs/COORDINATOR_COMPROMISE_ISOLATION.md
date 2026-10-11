@@ -58,6 +58,9 @@ In this mode the coordinator attempts to read the signer's pinned
 configuration and the signer's `/proc/<pid>/mem`; **both must be denied** or
 the experiment fails. Every authority RPC independently verifies the *real*
 socket peer UID, which is assigned after the child drops privileges.
+The supervisor also makes a direct signer-socket request under a UID other
+than the permitted coordinator's, and requires the actual `SO_PEERCRED`
+admission check to refuse it.
 
 This is **not** a production multi-tenant isolation design. Linux privilege
 separation alone is not kernel/hypervisor isolation, process role hardening,
