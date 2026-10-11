@@ -199,6 +199,19 @@ python scripts/run_ehh_fuzz.py --target all --smoke
 python scripts/run_ehh_fuzz.py --target gateway --seconds 300
 ```
 
+## Isolated signer and compromised-coordinator experiment
+
+The [multi-process signer and guardian containment lab](docs/COORDINATOR_COMPROMISE_ISOLATION.md)
+runs four independent signing-guardian processes, an isolated signer
+process, and disposable malicious coordinator processes over real Unix
+sockets. It tests challenge replay, forged/duplicated/absent approvals,
+request/policy widening, and a signed capability positive control without
+Docker or KVM. Ordinary CI runs separate processes under the **same UID**;
+an **explicit root-only opt-in** runs all six roles under distinct Linux
+UIDs and requires denial of signer file and process-memory access. Those
+privileged results must be produced on an operator host; CI cannot claim
+them. The experiment still uses synthetic attestation and no real guest VM.
+
 ## Guardian signature isolation (opt-in research signer contract)
 
 The [pinned guardian-signature signer facade](docs/SIGNED_GUARDIAN_AUTHORITY.md)
