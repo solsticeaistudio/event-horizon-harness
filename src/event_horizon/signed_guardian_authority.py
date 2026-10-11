@@ -260,7 +260,9 @@ class PinnedGuardianCapabilityIssuer:
             observed_attestation = attestation.get("attestation_result")
             if not isinstance(observed_attestation, Mapping):
                 raise GuardianAuthorityError("signed attestation result missing")
-            expected_trust = ProviderTrustState.from_attestation(\n                observed_attestation, requested_trust=trust.requested_trust,\n            )
+            expected_trust = ProviderTrustState.from_attestation(
+                observed_attestation, requested_trust=trust.requested_trust,
+            )
             if trust.to_dict() != expected_trust.to_dict():
                 raise GuardianAuthorityError("guardian trust assertion mismatches signed attestation evidence")
         except (TypeError, ValueError) as exc:
