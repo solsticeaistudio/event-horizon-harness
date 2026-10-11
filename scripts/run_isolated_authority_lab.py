@@ -19,7 +19,6 @@ import os
 import pwd
 import shutil
 import socket
-import stat
 import subprocess
 import sys
 import tempfile
@@ -115,7 +114,12 @@ def run(*, distinct_uids: bool) -> dict:
         base.chmod(0o755)
         stage = base / "stage"
         (stage / "src").mkdir(parents=True)
-        shutil.copytree(ROOT / "src/event_horizon", stage / "src/event_horizon")
+        shutil.copytree(
+            ROOT / "src/event_horizon", stage / "src/event_horizon",
+            ignore=shutil.ignore_patterns(
+                "__pycache__", "*.pyc", "*.pyo", "*.pem", "*.key", ".env*",
+            ),
+        )
         (stage / "scripts").mkdir()
         shutil.copy2(ROOT / "scripts/capability_fixture_support.py",
                      stage / "scripts/capability_fixture_support.py")
