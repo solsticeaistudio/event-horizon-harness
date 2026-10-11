@@ -51,6 +51,22 @@ jobs:
           path: ${{ runner.temp }}/ehh-gateway-attack.json
           if-no-files-found: warn
           retention-days: 14
+      - name: Exercise independent-process signer against adversarial coordinator
+        run: python scripts/run_isolated_authority_lab.py --report "$RUNNER_TEMP/ehh-coordinator-isolation.json"
+      - name: Attack signer separation under six real distinct Linux UIDs
+        run: |
+          sudo -n "$(command -v python)" scripts/run_isolated_authority_lab.py \
+            --distinct-uids --report "$RUNNER_TEMP/ehh-coordinator-isolation-uids.json"
+      - name: Publish coordinator-compromise results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ehh-coordinator-isolation-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ehh-coordinator-isolation.json
+            ${{ runner.temp }}/ehh-coordinator-isolation-uids.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify fixed capability vectors
         run: python scripts/verify_capability_vectors.py
 
