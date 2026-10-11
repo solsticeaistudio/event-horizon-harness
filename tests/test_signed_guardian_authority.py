@@ -171,10 +171,14 @@ class SignedGuardianSignerTests(unittest.TestCase):
             "object.read", "synthetic-dataset", "exec-1",
             {"offset": 0, "length": 5}, "synthetic signed decision test",
         )
-        votes[0] = attacker.approve(
+        static_index = next(
+            i for i, vote in enumerate(votes)
+            if vote.payload["guardian"] == STATIC_POLICY_GUARDIAN
+        )
+        votes[static_index] = attacker.approve(
             self.policy.evaluate(wrong),
             challenge=challenge, policy_digest=self.policy.policy_digest,
-        ) if votes[0].payload["guardian"] == STATIC_POLICY_GUARDIAN else votes[0]
+        )
         # Every signed decision must match the exact requested digest.
         with self.assertRaises(GuardianAuthorityError):
             self.signer.issue(
