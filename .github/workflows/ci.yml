@@ -41,6 +41,16 @@ jobs:
         run: python scripts/lint_python.py
       - name: Run Python tests
         run: python -m unittest discover -s tests -v
+      - name: Attack actual trusted gateway process over Unix sockets
+        run: python scripts/run_gateway_socket_campaign.py --report "$RUNNER_TEMP/ehh-gateway-attack.json"
+      - name: Publish actual-gateway attack outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ehh-gateway-attack-${{ github.run_id }}
+          path: ${{ runner.temp }}/ehh-gateway-attack.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify fixed capability vectors
         run: python scripts/verify_capability_vectors.py
 
