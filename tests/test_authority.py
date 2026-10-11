@@ -29,7 +29,7 @@ def payload(**overrides):
 class AuthorityTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.neural, self.executor, self.recorder, self.broker = build_local_harness(self.tmp.name, ttl_seconds=0.05)
+        self.neural, self.executor, self.recorder, self.broker = build_local_harness(self.tmp.name, ttl_seconds=5.0)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -75,6 +75,9 @@ class AuthorityTests(unittest.TestCase):
         self.assertIn("executor_id", result.error)
 
     def test_expired_capability_is_denied(self):
+        # Use a short TTL only for this clock-sensitive test. Signature and
+        # binding tests should not intermittently expire under busy CI.
+        self.broker.ttl_seconds = 0.05
         request, capability, attestation = self.issue()
         time.sleep(0.07)
         result = self.executor.execute(request, capability, attestation)
