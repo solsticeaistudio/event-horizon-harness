@@ -208,9 +208,10 @@ sockets. It tests challenge replay, forged/duplicated/absent approvals,
 request/policy widening, and a signed capability positive control without
 Docker or KVM. Ordinary CI runs separate processes under the **same UID**;
 an **explicit root-only opt-in** runs all six roles under distinct Linux
-UIDs and requires denial of signer file and process-memory access. Those
-privileged results must be produced on an operator host; CI cannot claim
-them. The experiment still uses synthetic attestation and no real guest VM.
+UIDs and requires denial of signer file and process-memory access. CI
+also executes this opt-in on its isolated disposable Linux runner and
+retains a second report. That proof is limited to the runner's OS boundary,
+not production or a Firecracker guest. The experiment still uses synthetic attestation and no real guest VM.
 
 ## Guardian signature isolation (opt-in research signer contract)
 
