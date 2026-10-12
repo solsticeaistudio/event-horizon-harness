@@ -63,5 +63,32 @@ class RecipientModeTests(unittest.TestCase):
             self.verify(value)
 
 
+    def test_confirmed_recipient_report_requires_signed_pid_and_receipt(self):
+        doc = example()
+        doc["source_commit"] = "f" * 40
+        for round_record in doc["rounds"]:
+            marker = round_record["observations"]["gateway_process_bridge"]
+            marker["identity_binding"] = "pidfd-dispatch-v1"
+            round_record["events"] = [{
+                "event_type": "execution.dispatch",
+                "source_id": "host-effect-service",
+                "payload": {"gateway_pid": marker["gateway_pid"],
+                            "dispatch_count": 1, "request_digest": DIGEST},
+            }]
+            recipient = round_record["observations"]["external_recipient"]
+            recipient["journal_state"] = "recipient-confirmed"
+            recipient["receipt_digest"] = recipient["rows_digest"]
+        self.verify(doc)
+        doc["rounds"][1]["observations"]["external_recipient"]["receipt_digest"] = "f" * 64
+        with self.assertRaises(ValueError):
+            self.verify(doc)
+
+    def test_new_commit_cannot_use_old_possibly_committed_recipient_state(self):
+        doc = example()
+        doc["source_commit"] = "f" * 40
+        with self.assertRaises(ValueError):
+            self.verify(doc)
+
+
 if __name__ == "__main__":
     unittest.main()
