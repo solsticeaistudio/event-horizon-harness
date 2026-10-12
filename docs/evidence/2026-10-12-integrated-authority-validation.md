@@ -1,7 +1,14 @@
 # Integrated isolated authority validation ? 2026-10-12 UTC
 
-**Status: real local Firecracker/KVM + etcd execution passed. Raw evidence is
-preserved locally and is not published by this feature PR.**
+**Status: real local Firecracker/KVM + etcd execution passed.**
+
+This validation record was written before evidence publication. The original
+successful report and checksum were subsequently published, byte-for-byte,
+in [PR #32](https://github.com/solsticeaistudio/event-horizon-harness/pull/32)
+and are available in the [evidence archive](artifacts/2026-10-12/README.md).
+The original experiment source commit is preserved at branch
+`evidence/source-2026-10-12-firecracker-etcd`, because PR #31 was
+squash-merged.
 
 Four separately owned guardian processes and a protected signer authorized the
 actual session-bound package retrieval subsequently executed by the real guest.
@@ -28,7 +35,7 @@ establish integrity, not independently witnessed hardware provenance.**
 | Original JSON | `artifacts/reports/package-etcd-20261012T011216Z-22743-isolated-authority.json` |
 | Original checksum sidecar | Same path with `.sha256` appended |
 | Original SHA-256 | `01c39b20a09ba389f509eb77e591c7bbc5f5f8062413d04237e082bee858f9bb` |
-| Publication | This summary and source only; original JSON and sidecar remain untracked locally |
+| Publication | Subsequently published unchanged in PR #32; originals remain preserved locally |
 
 Each guardian generated its own private key inside its process. The signer
 held the capability private key. Only public pins crossed the trusted startup
@@ -150,5 +157,5 @@ See [architecture and interfaces](../INTEGRATED_ISOLATED_AUTHORITY.md).
 | Medium, authority availability | Three bounded issuances per session; a token may be consumed without an effect; unused tokens retire by endpoint shutdown, not global revocation | Model cancellation/reconciliation explicitly before supporting retryable remote effects |
 
 No production infrastructure was used. No prior published report/checksum was
-modified. Raw integrated evidence publication and any independent attestation
-claim require separate review.
+modified. The original integrated report was published after separate content review in
+PR #32; independent attestation and external witness claims remain unestablished.
