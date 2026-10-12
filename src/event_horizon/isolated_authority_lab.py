@@ -211,8 +211,11 @@ def signer_main(arguments) -> None:
         session = SessionAuthority(json.loads(Path(arguments.session_config).read_text()))
     verifier = PinnedGuardianVerifier(configuration["public_keys"])
     broker = CapabilityBroker(ttl_seconds=60)
+    # Trusted local startup compilation, independent of coordinator RPC data.
+    signer_context = session.context if session else authority_context(fixture_request(), arguments.reference_time)
     issuer = PinnedGuardianCapabilityIssuer(
         broker=broker, static_policy=session.policy if session else fixture_policy(), verifier=verifier,
+        trusted_compiled_ceiling=signer_context["compiled_ceiling"],
         challenge_ttl_seconds=2.0 if session else 15.0,
     )
     print(json.dumps({
@@ -243,16 +246,13 @@ def signer_main(arguments) -> None:
             approvals.append(SignedGuardianApproval(item["payload"], item["signature"]))
         # Crucial: compiled ceiling and fixture policy originate inside the
         # signer, not from coordinator RPC input.
-        context = session.context if session else authority_context(fixture_request(), arguments.reference_time)
+        context = signer_context
         expected = session.request if session else fixture_request()
         if request.canonical_payload() != expected.canonical_payload():
             raise GuardianAuthorityError("only exact approved fixture request is issuable")
         if session and issued_count >= 3:
             raise GuardianAuthorityError("session issuance budget exhausted")
-        issued = issuer.issue(
-            request, message["challenge"], approvals,
-            context["compiled_ceiling"],
-        )
+        issued = issuer.issue(request, message["challenge"], approvals)
         issued_count += 1
         return {"capability": issued.to_dict(), "attestation": context["attestation"]}
 

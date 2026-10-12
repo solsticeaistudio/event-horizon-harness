@@ -183,16 +183,57 @@ class PinnedGuardianCapabilityIssuer:
 
     def __init__(
         self, *, broker: CapabilityBroker, static_policy: StaticPolicy,
-        verifier: PinnedGuardianVerifier, challenge_ttl_seconds: float = 15.0,
+        verifier: PinnedGuardianVerifier, trusted_compiled_ceiling: CompiledTaskPolicyCeiling,
+        challenge_ttl_seconds: float = 15.0,
     ):
         if not 0 < challenge_ttl_seconds <= 60:
             raise ValueError("signer challenge TTL invalid")
+        # This is installed by the privileged signer at startup, NEVER chosen
+        # per RPC. A self-consistent compiled digest is not trusted provenance.
+        if not isinstance(trusted_compiled_ceiling, CompiledTaskPolicyCeiling):
+            raise GuardianAuthorityError("trusted signer ceiling is required")
+        self._check_ceiling_against_policy(trusted_compiled_ceiling, static_policy)
+        self._compiled_ceiling = trusted_compiled_ceiling
         self._broker = broker
         self.policy = static_policy
         self.verifier = verifier
         self.ttl = challenge_ttl_seconds
         self._pending: dict[str, tuple[str, float]] = {}
         self._lock = threading.RLock()
+
+    @staticmethod
+    def _check_ceiling_against_policy(compiled_ceiling: CompiledTaskPolicyCeiling, policy: StaticPolicy) -> None:
+        try:
+            compiled_ceiling.verify_integrity()
+        except (PolicyCompilationError, ValueError, TypeError) as exc:
+            raise GuardianAuthorityError("trusted ceiling has invalid integrity") from exc
+        if compiled_ceiling.policy_version != policy.policy_id:
+            raise GuardianAuthorityError("trusted ceiling policy version mismatch")
+        # Hash integrity is not compiler provenance. Enforce the signer's
+        # conservative, non-RPC-adjustable compiler guardrails at startup.
+        # Deployment-specific broader permissions require a separately reviewed
+        # trusted compiler/policy contract; a self-hashed object is insufficient.
+        limits = {
+            "maximum_read_bytes": 1_048_576,
+            "maximum_write_bytes": 1_048_576,
+            "maximum_calls": 256,
+            "maximum_parallelism": 16,
+            "maximum_duration_seconds": 300,
+        }
+        if (not set(compiled_ceiling.data_classes).issubset({"public", "internal"})
+                or any(getattr(compiled_ceiling, name) > limit
+                       for name, limit in limits.items())):
+            raise GuardianAuthorityError("trusted ceiling exceeds signer safety limits")
+        for action in compiled_ceiling.actions:
+            rule = policy.operations.get(action)
+            if rule is None:
+                raise GuardianAuthorityError("trusted ceiling includes unapproved action")
+            if not set(compiled_ceiling.action_resources.get(action, ())).issubset(rule.resources):
+                raise GuardianAuthorityError("trusted ceiling widened resources")
+            if not set(compiled_ceiling.argument_constraints.get(action, ())).issubset(rule.allowed_argument_keys):
+                raise GuardianAuthorityError("trusted ceiling widened arguments")
+        if compiled_ceiling.network_destinations and "network.connect" not in policy.operations:
+            raise GuardianAuthorityError("trusted ceiling includes unapproved network access")
 
     def new_challenge(self, request: ActionRequest) -> str:
         if not isinstance(request, ActionRequest):
@@ -212,7 +253,6 @@ class PinnedGuardianCapabilityIssuer:
     def issue(
         self, request: ActionRequest, challenge: str,
         approvals: Sequence[SignedGuardianApproval],
-        compiled_ceiling: CompiledTaskPolicyCeiling,
     ) -> IssuedCapability:
         if not isinstance(request, ActionRequest) or not isinstance(challenge, str):
             raise GuardianAuthorityError("signer request invalid")
@@ -230,30 +270,12 @@ class PinnedGuardianCapabilityIssuer:
         if (_decision_payload(static, challenge, self.policy.policy_digest, self.verifier.key_ids[STATIC_POLICY_GUARDIAN])
                 != _decision_payload(independently_evaluated, challenge, self.policy.policy_digest, self.verifier.key_ids[STATIC_POLICY_GUARDIAN])):
             raise GuardianAuthorityError("guardian's signed static policy disagrees with independent signer policy")
-        # A compromised coordinator cannot smuggle an enlarged ceiling.
-        if not isinstance(compiled_ceiling, CompiledTaskPolicyCeiling):
-            raise GuardianAuthorityError("compiled authority ceiling invalid")
-        try:
-            compiled_ceiling.verify_integrity()
-            permitted = compiled_ceiling.permits(request)
-        except (PolicyCompilationError, ValueError, TypeError) as exc:
-            raise GuardianAuthorityError("compiled ceiling failed integrity verification") from exc
-        if not permitted:
-            raise GuardianAuthorityError("compiled ceiling rejects requested operation")
-        if compiled_ceiling.policy_version != self.policy.policy_id:
-            # The compiled ceiling actually binds an immutable compiler policy
-            # version, not a coordinator-provided authorization string.
-            raise GuardianAuthorityError("compiled ceiling policy version mismatch")
-        for action in compiled_ceiling.actions:
-            rule = self.policy.operations.get(action)
-            if rule is None:
-                raise GuardianAuthorityError("compiled ceiling includes unapproved action")
-            if not set(compiled_ceiling.action_resources.get(action, ())).issubset(rule.resources):
-                raise GuardianAuthorityError("compiled ceiling widened resources")
-            if not set(compiled_ceiling.argument_constraints.get(action, ())).issubset(rule.allowed_argument_keys):
-                raise GuardianAuthorityError("compiled ceiling widened arguments")
-        if compiled_ceiling.network_destinations and "network.connect" not in self.policy.operations:
-            raise GuardianAuthorityError("compiled ceiling requested network without policy")
+        # A coordinator has no per-issuance ceiling parameter. The signer
+        # owns the ceiling installed from its trusted startup configuration.
+        compiled_ceiling = self._compiled_ceiling
+        self._check_ceiling_against_policy(compiled_ceiling, self.policy)
+        if not compiled_ceiling.permits(request):
+            raise GuardianAuthorityError("trusted ceiling rejects requested operation")
         attestation = decisions[EXECUTOR_ATTESTATION_GUARDIAN].evidence
         if (attestation.get("device_id") != request.executor_id
                 or not isinstance(attestation.get("measurement"), str)

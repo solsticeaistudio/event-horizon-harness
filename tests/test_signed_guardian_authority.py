@@ -9,6 +9,7 @@ from dataclasses import replace
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_horizon.broker import CapabilityBroker, CapabilityVerifier
+from event_horizon.canonical import digest
 from event_horizon.component_ids import (
     REQUIRED_GUARDIANS, STATIC_POLICY_GUARDIAN,
     EXECUTOR_ATTESTATION_GUARDIAN,
@@ -57,7 +58,7 @@ class SignedGuardianSignerTests(unittest.TestCase):
         self.broker = CapabilityBroker(ttl_seconds=60)
         self.signer = PinnedGuardianCapabilityIssuer(
             broker=self.broker, static_policy=self.policy,
-            verifier=self.verifier,
+            verifier=self.verifier, trusted_compiled_ceiling=self.context["compiled_ceiling"],
         )
 
     def decisions(self, *, request=None):
@@ -98,7 +99,7 @@ class SignedGuardianSignerTests(unittest.TestCase):
         challenge = self.signer.new_challenge(self.request)
         votes = self.signed(challenge)
         capability = self.signer.issue(
-            self.request, challenge, votes, self.context["compiled_ceiling"],
+            self.request, challenge, votes,
         )
         self.assertEqual(capability.claims.operation, "object.read")
         self.assertEqual(capability.claims.max_output_bytes, 4096)
@@ -110,7 +111,7 @@ class SignedGuardianSignerTests(unittest.TestCase):
         self.assertEqual(claims.capability_id, capability.claims.capability_id)
         with self.assertRaises(GuardianAuthorityError):
             self.signer.issue(
-                self.request, challenge, votes, self.context["compiled_ceiling"],
+                self.request, challenge, votes,
             )
 
     def test_coordinator_cannot_forge_guardian_unanimity(self):
@@ -122,7 +123,6 @@ class SignedGuardianSignerTests(unittest.TestCase):
         with self.assertRaises(GuardianAuthorityError):
             self.signer.issue(
                 self.request, challenge, self.signed(challenge, keys=keys),
-                self.context["compiled_ceiling"],
             )
 
     def test_missing_duplicate_and_unsigned_approvals_veto(self):
@@ -141,7 +141,6 @@ class SignedGuardianSignerTests(unittest.TestCase):
                 with self.assertRaises(GuardianAuthorityError):
                     self.signer.issue(
                         self.request, challenge, votes,
-                        self.context["compiled_ceiling"],
                     )
 
     def test_challenge_is_fresh_consumed_and_request_bound(self):
@@ -154,12 +153,10 @@ class SignedGuardianSignerTests(unittest.TestCase):
         with self.assertRaises(GuardianAuthorityError):
             self.signer.issue(
                 wrong_request, previous, self.signed(previous),
-                self.context["compiled_ceiling"],
             )
         with self.assertRaises(GuardianAuthorityError):
             self.signer.issue(
                 self.request, previous, self.signed(previous),
-                self.context["compiled_ceiling"],
             )
 
     def test_valid_signature_over_swapped_request_is_rejected(self):
@@ -183,7 +180,6 @@ class SignedGuardianSignerTests(unittest.TestCase):
         with self.assertRaises(GuardianAuthorityError):
             self.signer.issue(
                 self.request, challenge, votes,
-                self.context["compiled_ceiling"],
             )
 
     def test_policy_ceiling_independently_deny_by_default(self):
@@ -206,7 +202,6 @@ class SignedGuardianSignerTests(unittest.TestCase):
         with self.assertRaises(GuardianAuthorityError):
             self.signer.issue(
                 prohibited, challenge, approvals,
-                self.context["compiled_ceiling"],
             )
 
     def test_trust_state_and_signed_attestation_must_match(self):
@@ -224,7 +219,6 @@ class SignedGuardianSignerTests(unittest.TestCase):
         with self.assertRaises(GuardianAuthorityError):
             self.signer.issue(
                 self.request, challenge, self.signed(challenge, decisions=decisions),
-                self.context["compiled_ceiling"],
             )
 
     def test_key_identity_must_be_unique_across_guardians(self):
@@ -236,12 +230,53 @@ class SignedGuardianSignerTests(unittest.TestCase):
             PinnedGuardianVerifier({guardian: pem for guardian in REQUIRED_GUARDIANS})
 
     def test_compiled_ceiling_must_be_independently_policy_bound(self):
-        challenge = self.signer.new_challenge(self.request)
         altered = replace(self.context["compiled_ceiling"], policy_version="coordinator-policy")
-        with self.assertRaises((GuardianAuthorityError, ValueError)):
-            self.signer.issue(
-                self.request, challenge, self.signed(challenge), altered,
+        altered = replace(altered, compiled_digest=digest(altered.unsigned_dict()))
+        # Even a self-consistent, correctly hashed ceiling cannot override
+        # the signer's independent static policy.
+        with self.assertRaises(GuardianAuthorityError):
+            PinnedGuardianCapabilityIssuer(
+                broker=self.broker, static_policy=self.policy, verifier=self.verifier,
+                trusted_compiled_ceiling=altered,
             )
+
+    def test_constructor_rejects_self_hashed_forged_budget_or_sensitive_classes(self):
+        original = self.context["compiled_ceiling"]
+        for kind, fields in (
+            ("billion_calls", {"maximum_calls": 10**9}),
+            ("secret_data", {"data_classes": ("restricted", "secret")}),
+            ("oversized_read", {"maximum_read_bytes": 2**40}),
+            ("excessive_parallelism", {"maximum_parallelism": 2**20}),
+        ):
+            with self.subTest(kind=kind):
+                forged = replace(original, **fields)
+                forged = replace(forged, compiled_digest=digest(forged.unsigned_dict()))
+                forged.verify_integrity()
+                with self.assertRaises(GuardianAuthorityError):
+                    PinnedGuardianCapabilityIssuer(
+                        broker=self.broker,
+                        static_policy=self.policy,
+                        verifier=self.verifier,
+                        trusted_compiled_ceiling=forged,
+                    )
+
+    def test_forged_budget_and_secret_classes_cannot_enter_issue_api(self):
+        original = self.context["compiled_ceiling"]
+        forged = replace(original, maximum_calls=10**9, data_classes=("restricted", "secret"))
+        forged = replace(forged, compiled_digest=digest(forged.unsigned_dict()))
+        forged.verify_integrity()  # Valid self-hash, NOT a trusted compilation.
+        challenge = self.signer.new_challenge(self.request)
+        approvals = self.signed(challenge)
+        with self.assertRaises(TypeError):
+            self.signer.issue(self.request, challenge, approvals, forged)
+        with self.assertRaises(TypeError):
+            self.signer.issue(self.request, challenge, approvals, compiled_ceiling=forged)
+        capability = self.signer.issue(self.request, challenge, approvals)
+        self.assertEqual(capability.claims.compiled_ceiling["maximum_calls"], original.maximum_calls)
+        self.assertEqual(tuple(capability.claims.compiled_ceiling["data_classes"]), original.data_classes)
+        verifier = CapabilityVerifier(self.broker.public_key_pem, self.broker.key_id)
+        verifier.verify_and_consume(capability, self.request, **verify_options(self.context))
+
 
 
 if __name__ == "__main__":
