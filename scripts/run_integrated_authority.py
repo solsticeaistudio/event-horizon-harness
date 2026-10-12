@@ -30,8 +30,8 @@ def main():
     args=parser.parse_args()
     if args.report.exists() or Path(str(args.report)+'.sha256').exists():
         raise FileExistsError('never replace an existing experiment artifact')
-    source=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
-    if subprocess.check_output(['git','diff','HEAD','--name-only'],cwd=ROOT).strip():
+    source=subprocess.check_output(['git','-c',f'safe.directory={ROOT}','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+    if subprocess.check_output(['git','-c',f'safe.directory={ROOT}','diff','HEAD','--name-only'],cwd=ROOT).strip():
         raise RuntimeError('commit implementation before running attributable hardware evidence')
     preflight()
     config={'authority_backend':'etcd','etcd_gateway':owned_etcd_config(args.etcd_endpoint,args.etcd_cluster_id),
