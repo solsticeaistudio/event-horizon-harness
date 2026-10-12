@@ -920,7 +920,17 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             if prior_message is not None:
                 cases["prior_session_capability"] = prior_message
             for name, attempt in cases.items():
-                response = guest_effect(channel, attempt)
+                try:
+                    response = guest_effect(channel, attempt)
+                except (TimeoutError, OSError, EOFError) as exc:
+                    # A dead recipient/gateway is not a successful denial.
+                    # Report the trusted receiver's failure rather than only
+                    # the guest's blocked socket when it is already known.
+                    if (package_lab is not None
+                            and getattr(package_lab, "external_recipient_mode", False)
+                            and receiver.failure is not None):
+                        raise RuntimeError("trusted recipient/gateway bridge failed") from receiver.failure
+                    raise
                 if response["success"] or response["effect_state"] != "not-started":
                     raise RuntimeError(f"forbidden request not denied: {name}")
             observed["denied_cases"] = list(cases)
