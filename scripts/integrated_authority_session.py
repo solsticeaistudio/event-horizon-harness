@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AUTHORITY_ATTACKS = (
     "forged_signature", "missing_guardian", "duplicate_guardian", "modified_approval",
     "swapped_approval", "guardian_veto", "expired_challenge", "reuse_challenge",
-    "different_request", "changed_resource", "expanded_arguments", "expanded_ceiling",
+    "different_request", "changed_resource", "expanded_arguments", "expanded_ceiling", "expanded_budget",
     "network_operation", "executor_substitution", "attestation_substitution",
     "policy_substitution", "bypass_signer", "signer_key_substitution",
 )
@@ -234,6 +234,11 @@ class IsolatedSession:
         spare_result=self.client('legitimate');self._check_transcript(spare_result)
         spare=IssuedCapability.from_dict(spare_result['transcript'][-1]['answer']['result']['capability'])
         self.evidence['spare_authorization']=spare_result['transcript'][-1]
+        exhausted=self.client('issuance_budget_exhausted'); self._check_transcript(exhausted)
+        if exhausted['transcript'][-1]['answer']['ok'] is not False:
+            raise RuntimeError('signer exceeded its local issuance budget')
+        self.evidence['scenarios'].append({'name':'issuance_budget_exhausted','outcome':'denied',
+            'guest_invoked':False,'effect_dispatches':0,'transcript':exhausted['transcript']})
         return cap,spare,self.session.context
 
     def close(self):

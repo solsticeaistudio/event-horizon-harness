@@ -50,7 +50,7 @@ def verify_authority(value, *, require_os=True):
     require(caps[0].claims.capability_id!=caps[1].claims.capability_id,'spare capability duplicated')
     require(value['process_cleanup'] is True and value['temporary_paths_removed'] is True,
             'authority cleanup missing')
-    expected=set(AUTHORITY_ATTACKS)|{'read_signer_config','read_signer_memory',
+    expected=set(AUTHORITY_ATTACKS)|{'issuance_budget_exhausted','read_signer_config','read_signer_memory',
                                    'guardian_unavailable','signer_unavailable'}
     scenarios=value['scenarios']
     require(len(scenarios)==len(expected) and {x['name'] for x in scenarios}==expected,
@@ -65,7 +65,7 @@ def verify_authority(value, *, require_os=True):
     for test in scenarios:
         require(test['guest_invoked'] is False and test['effect_dispatches']==0,
                 'pre-execution authority failure dispatched')
-        if test['name'] in AUTHORITY_ATTACKS:
+        if test['name'] in (*AUTHORITY_ATTACKS,'issuance_budget_exhausted'):
             require(test['outcome']=='denied','authority attack not denied')
             final=test['transcript'][-1]
             require(final['answer']=={'ok':False,'result':{'error':'denied'}},'unexpected issuance')

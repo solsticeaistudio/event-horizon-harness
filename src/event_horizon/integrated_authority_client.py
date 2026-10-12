@@ -60,6 +60,7 @@ def run(config):
     elif scenario == "expired_challenge": time.sleep(2.1)
     message = {"method": "issue", "request": request, "challenge": challenge, "approvals": approvals}
     if scenario == "expanded_ceiling": message["max_output_bytes"] = 65536
+    if scenario == "expanded_budget": message["compiled_ceiling"] = {"maximum_calls": 100}
     if scenario == "signer_key_substitution": message["public_key"] = "coordinator pin"
     call(signer, message)
     return {"transcript": transcript}

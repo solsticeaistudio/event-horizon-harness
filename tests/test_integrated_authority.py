@@ -25,7 +25,7 @@ class IntegratedAuthorityTests(unittest.TestCase):
 
     def test_real_process_campaign_and_verifier(self):
         verify_authority(self.evidence,require_os=False)
-        self.assertEqual(len(self.evidence['scenarios']),22)
+        self.assertEqual(len(self.evidence['scenarios']),24)
         self.assertEqual(len({x['pid'] for x in self.evidence['roles'].values()}),5)
 
     def test_portable_processes_cannot_claim_os_isolation(self):
