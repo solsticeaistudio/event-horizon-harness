@@ -10,6 +10,11 @@ cd "$ROOT"
 PY="${EHH_ISOLATION_PYTHON:-/var/tmp/event-horizon-isolation-venv/bin/python}"
 IMAGE="${EHH_LAB_ETCD_IMAGE:-quay.io/coreos/etcd:v3.6.0}"
 ADAPTIVE_STEPS=0
+ISOLATED_AUTHORITY=0
+if [[ "${1:-}" == "--isolated-authority" && $# == 1 ]]; then
+  ISOLATED_AUTHORITY=1
+  shift
+fi
 if (( $# > 2 )); then
   echo "Usage: bash scripts/run_package_etcd_lab.sh [--adaptive-steps 1..4]" >&2
   exit 2
@@ -141,12 +146,17 @@ echo "PASS: three disposable etcd nodes agree on cluster $CLUSTER_ID"
 mkdir -p artifacts/reports
 RUN_NAME="package-etcd-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 if (( ADAPTIVE_STEPS > 0 )); then RUN_NAME+="-adaptive"; fi
+if (( ISOLATED_AUTHORITY > 0 )); then RUN_NAME+="-isolated-authority"; fi
 REPORT="artifacts/reports/${RUN_NAME}.json"
 echo "Source revision: $(git rev-parse HEAD)"
 echo "Report: $REPORT"
 
 # Never preserve arbitrary environment variables or credentials under sudo.
-if (( ADAPTIVE_STEPS > 0 )); then
+if (( ISOLATED_AUTHORITY > 0 )); then
+  sudo "$PY" scripts/run_integrated_authority.py \
+    --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
+    --etcd-containers "${CONTAINERS[@]}" --report "$REPORT"
+elif (( ADAPTIVE_STEPS > 0 )); then
   sudo --preserve-env=EH_ADVERSARY_BASE_URL,EH_ADVERSARY_MODEL,EH_ADVERSARY_API_KEY \
     "$PY" scripts/run_package_isolation.py \
     --etcd-endpoint http://127.0.0.1:2379 \
@@ -160,7 +170,9 @@ fi
 "$PY" scripts/verify_package_isolation.py "$REPORT"
 (
   cd "$(dirname "$REPORT")"
-  sha256sum "$(basename "$REPORT")" > "$(basename "$REPORT").sha256"
+  if (( ISOLATED_AUTHORITY == 0 )); then
+    sha256sum "$(basename "$REPORT")" > "$(basename "$REPORT").sha256"
+  fi
   sha256sum -c "$(basename "$REPORT").sha256"
 )
 echo "PASS: original report preserved at $REPORT"

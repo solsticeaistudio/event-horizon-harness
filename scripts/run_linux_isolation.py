@@ -662,10 +662,28 @@ def stage_effect_service(run: Path) -> Path:
 
 
 def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, *, stop_mode="requested",
-              package_lab=None) -> tuple[dict, dict, str]:
+              package_lab=None, authority_session=None) -> tuple[dict, dict, str]:
+    if authority_session is not None and (
+        broker is not None or package_lab is None or package_lab.authority_config is None
+    ):
+        raise ValueError("isolated authority requires package+etcd and forbids a local broker")
     import resource
     run = Path(tempfile.mkdtemp(prefix="ehk-", dir="/var/tmp"))
     run.chmod(0o711)
+    content = DATASET if package_lab is None else package_lab.artifact.content
+    resource_id = "synthetic-dataset" if package_lab is None else package_lab.artifact.resource_id
+    request = ActionRequest("dataset-read", run.name, "attacker-agent", "object.read",
+                            resource_id, "exec-1", {"offset": 0, "length": len(content)}, "read approved inert bytes")
+    if authority_session is not None:
+        from scripts.integrated_authority_session import evidence_digest
+        capability, spare, context = authority_session.authorize_pair(request, manifest)
+        issuer_public, issuer_key_id = authority_session.public_key_pem, authority_session.key_id
+        package_lab.fault_capability = authority_session.fault_capability
+    else:
+        context = authority_context(request, time.time(), measurement=digest(manifest["artifacts"]))
+        capability = broker.issue(request, **issue_options(context), max_output_bytes=512)
+        spare = broker.issue(request, **issue_options(context), max_output_bytes=512)
+        issuer_public, issuer_key_id = broker.public_key_pem, broker.key_id
     control = run / "control"
     control.mkdir(mode=0o700)
     (control / "synthetic-secret").write_text("synthetic fixture, never an infrastructure credential")
@@ -700,17 +718,10 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     config = make_config()
     (jail / "config.json").write_bytes(canonical_bytes(config))
     (jail / "config.json").chmod(0o444)
-    content = DATASET if package_lab is None else package_lab.artifact.content
-    resource_id = "synthetic-dataset" if package_lab is None else package_lab.artifact.resource_id
-    request = ActionRequest("dataset-read", run.name, "attacker-agent", "object.read",
-                            resource_id, "exec-1", {"offset": 0, "length": len(content)}, "read approved inert bytes")
-    context = authority_context(request, time.time(), measurement=digest(manifest["artifacts"]))
-    capability = broker.issue(request, **issue_options(context), max_output_bytes=512)
-    spare = broker.issue(request, **issue_options(context), max_output_bytes=512)
     message = effect_message(request, capability)
     service_config = {
         "session_id": request.session_id, "vm_uid": VM_UID, "dataset": content, "resource_id": resource_id,
-        "public_key_pem": broker.public_key_pem, "key_id": broker.key_id,
+        "public_key_pem": issuer_public, "key_id": issuer_key_id,
         "verification_context": verify_options(context),
         "replay_database": str(state / "replay.sqlite3"), "decay_database": str(state / "decay.sqlite3"),
     }
@@ -771,6 +782,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             "attestation_mode": "tpm2-requested" if manifest.get("tpm2_enabled") else "synthetic-fixture",
             "session_id": request.session_id, "capability_id": capability.claims.capability_id,
             **({"package_context": package_lab.context()} if package_lab is not None else {}),
+            **({"isolated_authority_digest": evidence_digest(authority_session.evidence)}
+               if authority_session else {}),
         }, source_id="host-supervisor")["receipt"])
         with (control / "service.log").open("wb") as service_log:
             service_command = [
@@ -899,6 +912,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 if response["success"] or response["effect_state"] != "not-started":
                     raise RuntimeError(f"forbidden request not denied: {name}")
             observed["denied_cases"] = list(cases)
+            if authority_session is not None:
+                package_lab.before_authorized(channel, message, receiver)
             response = guest_effect(channel, message)
             if not response["success"] or response["output"] != content:
                 raise RuntimeError(f"authorized dataset read failed: {response}")
@@ -906,6 +921,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             if guest_effect(channel, message)["success"]:
                 raise RuntimeError("replay succeeded")
             observed["replay_denied"] = True
+            if authority_session is not None:
+                observed["integrated_gateway"] = package_lab.after_authorized(channel, message, receiver)
             if package_lab is not None:
                 observed["package"] = package_lab.observe(service, channel, response, message)
             observed["forbidden_vsock_port_diagnostic"] = send_frame(channel, {"type": "forbidden_port"})
@@ -921,8 +938,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             observed["scratch_write_independently_observed"] = True
             if package_lab is not None and package_lab.authority_config is not None:
                 authority = package_lab.observe_authority(service_config, capability)
-                if authority["record_count"] != 1:
-                    raise RuntimeError("external etcd authority consumption count is not one")
+                if authority.get("primary_record_count", authority["record_count"]) != 1:
+                    raise RuntimeError("external etcd primary authority consumption count is not one")
                 observed["authority_oracle"] = authority
                 count = authority["record_count"]
             else:
@@ -1002,6 +1019,10 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             observed["retired_effect_endpoint_unreachable"] = True
         else:
             raise RuntimeError("retired effect endpoint remains reachable")
+    if authority_session is not None:
+        authority_session.close()
+        from scripts.integrated_authority_session import evidence_digest
+        observed["isolated_authority_digest"] = evidence_digest(authority_session.evidence)
     for event_type, payload in (("isolation.observed", observed), ("teardown.verified", teardown)):
         receiver.receipts.append(recorder.append(event_type, payload, source_id="host-supervisor")["receipt"])
     valid, tip = recorder.verify()
@@ -1010,6 +1031,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     report = {"run_directory": str(run), "observations": observed, "teardown": teardown,
               "evidence_chain_tip": tip, "recorder_public_key_pem": recorder.public_key_pem,
               "events": recorder.events(), "receipts": receiver.receipts}
+    if authority_session is not None:
+        report["isolated_authority"] = authority_session.evidence
     write_durable_json(control / "result.json", report)
     return report, effect_message(request, spare), attestation_mode
 

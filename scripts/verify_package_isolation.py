@@ -21,10 +21,11 @@ from scripts.verify_linux_isolation import verify_rounds  # noqa: E402
 def verify_report(report: dict) -> None:
     schema = report["schema"]
     if schema not in {"event-horizon.package-isolation.v1", "event-horizon.package-isolation.v2",
-                      "event-horizon.package-isolation.v3"}:
+                      "event-horizon.package-isolation.v3", "event-horizon.package-isolation.v4"}:
         raise ValueError("unknown package experiment evidence schema")
     adaptive = schema.endswith(".v3")
-    distributed = schema.endswith((".v2", ".v3"))
+    distributed = schema.endswith((".v2", ".v3", ".v4"))
+    integrated = schema.endswith(".v4")
     if adaptive:
         cfg = report.get("adaptive")
         if (not isinstance(cfg, dict) or set(cfg) != {
@@ -49,7 +50,8 @@ def verify_report(report: dict) -> None:
             raise ValueError("invalid pinned distributed authority context")
     elif authority != {"backend": "sqlite"}:
         raise ValueError("local package evidence cannot advertise distributed authority")
-    verify_rounds(report, schema=schema, triggers=["requested-stop"] * 3)
+    verify_rounds(report, schema=schema, triggers=(["requested-stop", "requested-stop", "supervisor-channel-closed"]
+                                                 if integrated else ["requested-stop"] * 3))
     for index, run in enumerate(report["rounds"]):
         observed = run["observations"]
         package = observed["package"]
@@ -67,18 +69,18 @@ def verify_report(report: dict) -> None:
                     or context.get("etcd_cluster_id") != authority["cluster_id"]):
                 raise ValueError("round's signed context does not bind the pinned etcd authority")
             oracle = observed.get("authority_oracle")
-            if not isinstance(oracle, dict) or set(oracle) != {
+            if not isinstance(oracle, dict) or set(oracle) != ({
                 "backend", "cluster_id", "revision", "raft_term", "record_count",
                 "capability_id", "claims_digest", "expires_at",
                 "record_integrity_checked", "source",
-            }:
+            } | ({"primary_record_count", "additional_consumed_ids"} if integrated else set())):
                 raise ValueError("distributed replay oracle is absent or malformed")
             if (oracle["backend"] != "etcd"
                     or oracle["cluster_id"] != authority["cluster_id"]
                     or oracle["source"] != authority["oracle"]
                     or oracle["record_integrity_checked"] is not True
                     or type(oracle["record_count"]) is not int
-                    or oracle["record_count"] != 1
+                    or oracle.get("primary_record_count", oracle["record_count"]) != 1
                     or any(type(oracle[name]) is not int or oracle[name] <= 0
                            for name in ("revision", "raft_term", "expires_at"))
                     or not isinstance(oracle["claims_digest"], str)
@@ -186,7 +188,8 @@ def verify_report(report: dict) -> None:
                       "authoritative_evidence_outside_service_root"):
             if package[field] is not True:
                 raise ValueError(f"missing package boundary observation: {field}")
-        if (observed["useful_package_read_and_summary"] is not True or observed["host_consumption_count"] != 1
+        if (observed["useful_package_read_and_summary"] is not True or observed["host_consumption_count"] != (
+                observed["authority_oracle"]["record_count"] if integrated else 1)
                 or observed["replay_denied"] is not True or package["ambiguous_outcomes"] != []):
             raise ValueError("useful work, budget, or outcome check failed")
         if index and "prior_session_capability" not in observed["denied_cases"]:
@@ -197,6 +200,10 @@ def verify_report(report: dict) -> None:
                 raise ValueError("invalid measured duration")
         if package["automatic_attack_detection"] is not False or package["detection_delay_ms"] is not None:
             raise ValueError("this lab does not measure automatic detection")
+
+    if integrated:
+        from scripts.verify_integrated_authority import verify_integrated
+        verify_integrated(report)
 
 
 def main() -> int:
