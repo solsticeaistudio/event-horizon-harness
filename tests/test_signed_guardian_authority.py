@@ -253,7 +253,7 @@ class SignedGuardianSignerTests(unittest.TestCase):
             self.signer.issue(self.request, challenge, approvals, compiled_ceiling=forged)
         capability = self.signer.issue(self.request, challenge, approvals)
         self.assertEqual(capability.claims.compiled_ceiling["maximum_calls"], original.maximum_calls)
-        self.assertEqual(capability.claims.compiled_ceiling["data_classes"], list(original.data_classes))
+        self.assertEqual(tuple(capability.claims.compiled_ceiling["data_classes"]), original.data_classes)
         verifier = CapabilityVerifier(self.broker.public_key_pem, self.broker.key_id)
         verifier.verify_and_consume(capability, self.request, **verify_options(self.context))
 
