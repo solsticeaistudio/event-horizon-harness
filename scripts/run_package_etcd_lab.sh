@@ -22,6 +22,10 @@ if [[ "${1:-}" == "--bridged-authority" && $# == 1 ]]; then
   BRIDGED_AUTHORITY=1
   shift
 fi
+if [[ "${1:-}" == "--bridged-recipient" && $# == 1 ]]; then
+  BRIDGED_RECIPIENT=1
+  shift
+fi
 if [[ "${1:-}" == "--effect-crash" && $# == 1 ]]; then
   EFFECT_CRASH=1
   shift
