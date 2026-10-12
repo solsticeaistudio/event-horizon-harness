@@ -50,6 +50,7 @@ class IsolatedSession:
         self.distinct = distinct_uids
         self.source_commit = source_commit
         self.services = {}
+        self.clients = []
         self.sockets = []
         self.threads = []
         self.audit = {}
@@ -66,7 +67,8 @@ class IsolatedSession:
                        f"--regid={uid}", "--clear-groups", "--bounding-set=-all",
                        "--no-new-privs", "--", *command]
         return subprocess.Popen(command, cwd=self.stage, env=self.env, pass_fds=fds,
-                                stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                start_new_session=True)
 
     def _service(self, role, args):
         listener = _bind(self.base / 'sockets' / (role + '.sock'))
@@ -79,6 +81,8 @@ class IsolatedSession:
         ], UIDS[role], fds=(listener.fileno(),))
         self.services[role] = proc
         hello = _ready(proc, 'signer-ready' if role == 'signer' else 'guardian-ready')
+        if role != 'signer' and hello.get('identity') != role:
+            raise RuntimeError('guardian boot identity substitution')
         expected_uid = UIDS[role] if self.distinct else os.geteuid()
         status = Path(f'/proc/{proc.pid}/status').read_text()
         if hello['uid'] != expected_uid or f'Uid:\t{expected_uid}\t' not in status:
@@ -149,6 +153,7 @@ class IsolatedSession:
                          'signer_pid':self.services['signer'].pid,'previous_issue':previous}
         proc=self._spawn('event_horizon.integrated_authority_client',[],self.coordinator_uid,
                          stdin=subprocess.PIPE)
+        self.clients.append(proc)
         hello = _ready(proc, 'coordinator-ready')
         status = Path(f'/proc/{proc.pid}/status').read_text()
         if hello['uid'] != self.coordinator_uid or f'Uid:\t{self.coordinator_uid}\t' not in status:
@@ -231,6 +236,9 @@ class IsolatedSession:
                 raise RuntimeError('authority process crashed during outage')
             self.evidence['scenarios'].append({'name':name,'outcome':'unavailable-no-issuance',
                 'guest_invoked':False,'effect_dispatches':0,'resumed_healthy':True})
+        fault_result=self.client('legitimate');self._check_transcript(fault_result)
+        self.fault_capability=IssuedCapability.from_dict(fault_result['transcript'][-1]['answer']['result']['capability'])
+        self.evidence['fault_authorization']=fault_result['transcript'][-1]
         spare_result=self.client('legitimate');self._check_transcript(spare_result)
         spare=IssuedCapability.from_dict(spare_result['transcript'][-1]['answer']['result']['capability'])
         self.evidence['spare_authorization']=spare_result['transcript'][-1]
@@ -244,17 +252,19 @@ class IsolatedSession:
     def close(self):
         if getattr(self, '_closed', False): return
         self._closed = True
-        for proc in self.services.values():
-            if proc.poll() is None: proc.terminate()
-        for proc in self.services.values():
+        processes=[*self.services.values(),*self.clients]
+        for proc in processes:
+            if proc.poll() is None: os.killpg(proc.pid, signal.SIGTERM)
+        for proc in processes:
             try: proc.wait(timeout=3)
-            except subprocess.TimeoutExpired: proc.kill();proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL); proc.wait(timeout=2)
         for thread in self.threads: thread.join(timeout=2)
         for proc in self.services.values():
             proc.stdout.close(); proc.stderr.close()
         for sock in self.sockets: sock.close()
         self.evidence['service_audit']=self.audit
-        self.evidence['process_cleanup']=all(p.poll() is not None for p in self.services.values())
+        self.evidence['process_cleanup']=all(p.poll() is not None for p in processes)
         if self.temp:
             self.temp.cleanup()
             self.evidence['temporary_paths_removed']=not self.base.exists()

@@ -81,6 +81,25 @@ class IndependentPackageOracleTests(unittest.TestCase):
         self.assertEqual(base64.b64decode(query["key"]), PREFIX.encode())
         self.assertEqual(base64.b64decode(query["range_end"]), PREFIX[:-1].encode() + b"0")
 
+    def test_known_retired_fault_consumption_is_distinct_from_primary(self):
+        fault = "cap_aaaaaaaaaaaaaaaaaaaaaaaa"
+        candidate = reply()
+        value = candidate["responses"][0]["response_range"]
+        value["count"] = "2"
+        value["kvs"].append({"key": b64((PREFIX + fault).encode()),
+                             "value": b64(signed_record(binding="b" * 64))})
+        options = dict(cluster_id=CLUSTER, session_id="ehk-abc123", capability_id=CAP,
+                       claims_digest=BINDING, expires_at=EXPIRY,
+                       extra_bindings={fault: ("b" * 64, EXPIRY)})
+        observed = inspect_committed_consumption(lambda _: candidate, **options)
+        self.assertEqual(observed["record_count"], 2)
+        self.assertEqual(observed["primary_record_count"], 1)
+        self.assertEqual(observed["additional_consumed_ids"], [fault])
+        with self.assertRaises(ValueError): observe(lambda _: candidate)
+        value["kvs"][1]["value"] = b64(signed_record(binding="c" * 64))
+        with self.assertRaises(ValueError):
+            inspect_committed_consumption(lambda _: candidate, **options)
+
     def test_oracle_rejects_missing_extra_cross_session_or_wrong_cluster(self):
         scenarios = (
             reply(count=0),

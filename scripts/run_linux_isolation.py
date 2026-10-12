@@ -678,6 +678,7 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         from scripts.integrated_authority_session import evidence_digest
         capability, spare, context = authority_session.authorize_pair(request, manifest)
         issuer_public, issuer_key_id = authority_session.public_key_pem, authority_session.key_id
+        package_lab.fault_capability = authority_session.fault_capability
     else:
         context = authority_context(request, time.time(), measurement=digest(manifest["artifacts"]))
         capability = broker.issue(request, **issue_options(context), max_output_bytes=512)
@@ -937,8 +938,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             observed["scratch_write_independently_observed"] = True
             if package_lab is not None and package_lab.authority_config is not None:
                 authority = package_lab.observe_authority(service_config, capability)
-                if authority["record_count"] != 1:
-                    raise RuntimeError("external etcd authority consumption count is not one")
+                if authority.get("primary_record_count", authority["record_count"]) != 1:
+                    raise RuntimeError("external etcd primary authority consumption count is not one")
                 observed["authority_oracle"] = authority
                 count = authority["record_count"]
             else:

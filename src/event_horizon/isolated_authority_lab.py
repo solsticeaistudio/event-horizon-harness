@@ -247,7 +247,7 @@ def signer_main(arguments) -> None:
         expected = session.request if session else fixture_request()
         if request.canonical_payload() != expected.canonical_payload():
             raise GuardianAuthorityError("only exact approved fixture request is issuable")
-        if session and issued_count >= 2:
+        if session and issued_count >= 3:
             raise GuardianAuthorityError("session issuance budget exhausted")
         issued = issuer.issue(
             request, message["challenge"], approvals,
@@ -262,11 +262,11 @@ def signer_main(arguments) -> None:
             result = handle(message)
         except (ValueError, TypeError, KeyError, PermissionError) as exc:
             if session:
-                print(json.dumps({"audit": "signer", "message_digest": digest(message),
+                print(json.dumps({"audit": "signer", "method": message.get("method"), "message_digest": digest(message),
                                   "accepted": False, "error_class": type(exc).__name__}), flush=True)
             raise
         if session:
-            print(json.dumps({"audit": "signer", "message_digest": digest(message),
+            print(json.dumps({"audit": "signer", "method": message.get("method"), "message_digest": digest(message),
                               "accepted": True, "result_digest": digest(result)}), flush=True)
         return result
 

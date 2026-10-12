@@ -28,7 +28,8 @@ actual `dataset-read` request, ephemeral `ehk-*` session, package artifact,
 exact arguments, executor, synthetic measurement of Firecracker asset digests,
 and a 512-byte ceiling. No RPC accepts a new policy, compiled ceiling, verifier
 pin or measurement. The signer compiles its ceiling locally and limits issuance
-to the usable capability plus one unused prior-session negative-control token.
+to three independently approved tokens: the useful operation, a retired quorum-fault
+probe, and an unused prior-session negative-control token.
 
 ## Trust architecture and execution order
 
@@ -73,14 +74,15 @@ arguments, output ceiling, policy, executor and attestation; direct broker RPC
 bypass; and signer-key substitution. The separate UID campaign also probes
 signer config/memory access and wrong-UID socket admission. SIGSTOP faults test
 missing signer/guardian availability followed by healthy resumed service.
-The same session's legitimate usable and spare capabilities are positive
+The same session's independently issued capabilities are positive
 controls; failed authority attempts happen before a VM or effect handler exists.
 
 The actual guest path checks changed resource/executor/ceiling/key envelopes,
 replay and prior-session capabilities. Two Docker etcd nodes are paused to lose
 majority before a valid request: direct host observation must show no handler
 dispatch. Consumption remains unknown during the outage; a linearizable read
-after recovery must establish zero before proceeding. A valid request then
+after recovery establishes whether that token was consumed. It is retired without
+retry either way; a separately approved token supplies the healthy control. A valid request then
 succeeds while one node is paused (majority retained). Recovery must not
 resurrect its consumed authority. An unresolved dispatch or consumption outcome
 fails the run rather than becoming a successful denial.
@@ -139,3 +141,10 @@ prove cleanup after every host crash or power loss. Interrupted effects after
 dispatch remain potentially committed; this campaign injects quorum loss before
 dispatch. Automatic attack detection is absent. The worker has no added seccomp
 filter; process hardening and independent reproduction remain further work.
+
+The final oracle records the total session consumption count and the primary
+capability's count separately. Exactly one primary consumption and one handler
+dispatch are required. The retired fault token may also have one committed
+consumption without an effect. Its exact signed claims must match that record;
+no unexpected third record is allowed. This is an availability cost of an
+ambiguous consensus reply, not permission to retry an uncertain operation.

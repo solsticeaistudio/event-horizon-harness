@@ -28,7 +28,7 @@ def verify_authority(value, *, require_os=True):
                 'authority network was not isolated')
         require(value['wrong_uid'] in {'structured-denial','early-peer-disconnect'},'missing wrong UID control')
     caps=[]
-    for field in ('authorization','spare_authorization'):
+    for field in ('authorization','spare_authorization','fault_authorization'):
         record=value[field];message=record['message'];answer=record['answer']
         require(answer['ok'] is True and message['request']==request.canonical_payload(),
                 'not the exact supervisor request')
@@ -47,7 +47,7 @@ def verify_authority(value, *, require_os=True):
                     value['request_digest']==request.request_digest and
                     value['policy_digest']==session.policy.policy_digest,'authority digest mismatch')
         caps.append(cap)
-    require(caps[0].claims.capability_id!=caps[1].claims.capability_id,'spare capability duplicated')
+    require(len({c.claims.capability_id for c in caps})==3,'capability identifiers duplicated')
     require(value['process_cleanup'] is True and value['temporary_paths_removed'] is True,
             'authority cleanup missing')
     expected=set(AUTHORITY_ATTACKS)|{'issuance_budget_exhausted','read_signer_config','read_signer_memory',
@@ -56,8 +56,10 @@ def verify_authority(value, *, require_os=True):
     require(len(scenarios)==len(expected) and {x['name'] for x in scenarios}==expected,
             'authority negative controls missing or duplicated')
     audit=value['service_audit']['signer']
-    # Exactly two trusted signer success records may contain a capability.
-    for field in ('authorization','spare_authorization'):
+    require(sum(e.get('method')=='issue' and e.get('accepted') is True for e in audit)==3,
+            'unexpected additional capability issuance')
+    # Only primary, unused prior-session and retired fault tokens may be issued.
+    for field in ('authorization','spare_authorization','fault_authorization'):
         record=value[field]
         require(any(e.get('message_digest')==digest(record['message']) and e.get('accepted') is True
                     and e.get('result_digest')==digest(record['answer']['result']) for e in audit),
@@ -133,4 +135,12 @@ def verify_integrated(report):
                     not any(e['event_type'] in {'execution.dispatch','execution.completed','execution.indeterminate'} for e in between),
                     'negative test lacks primary no-dispatch evidence')
         loss=next(c for c in cases if c['name']=='etcd_majority_loss')
-        require(loss['consumption_after_recovery']['record_count']==0,'quorum loss consumed authority unexpectedly')
+        retired=loss['consumption_after_recovery']; fault=caps[2]
+        require(retired['record_count'] in (0,1) and retired['token_retired_without_retry'] is True and
+                retired['capability_id']==fault.claims.capability_id and
+                retired['claims_digest']==digest(fault.claims.to_dict()),'uncertain token was not safely retired')
+        extras=oracle['additional_consumed_ids']
+        require(extras in ([],[fault.claims.capability_id]) and oracle['record_count']==1+len(extras)
+                and oracle['primary_record_count']==1,'unexpected consumption beyond primary/fault tokens')
+        if retired['record_count']==1:
+            require(extras==[fault.claims.capability_id],'consumed fault token disappeared after recovery')

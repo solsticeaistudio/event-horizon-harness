@@ -70,6 +70,7 @@ def inspect_committed_consumption(
     capability_id: str,
     claims_digest: str,
     expires_at: int,
+    extra_bindings: Mapping[str, tuple[str, int]] | None = None,
 ) -> dict[str, Any]:
     """Linearizable range of one session's entire replay partition.
 
@@ -98,7 +99,7 @@ def inspect_committed_consumption(
         "compare": [],
         "success": [{"requestRange": {
             "key": _b64(prefix), "range_end": _b64(end),
-            "serializable": False, "limit": "2",
+            "serializable": False, "limit": "3" if extra_bindings else "2",
         }}],
         "failure": [],
     })
@@ -121,33 +122,47 @@ def inspect_committed_consumption(
     if not isinstance(value, Mapping):
         raise ValueError("etcd oracle has no range response")
     entries = value.get("kvs")
-    if not isinstance(entries, list) or len(entries) != 1:
-        raise ValueError("expected exactly one committed capability consumption")
-    if "count" in value and (not str(value["count"]).isdecimal() or int(value["count"]) != 1):
-        raise ValueError("etcd oracle count is not one")
-    row = entries[0]
-    if not isinstance(row, Mapping):
-        raise ValueError("etcd oracle record malformed")
-    expected_key = prefix + capability_id.encode("ascii")
-    if _decode(row.get("key")) != expected_key:
-        raise ValueError("etcd oracle found an unexpected consumed capability")
-    record = strict_json_loads(_decode(row.get("value")))
-    if not isinstance(record, Mapping) or set(record) != {
-        "schema", "claims_digest", "expires_at", "consumed_at",
-    }:
-        raise ValueError("etcd oracle replay record schema invalid")
-    if (record["schema"] != "eh.capability-consumption.v1"
-            or record["claims_digest"] != claims_digest
-            or type(record["expires_at"]) is not int
-            or record["expires_at"] != expires_at
-            or type(record["consumed_at"]) is not int):
-        raise ValueError("etcd oracle found a mismatched replay binding")
+    if extra_bindings is not None:
+        if (not isinstance(extra_bindings, Mapping) or len(extra_bindings) != 1
+                or capability_id in extra_bindings):
+            raise ValueError("integrated oracle allows only one distinct retired fault token")
+    expected = {capability_id: (claims_digest, expires_at), **(extra_bindings or {})}
+    if not isinstance(entries, list) or not 1 <= len(entries) <= len(expected):
+        raise ValueError("unexpected committed capability consumption count")
+    if "count" in value and str(value["count"]) != str(len(entries)):
+        raise ValueError("etcd oracle count contradicts entries")
+    observed_ids = set()
+    for row in entries:
+        if not isinstance(row, Mapping):
+            raise ValueError("etcd oracle row malformed")
+        raw_key = _decode(row.get("key"))
+        if not raw_key.startswith(prefix):
+            raise ValueError("etcd oracle partition mismatch")
+        identifier = raw_key[len(prefix):].decode("ascii")
+        if identifier not in expected or identifier in observed_ids:
+            raise ValueError("etcd oracle found unexpected or duplicated consumption")
+        observed_ids.add(identifier)
+        record = strict_json_loads(_decode(row.get("value")))
+        if not isinstance(record, Mapping) or set(record) != {
+            "schema", "claims_digest", "expires_at", "consumed_at",
+        }:
+            raise ValueError("etcd oracle replay record schema invalid")
+        expected_digest, expected_expiry = expected[identifier]
+        if (record["schema"] != "eh.capability-consumption.v1"
+                or record["claims_digest"] != expected_digest
+                or type(record["expires_at"]) is not int or record["expires_at"] != expected_expiry
+                or type(record["consumed_at"]) is not int):
+            raise ValueError("etcd oracle found mismatched replay binding")
+    if capability_id not in observed_ids:
+        raise ValueError("primary consumption missing")
     return {
         "backend": "etcd",
         "cluster_id": cluster_id,
         "revision": revision,
         "raft_term": term,
-        "record_count": 1,
+        "record_count": len(entries),
+        **({"primary_record_count": 1, "additional_consumed_ids": sorted(observed_ids - {capability_id})}
+           if extra_bindings else {}),
         "capability_id": capability_id,
         "claims_digest": claims_digest,
         "expires_at": expires_at,

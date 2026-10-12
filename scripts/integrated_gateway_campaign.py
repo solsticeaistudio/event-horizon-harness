@@ -5,7 +5,9 @@ import subprocess
 import time
 
 from event_horizon.authority_backends import EtcdGatewayConfig, EtcdV3TransactionTransport
-from scripts.package_authority_oracle import _b64
+from scripts.package_authority_oracle import _b64, inspect_committed_consumption
+from event_horizon.canonical import digest, strict_json_loads
+import base64
 from scripts.run_linux_isolation import guest_effect
 from scripts.run_package_isolation import PackageLab
 
@@ -63,7 +65,7 @@ class OwnedQuorum:
                 if time.monotonic()>deadline: raise
                 time.sleep(.1)
 
-    def empty(self, session):
+    def retired_consumption(self, session, fault):
         prefix=f'/event-horizon/replay/v1/{session}/external-effect/'.encode()
         result=self.transport({'compare':[], 'success':[{'requestRange':{
             'key':_b64(prefix),'range_end':_b64(prefix[:-1]+bytes([prefix[-1]+1])),
@@ -71,9 +73,18 @@ class OwnedQuorum:
         if str(result['header']['cluster_id'])!=self.config['etcd_cluster_id']:
             raise RuntimeError('oracle cluster mismatch')
         value=result['responses'][0]['response_range']
-        if value.get('kvs') or int(value.get('count',0))!=0:
-            raise RuntimeError('unexpected committed authority before dispatch')
-        return {'record_count':0,'cluster_id':self.config['etcd_cluster_id'],
+        rows=value.get('kvs', [])
+        if len(rows)>1 or int(value.get('count',0))!=len(rows):
+            raise RuntimeError('unexpected pre-dispatch authority records')
+        if rows:
+            if base64.b64decode(rows[0]['key'])!=prefix+fault.claims.capability_id.encode():
+                raise RuntimeError('wrong capability consumed during outage')
+            record=strict_json_loads(base64.b64decode(rows[0]['value']))
+            if (record['claims_digest']!=digest(fault.claims.to_dict()) or
+                    record['expires_at']!=fault.claims.expires_at):
+                raise RuntimeError('fault consumption binding changed')
+        return {'record_count':len(rows),'capability_id':fault.claims.capability_id,
+                'claims_digest':digest(fault.claims.to_dict()),'token_retired_without_retry':True,'cluster_id':self.config['etcd_cluster_id'],
                 'revision':int(result['header']['revision']),'raft_term':int(result['header']['raft_term'])}
 
 
@@ -117,12 +128,14 @@ class IntegratedPackageLab(PackageLab):
             self.deny(name,channel,attempt,receiver)
         self.quorum.pause([1,2])
         try:
-            self.deny('etcd_majority_loss',channel,message,receiver)
+            attempt=copy.deepcopy(message)
+            attempt['capability']=self.fault_capability.to_dict()
+            self.deny('etcd_majority_loss',channel,attempt,receiver)
         finally:
             restored=self.quorum.restore()
-        # Consumption may be indeterminate during the outage; do not call it
-        # uncommitted until an independent linearizable read establishes zero.
-        empty=self.quorum.empty(message['request']['session_id'])
+        # A timed-out consensus operation can commit later. Retire that token;
+        # never retry it or equate unknown consumption with an external effect.
+        empty=self.quorum.retired_consumption(message['request']['session_id'], self.fault_capability)
         self.campaign[-1]['consumption_after_recovery']=empty
         self.recovery_header=restored
         self.quorum.pause([2])
@@ -138,6 +151,14 @@ class IntegratedPackageLab(PackageLab):
                 'recovered_cluster_id':str(header['cluster_id']),
                 'containers':self.quorum.identities,'member_headers':self.quorum.member_headers,
                 'dispatches':receiver.dispatches}
+
+    def observe_authority(self, config, capability):
+        fault=self.fault_capability
+        return inspect_committed_consumption(self.quorum.transport,
+            cluster_id=config['etcd_cluster_id'], session_id=config['session_id'],
+            capability_id=capability.claims.capability_id,
+            claims_digest=digest(capability.claims.to_dict()), expires_at=capability.claims.expires_at,
+            extra_bindings={fault.claims.capability_id:(digest(fault.claims.to_dict()), fault.claims.expires_at)})
 
     def close(self):
         try:self.quorum.restore()
