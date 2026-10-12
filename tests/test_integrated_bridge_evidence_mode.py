@@ -87,5 +87,33 @@ class BridgedEvidenceModeTests(unittest.TestCase):
             verify_gateway_process_mode(doc)
 
 
+    def test_new_process_identity_binding_is_in_signed_dispatch(self):
+        document = fixture()
+        document["source_commit"] = "f" * 40
+        for index, round_record in enumerate(document["rounds"]):
+            marker = round_record["observations"]["gateway_process_bridge"]
+            marker["identity_binding"] = "pidfd-dispatch-v1"
+            round_record["events"] = [{
+                "event_type": "execution.dispatch",
+                "source_id": "host-effect-service",
+                "payload": {
+                    "request_digest": "a" * 64,
+                    "dispatch_count": 1,
+                    "gateway_pid": marker["gateway_pid"],
+                },
+            }]
+        verify_gateway_process_mode(document)
+        document["rounds"][1]["events"][0]["payload"]["gateway_pid"] += 1
+        with self.assertRaises(ValueError):
+            verify_gateway_process_mode(document)
+
+    def test_new_commit_cannot_claim_legacy_pid_marker(self):
+        document = fixture()
+        document["source_commit"] = "f" * 40
+        with self.assertRaises(ValueError):
+            verify_gateway_process_mode(document)
+
+
+
 if __name__ == "__main__":
     unittest.main()
