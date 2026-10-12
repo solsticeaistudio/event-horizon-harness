@@ -209,6 +209,21 @@ class PinnedGuardianCapabilityIssuer:
             raise GuardianAuthorityError("trusted ceiling has invalid integrity") from exc
         if compiled_ceiling.policy_version != policy.policy_id:
             raise GuardianAuthorityError("trusted ceiling policy version mismatch")
+        # Hash integrity is not compiler provenance. Enforce the signer's
+        # conservative, non-RPC-adjustable compiler guardrails at startup.
+        # Deployment-specific broader permissions require a separately reviewed
+        # trusted compiler/policy contract; a self-hashed object is insufficient.
+        limits = {
+            "maximum_read_bytes": 1_048_576,
+            "maximum_write_bytes": 1_048_576,
+            "maximum_calls": 256,
+            "maximum_parallelism": 16,
+            "maximum_duration_seconds": 300,
+        }
+        if (not set(compiled_ceiling.data_classes).issubset({"public", "internal"})
+                or any(getattr(compiled_ceiling, name) > limit
+                       for name, limit in limits.items())):
+            raise GuardianAuthorityError("trusted ceiling exceeds signer safety limits")
         for action in compiled_ceiling.actions:
             rule = policy.operations.get(action)
             if rule is None:
