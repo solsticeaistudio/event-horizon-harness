@@ -240,6 +240,26 @@ class SignedGuardianSignerTests(unittest.TestCase):
                 trusted_compiled_ceiling=altered,
             )
 
+    def test_constructor_rejects_self_hashed_forged_budget_or_sensitive_classes(self):
+        original = self.context["compiled_ceiling"]
+        for kind, fields in (
+            ("billion_calls", {"maximum_calls": 10**9}),
+            ("secret_data", {"data_classes": ("restricted", "secret")}),
+            ("oversized_read", {"maximum_read_bytes": 2**40}),
+            ("excessive_parallelism", {"maximum_parallelism": 2**20}),
+        ):
+            with self.subTest(kind=kind):
+                forged = replace(original, **fields)
+                forged = replace(forged, compiled_digest=digest(forged.unsigned_dict()))
+                forged.verify_integrity()
+                with self.assertRaises(GuardianAuthorityError):
+                    PinnedGuardianCapabilityIssuer(
+                        broker=self.broker,
+                        static_policy=self.policy,
+                        verifier=self.verifier,
+                        trusted_compiled_ceiling=forged,
+                    )
+
     def test_forged_budget_and_secret_classes_cannot_enter_issue_api(self):
         original = self.context["compiled_ceiling"]
         forged = replace(original, maximum_calls=10**9, data_classes=("restricted", "secret"))
