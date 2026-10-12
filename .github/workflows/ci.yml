@@ -41,6 +41,20 @@ jobs:
         run: python scripts/lint_python.py
       - name: Run Python tests
         run: python -m unittest discover -s tests -v
+      - name: Kill real Linux gateway subprocesses at five effect checkpoints
+        run: |
+          python scripts/run_effect_crash_campaign.py --backend sqlite --report "$RUNNER_TEMP/ehh-effect-crash.json"
+          python scripts/verify_effect_crash_campaign.py "$RUNNER_TEMP/ehh-effect-crash.json"
+      - name: Publish signed host-process SIGKILL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ehh-effect-crash-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ehh-effect-crash.json
+            ${{ runner.temp }}/ehh-effect-crash.json.sha256
+          if-no-files-found: warn
+          retention-days: 14
       - name: Attack actual trusted gateway process over Unix sockets
         run: python scripts/run_gateway_socket_campaign.py --report "$RUNNER_TEMP/ehh-gateway-attack.json"
       - name: Publish actual-gateway attack outcomes
