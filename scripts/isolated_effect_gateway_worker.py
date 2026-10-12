@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -99,6 +100,7 @@ def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None) -
                 recorder.append("execution.dispatch", {
                     "request_digest": request.request_digest,
                     "dispatch_count": dispatch_count,
+                    "gateway_pid": os.getpid(),
                 })
                 return original(request)
 
