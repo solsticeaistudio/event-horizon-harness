@@ -15,6 +15,8 @@ import json
 from typing import Any, Callable, Mapping, Protocol
 
 from .broker import CapabilityVerifier
+from .canonical import digest
+from .effect_outcome_journal import DurableEffectJournal
 from .models import ActionRequest, IssuedCapability
 from .replay_state import CapabilityConsumptionStore
 
@@ -49,6 +51,8 @@ class TrustedEffectGateway:
         event_prefix: str = "gateway",
         tenant: str = "default",
         environment: str = "synthetic",
+        outcome_journal: DurableEffectJournal | None = None,
+        pre_dispatch_rules: Mapping[str, Callable[[ActionRequest, Any], bool]] | None = None,
     ):
         if event_prefix not in {"gateway", "execution"}:
             raise ValueError("unrecognized evidence event namespace")
@@ -58,9 +62,16 @@ class TrustedEffectGateway:
         if not effects or any(not isinstance(name, str) or not callable(fn)
                               for name, fn in effects.items()):
             raise ValueError("gateway must have explicit trusted effect handlers")
+        if pre_dispatch_rules is not None and (
+            set(pre_dispatch_rules) - set(effects)
+            or any(not callable(rule) for rule in pre_dispatch_rules.values())
+        ):
+            raise ValueError("pre-dispatch rules must be trusted registered operation callbacks")
         self.verifier = verifier
         self.effects = dict(effects)
         self.recorder = recorder
+        self.outcome_journal = outcome_journal
+        self.pre_dispatch_rules = dict(pre_dispatch_rules or {})
 
     def _record_denial(self, request: ActionRequest, error_class: str) -> None:
         # A recorder outage must never weaken the authority decision.
@@ -115,6 +126,29 @@ class TrustedEffectGateway:
             })
         except Exception:
             return GatewayDecision(False, "not-started", "evidence-unavailable")
+        rule = self.pre_dispatch_rules.get(request.operation)
+        if rule is not None:
+            try:
+                if rule(request, claims) is not True:
+                    raise PermissionError("trusted pre-dispatch rule denied")
+            except Exception:
+                self._record_denial(request, "pre-dispatch-denied")
+                return GatewayDecision(False, "not-started", "pre-dispatch-denied")
+        if self.outcome_journal is not None:
+            try:
+                reserved = self.outcome_journal.reserve(
+                    tenant=self.tenant, environment=self.environment,
+                    capability_id=claims.capability_id,
+                    request_digest=request.request_digest,
+                    claims_digest=digest(claims.to_dict()),
+                )
+            except Exception:
+                # No durable reservation acknowledgement means NO dispatch.
+                self._record_denial(request, "effect-journal-unavailable")
+                return GatewayDecision(False, "not-started", "effect-journal-unavailable")
+            if not reserved:
+                # A prior process may have dispatched; never try again.
+                return GatewayDecision(False, "possibly-committed", "prior-dispatch-unknown")
         try:
             output = handler(request)
             encoded = json.dumps(
