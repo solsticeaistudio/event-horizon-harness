@@ -4,8 +4,9 @@ The trusted host gateway can now use `DurableEffectJournal` to atomically
 reserve a capability **before** effect handler dispatch. The reservation lives
 on disk (SQLite, `synchronous=FULL`) in a trusted, non-group-writable,
 non-world-writable directory. A new gateway instance refuses to run an effect
-whose capability was already reserved. This remains true if the first instance
-lost its acknowledgment or the client mistakenly supplies fresh replay state.
+whose capability **or logical effect identity** was already reserved. The identity
+is derived from session ID plus request ID, so another freshly issued capability
+cannot silently retry the same action after a lost acknowledgment.
 
 **Safety is conservative:** a reserved capability is treated as
 `possibly-committed`, even if the process died before calling its handler.
@@ -22,8 +23,11 @@ exactly-once effects or permit retry with a different capability.
 - A capability is already verified and consumed before the journal reservation.
   The journal is an **additional** defense against accidental re-dispatch,
   not a replacement for distributed one-use authority.
-- Each reservation binds tenant, environment, capability ID, exact request
-  digest and exact signed claims digest. Changed bindings fail closed.
+- Each reservation binds tenant, environment, logical effect key
+  (session ID + request ID), capability ID, exact request digest and signed
+  claims digest. An alternate capability for the same logical effect fails
+  closed as `possibly-committed`. A caller intentionally inventing a new
+  request ID is outside this protection; trusted request identity is required.
 - The optional `pre_dispatch_rules` are host-installed callables keyed to
   registered operations, never supplied by a guest. They may reject known
   oversized operations **before** the effect callback, but output measurement
@@ -49,7 +53,8 @@ exactly-once effects or permit retry with a different capability.
 
 The portable suite covers durable re-open, changed binding, conflicting
 recipient receipt, handler-commit-then-lost-reply, duplicate request with a fresh
-verifier, known pre-dispatch denial and journal outage. **Actual process SIGKILL,
+verifier, a new capability for the same logical request, known pre-dispatch
+denial and journal outage. **Actual process SIGKILL,
 power loss, Firecracker guest interruption and a real independent recipient
 oracle are not yet exercised.** Those require a separate privileged experiment,
 new report and explicit operator review under
