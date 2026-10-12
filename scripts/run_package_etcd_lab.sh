@@ -11,12 +11,17 @@ PY="${EHH_ISOLATION_PYTHON:-/var/tmp/event-horizon-isolation-venv/bin/python}"
 IMAGE="${EHH_LAB_ETCD_IMAGE:-quay.io/coreos/etcd:v3.6.0}"
 ADAPTIVE_STEPS=0
 ISOLATED_AUTHORITY=0
+EFFECT_CRASH=0
 if [[ "${1:-}" == "--isolated-authority" && $# == 1 ]]; then
   ISOLATED_AUTHORITY=1
   shift
 fi
+if [[ "${1:-}" == "--effect-crash" && $# == 1 ]]; then
+  EFFECT_CRASH=1
+  shift
+fi
 if (( $# > 2 )); then
-  echo "Usage: bash scripts/run_package_etcd_lab.sh [--adaptive-steps 1..4]" >&2
+  echo "Usage: bash scripts/run_package_etcd_lab.sh [--isolated-authority | --effect-crash | --adaptive-steps 1..4]" >&2
   exit 2
 fi
 if (( $# > 0 )); then
@@ -38,11 +43,11 @@ if [[ ! -x "$PY" ]]; then
   echo "Missing prepared isolation Python: $PY; follow docs/LINUX_ISOLATION.md" >&2
   exit 1
 fi
-if [[ ! -e /dev/kvm ]]; then
+if (( EFFECT_CRASH == 0 )) && [[ ! -e /dev/kvm ]]; then
   echo "/dev/kvm is missing; KVM must be configured before this lab" >&2
   exit 1
 fi
-if [[ ! -f firecracker/build/isolation/manifest.json ]]; then
+if (( EFFECT_CRASH == 0 )) && [[ ! -f firecracker/build/isolation/manifest.json ]]; then
   echo "Missing verified Firecracker build; run python3 scripts/prepare_linux_isolation.py first" >&2
   exit 1
 fi
@@ -147,12 +152,18 @@ mkdir -p artifacts/reports
 RUN_NAME="package-etcd-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 if (( ADAPTIVE_STEPS > 0 )); then RUN_NAME+="-adaptive"; fi
 if (( ISOLATED_AUTHORITY > 0 )); then RUN_NAME+="-isolated-authority"; fi
+if (( EFFECT_CRASH > 0 )); then RUN_NAME="effect-crash-$(date -u +%Y%m%dT%H%M%SZ)-$"; fi
 REPORT="artifacts/reports/${RUN_NAME}.json"
 echo "Source revision: $(git rev-parse HEAD)"
 echo "Report: $REPORT"
 
 # Never preserve arbitrary environment variables or credentials under sudo.
-if (( ISOLATED_AUTHORITY > 0 )); then
+# Crash campaign deliberately exercises host processes, not Firecracker/KVM.
+if (( EFFECT_CRASH > 0 )); then
+  "$PY" scripts/run_effect_crash_campaign.py \
+    --backend etcd --etcd-endpoint http://127.0.0.1:2379 \
+    --etcd-cluster-id "$CLUSTER_ID" --report "$REPORT"
+elif (( ISOLATED_AUTHORITY > 0 )); then
   sudo "$PY" scripts/run_integrated_authority.py \
     --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
     --etcd-containers "${CONTAINERS[@]}" --report "$REPORT"
@@ -167,10 +178,14 @@ else
     --etcd-endpoint http://127.0.0.1:2379 \
     --etcd-cluster-id "$CLUSTER_ID" --report "$REPORT"
 fi
-"$PY" scripts/verify_package_isolation.py "$REPORT"
+if (( EFFECT_CRASH > 0 )); then
+  "$PY" scripts/verify_effect_crash_campaign.py "$REPORT"
+else
+  "$PY" scripts/verify_package_isolation.py "$REPORT"
+fi
 (
   cd "$(dirname "$REPORT")"
-  if (( ISOLATED_AUTHORITY == 0 )); then
+  if (( ISOLATED_AUTHORITY == 0 && EFFECT_CRASH == 0 )); then
     sha256sum "$(basename "$REPORT")" > "$(basename "$REPORT").sha256"
   fi
   sha256sum -c "$(basename "$REPORT").sha256"
@@ -178,3 +193,6 @@ fi
 echo "PASS: original report preserved at $REPORT"
 echo "Checksum: $REPORT.sha256"
 echo "DO NOT edit the JSON; publication and independent provenance verification are separate steps."
+if (( EFFECT_CRASH > 0 )); then
+  echo "IMPORTANT: real gateway SIGKILL and etcd only; Firecracker/KVM and independent witness NOT exercised."
+fi
