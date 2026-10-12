@@ -91,9 +91,14 @@ def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None) -
         if recorder_fd is not None and boundary_config.get("observe_integrated_dispatch"):
             original = boundary.gateway.effects["object.read"]
 
+            dispatch_count = 0
+
             def observed_dispatch(request):
+                nonlocal dispatch_count
+                dispatch_count += 1
                 recorder.append("execution.dispatch", {
                     "request_digest": request.request_digest,
+                    "dispatch_count": dispatch_count,
                 })
                 return original(request)
 
