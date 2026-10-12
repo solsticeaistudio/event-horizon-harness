@@ -82,6 +82,7 @@ def verify_authority(value, *, require_os=True):
 
 BASE_MODE = 'isolated-authority-firecracker-etcd'
 BRIDGED_MODE = 'isolated-authority-firecracker-etcd-bridged'
+RECIPIENT_MODE = 'isolated-authority-firecracker-etcd-bridged-recipient'
 
 
 def verify_gateway_process_mode(report):
@@ -91,8 +92,9 @@ def verify_gateway_process_mode(report):
     teardown checks, not instead of any existing condition.
     """
     mode = report.get('experiment_mode')
-    require(mode in (BASE_MODE, BRIDGED_MODE), 'wrong experiment mode')
-    bridged = mode == BRIDGED_MODE
+    require(mode in (BASE_MODE, BRIDGED_MODE, RECIPIENT_MODE), 'wrong experiment mode')
+    bridged = mode in (BRIDGED_MODE, RECIPIENT_MODE)
+    recipient_mode = mode == RECIPIENT_MODE
     require(len(report['rounds']) == 3, 'integrated run must contain three rounds')
     for run in report['rounds']:
         observed = run['observations']
@@ -114,12 +116,39 @@ def verify_gateway_process_mode(report):
             'independent_process', 'guest_vsock_request_path',
             'recorder_resides_in_supervisor',
         )), 'gateway process or guest path claim missing')
+        recipient = observed.get('external_recipient')
+        if recipient_mode:
+            require(isinstance(recipient, dict) and set(recipient) == {
+                'count', 'rows_digest', 'recipient_pid', 'journal_state', 'request_digest',
+            }, 'missing or malformed independent recipient observation')
+            require(type(recipient['count']) is int and recipient['count'] == 1,
+                    'KVM effect recipient did not durably commit exactly once')
+            require(recipient['journal_state'] == 'possibly-committed',
+                    'durable outcome journal did not reserve the effect')
+            require(type(recipient['recipient_pid']) is int
+                    and recipient['recipient_pid'] > 1
+                    and recipient['recipient_pid'] not in (gateway_pid, supervisor_pid),
+                    'recipient reused gateway/supervisor process')
+            for key in ('rows_digest', 'request_digest'):
+                value = recipient[key]
+                require(isinstance(value, str) and len(value) == 64
+                        and all(x in '0123456789abcdef' for x in value),
+                        'malformed independent recipient digest')
+        else:
+            require('external_recipient' not in observed,
+                    'baseline cannot claim unverified external recipient')
         authority = run['isolated_authority']
         role_pids = {role['pid'] for role in authority['roles'].values()}
         coordinator_pids = {row['pid'] for row in authority.get('coordinators', [])}
         require(gateway_pid not in role_pids | coordinator_pids
                 and supervisor_pid not in role_pids | coordinator_pids,
                 'gateway or supervisor shares guardian/coordinator process')
+        if recipient_mode:
+            require(recipient['recipient_pid'] not in role_pids | coordinator_pids,
+                    'recipient shares guardian/coordinator process')
+            session = SessionAuthority(authority['configuration'])
+            require(recipient['request_digest'] == session.request.request_digest,
+                    'recipient observation not bound to guardian request')
 
 
 def verify_integrated(report):
