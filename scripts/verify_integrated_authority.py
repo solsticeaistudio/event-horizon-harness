@@ -105,10 +105,34 @@ def verify_gateway_process_mode(report):
             require('external_recipient' not in observed,
                     'baseline run cannot claim external recipient')
             continue
-        require(isinstance(marker, dict) and set(marker) == {
+        required_bridge_fields = {
             'gateway_pid', 'supervisor_pid', 'independent_process',
             'guest_vsock_request_path', 'recorder_resides_in_supervisor',
-        }, 'missing or malformed gateway process bridge evidence')
+        }
+        bound_identity = isinstance(marker, dict) and 'identity_binding' in marker
+        require(isinstance(marker, dict) and set(marker) == (
+            required_bridge_fields | ({'identity_binding'} if bound_identity else set())
+        ), 'missing or malformed gateway process bridge evidence')
+        if bound_identity:
+            require(marker['identity_binding'] == 'pidfd-dispatch-v1',
+                    'unrecognized process provenance contract')
+            dispatch = [event for event in run['events']
+                        if event['event_type'] == 'execution.dispatch']
+            require(len(dispatch) == 1
+                    and dispatch[0]['source_id'] == 'host-effect-service'
+                    and dispatch[0]['payload'].get('gateway_pid') == marker['gateway_pid']
+                    and dispatch[0]['payload'].get('dispatch_count') == 1,
+                    'gateway PID is not bound to independently signed dispatch event')
+        else:
+            # Preserve verification for two published, immutable pre-hardening
+            # reports; newly generated reports must carry the stronger binding.
+            legacy = {
+                '8be130eb584dfd90d514b754244e26b4434ccda3',
+                'ea79595db5a659c6ae543c42e66618edfcd770ba',
+            }
+            require(report.get('source_commit') is None
+                    or report['source_commit'] in legacy,
+                    'new integrated KVM report missing process identity binding')
         gateway_pid, supervisor_pid = marker['gateway_pid'], marker['supervisor_pid']
         require(type(gateway_pid) is int and type(supervisor_pid) is int
                 and gateway_pid > 1 and supervisor_pid > 1
