@@ -7,10 +7,13 @@ and effect dispatch happen in the trusted host service.
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
+import socket
 from typing import Any
 
 from .authority_backends import EtcdGatewayConfig
 from .broker import CapabilityVerifier
+from .effect_outcome_journal import DurableEffectJournal
 from .models import ActionRequest, ExecutionResult, IssuedCapability
 from .trusted_effect_gateway import TrustedEffectGateway, select_consumption_store
 from .trust_decay import DecayEngine, SqliteDecayStateStore
@@ -48,6 +51,13 @@ class DatasetEffectBoundary:
         else:
             raise ValueError("unknown authority backend; no local fallback")
         self.consumption_store = select_consumption_store(**opts)
+        recipient = config.get("recipient_socket")
+        journal_path = config.get("outcome_journal")
+        if bool(recipient) != bool(journal_path):
+            raise ValueError("external recipient requires durable outcome journal")
+        if recipient and (not isinstance(recipient, str) or not isinstance(journal_path, str)):
+            raise ValueError("invalid trusted external effect configuration")
+        self.outcome_journal = DurableEffectJournal(journal_path) if journal_path else None
         self.decay_store = SqliteDecayStateStore(config["decay_database"])
         self.gateway = TrustedEffectGateway(
             CapabilityVerifier(
@@ -59,11 +69,28 @@ class DatasetEffectBoundary:
             event_prefix="execution",
             tenant=context["tenant"],
             environment=context["environment"],
+            outcome_journal=self.outcome_journal,
         )
 
     def _read_dataset(self, request: ActionRequest) -> str:
         offset, length = request.arguments["offset"], request.arguments["length"]
-        return self.config["dataset"][offset:offset + length]
+        output = self.config["dataset"][offset:offset + length]
+        endpoint = self.config.get("recipient_socket")
+        if endpoint:
+            effect_key = self.config["recipient_effect_key"]
+            if not isinstance(effect_key, str) or not effect_key:
+                raise ValueError("missing pinned external effect identity")
+            message = json.dumps({"effect_key": effect_key,
+                                  "request_digest": request.request_digest},
+                                 sort_keys=True).encode("utf-8")
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as recipient:
+                recipient.settimeout(3)
+                recipient.connect(endpoint)
+                recipient.sendall(message)
+                response = recipient.recv(4096)
+            if json.loads(response).get("committed") is not True:
+                raise RuntimeError("recipient commit was not confirmed")
+        return output
 
     def close(self) -> None:
         self.active = False
