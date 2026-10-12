@@ -144,13 +144,27 @@ def verify_gateway_process_mode(report):
         )), 'gateway process or guest path claim missing')
         recipient = observed.get('external_recipient')
         if recipient_mode:
-            require(isinstance(recipient, dict) and set(recipient) == {
+            base_recipient = {
                 'count', 'rows_digest', 'recipient_pid', 'journal_state', 'request_digest',
-            }, 'missing or malformed independent recipient observation')
+            }
+            new_confirmation = isinstance(recipient, dict) and 'receipt_digest' in recipient
+            require(isinstance(recipient, dict)
+                    and set(recipient) == (base_recipient | (
+                        {'receipt_digest'} if new_confirmation else set())),
+                    'missing or malformed independent recipient observation')
             require(type(recipient['count']) is int and recipient['count'] == 1,
                     'KVM effect recipient did not durably commit exactly once')
-            require(recipient['journal_state'] == 'possibly-committed',
-                    'durable outcome journal did not reserve the effect')
+            if new_confirmation:
+                require(bound_identity
+                        and recipient['journal_state'] == 'recipient-confirmed'
+                        and recipient['receipt_digest'] == recipient['rows_digest'],
+                        'recipient confirmation not bound to independent journal/child')
+            else:
+                require(recipient['journal_state'] == 'possibly-committed'
+                        and report.get('source_commit') in (
+                            None, 'ea79595db5a659c6ae543c42e66618edfcd770ba',
+                        ),
+                        'new KVM evidence omitted independent recipient confirmation')
             require(type(recipient['recipient_pid']) is int
                     and recipient['recipient_pid'] > 1
                     and recipient['recipient_pid'] not in (gateway_pid, supervisor_pid),
