@@ -16,7 +16,7 @@ from typing import Any, Callable, Mapping, Protocol
 
 from .broker import CapabilityVerifier
 from .canonical import digest
-from .effect_outcome_journal import DurableEffectJournal
+from .effect_outcome_journal import DurableEffectJournal, EffectAlreadyReserved
 from .models import ActionRequest, IssuedCapability
 from .replay_state import CapabilityConsumptionStore
 
@@ -138,10 +138,15 @@ class TrustedEffectGateway:
             try:
                 reserved = self.outcome_journal.reserve(
                     tenant=self.tenant, environment=self.environment,
+                    effect_key=digest({"session_id": request.session_id,
+                                       "request_id": request.request_id}),
                     capability_id=claims.capability_id,
                     request_digest=request.request_digest,
                     claims_digest=digest(claims.to_dict()),
                 )
+            except EffectAlreadyReserved:
+                # Another token for this same logical effect must not dispatch.
+                return GatewayDecision(False, "possibly-committed", "prior-effect-unknown")
             except Exception:
                 # No durable reservation acknowledgement means NO dispatch.
                 self._record_denial(request, "effect-journal-unavailable")
