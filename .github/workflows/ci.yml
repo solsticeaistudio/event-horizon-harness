@@ -39,8 +39,6 @@ jobs:
         run: python scripts/verify_linux_isolation.py docs/evidence/artifacts/2026-10-10/linux-isolation.json
       - name: Lint Python sources
         run: python scripts/lint_python.py
-      - name: Exercise session-bound isolated authority (real processes, no KVM)
-        run: python -m unittest tests.test_integrated_authority tests.test_wrong_uid_rejection -v
       - name: Run Python tests
         run: python -m unittest discover -s tests -v
       - name: Attack actual trusted gateway process over Unix sockets
