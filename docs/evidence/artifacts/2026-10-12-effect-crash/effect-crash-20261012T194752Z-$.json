@@ -1,0 +1,271 @@
+{
+  "payload": {
+    "attestation": "synthetic-fixture",
+    "authority_backend": "etcd",
+    "etcd_cluster_id": "9941398530155181845",
+    "experiment_mode": "linux-host-process-sigkill",
+    "guardian_quorum_exercised": false,
+    "host_kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "kvm_exercised": false,
+    "provenance": "internal ephemeral signing key; embedded public key; no witness",
+    "scenarios": [
+      {
+        "capability_id": "cap_adc0b91597f2f73ed6488b25",
+        "consumed_capabilities": 1,
+        "etcd_oracle": {
+          "backend": "etcd",
+          "capability_id": "cap_adc0b91597f2f73ed6488b25",
+          "claims_digest": "19c0dd0bf71cbe419d833b424286eb93c0312458f6926ab6150e7e1dea9c9adc",
+          "cluster_id": "9941398530155181845",
+          "expires_at": 1791834532771,
+          "raft_term": 2,
+          "record_count": 1,
+          "record_integrity_checked": true,
+          "revision": 2,
+          "source": "host-supervisor-linearizable-etcd-read"
+        },
+        "journal_state_after_kill": null,
+        "killed_worker": {
+          "exit_code": -9,
+          "marker": "before_reservation",
+          "signal": 9
+        },
+        "original_replay": {
+          "accepted": false,
+          "effect_state": "not-started",
+          "error_class": "authority-denied"
+        },
+        "recipient_after_kill": {
+          "count": 0,
+          "rows_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "recipient_after_recovery": {
+          "count": 0,
+          "rows_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "recipient_before": {
+          "count": 0,
+          "rows_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "replacement_capability_id": "cap_b8991ab04f6e2d7f0f436899",
+        "replacement_replay": null,
+        "request_digest": "5cc97c9ce59f0b9c117cb181f8e02840ca6cf0fa3b8c05bc2e53b196123f6e7a",
+        "scenario": "before_reservation",
+        "session_id": "ehk-crash-ff384e29581048"
+      },
+      {
+        "capability_id": "cap_5846e8a202fe760b8dc10620",
+        "consumed_capabilities": 2,
+        "etcd_oracle": {
+          "additional_consumed_ids": [
+            "cap_7a4c7b6bba19a42846f82355"
+          ],
+          "backend": "etcd",
+          "capability_id": "cap_5846e8a202fe760b8dc10620",
+          "claims_digest": "f4c9d884ef82a20f82469b8550f36efafac1fa92a983a12741e6de48962ca21c",
+          "cluster_id": "9941398530155181845",
+          "expires_at": 1791834533200,
+          "primary_record_count": 1,
+          "raft_term": 2,
+          "record_count": 2,
+          "record_integrity_checked": true,
+          "revision": 4,
+          "source": "host-supervisor-linearizable-etcd-read"
+        },
+        "journal_state_after_kill": "possibly-committed",
+        "killed_worker": {
+          "exit_code": -9,
+          "marker": "after_reservation_before_dispatch",
+          "signal": 9
+        },
+        "original_replay": {
+          "accepted": false,
+          "effect_state": "not-started",
+          "error_class": "authority-denied"
+        },
+        "recipient_after_kill": {
+          "count": 0,
+          "rows_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "recipient_after_recovery": {
+          "count": 0,
+          "rows_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "recipient_before": {
+          "count": 0,
+          "rows_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "replacement_capability_id": "cap_7a4c7b6bba19a42846f82355",
+        "replacement_replay": {
+          "accepted": false,
+          "effect_state": "possibly-committed",
+          "error_class": "prior-effect-unknown"
+        },
+        "request_digest": "b1301e8295f9719d0d9741265c4461a3397a11d817c52a54da80852382e5a99a",
+        "scenario": "after_reservation_before_dispatch",
+        "session_id": "ehk-crash-26e70ae8296342"
+      },
+      {
+        "capability_id": "cap_3a4ef25fef482d46d8eae6d1",
+        "consumed_capabilities": 2,
+        "etcd_oracle": {
+          "additional_consumed_ids": [
+            "cap_93b16a56bb9a156d293b9c60"
+          ],
+          "backend": "etcd",
+          "capability_id": "cap_3a4ef25fef482d46d8eae6d1",
+          "claims_digest": "4ae9b67ff508cf6872177e7f262affdfc39dd6640207fe9e7ae426690e7c1e5b",
+          "cluster_id": "9941398530155181845",
+          "expires_at": 1791834533741,
+          "primary_record_count": 1,
+          "raft_term": 2,
+          "record_count": 2,
+          "record_integrity_checked": true,
+          "revision": 6,
+          "source": "host-supervisor-linearizable-etcd-read"
+        },
+        "journal_state_after_kill": "possibly-committed",
+        "killed_worker": {
+          "exit_code": -9,
+          "marker": "after_recipient_commit_before_gateway_ack",
+          "signal": 9
+        },
+        "original_replay": {
+          "accepted": false,
+          "effect_state": "not-started",
+          "error_class": "authority-denied"
+        },
+        "recipient_after_kill": {
+          "count": 1,
+          "rows_digest": "654521a80a8a90d8e588a5b22c5e2f27bc19683ba6b3019352d39b40843964d4"
+        },
+        "recipient_after_recovery": {
+          "count": 1,
+          "rows_digest": "654521a80a8a90d8e588a5b22c5e2f27bc19683ba6b3019352d39b40843964d4"
+        },
+        "recipient_before": {
+          "count": 0,
+          "rows_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "replacement_capability_id": "cap_93b16a56bb9a156d293b9c60",
+        "replacement_replay": {
+          "accepted": false,
+          "effect_state": "possibly-committed",
+          "error_class": "prior-effect-unknown"
+        },
+        "request_digest": "aeb351dce2da0af3d0df474fba7a322d6f1f26fd618419eb94f1c28596a0d627",
+        "scenario": "after_recipient_commit_before_gateway_ack",
+        "session_id": "ehk-crash-042c8c69578f46"
+      },
+      {
+        "capability_id": "cap_ca5534b3b7f80fcdb87ce58b",
+        "consumed_capabilities": 2,
+        "etcd_oracle": {
+          "additional_consumed_ids": [
+            "cap_b354f763650cc9de2f766b8f"
+          ],
+          "backend": "etcd",
+          "capability_id": "cap_ca5534b3b7f80fcdb87ce58b",
+          "claims_digest": "fe360ec76cb4d79e52541dc25ba15b72d45ca5e7309858e0bb7a02e0da9b884b",
+          "cluster_id": "9941398530155181845",
+          "expires_at": 1791834534395,
+          "primary_record_count": 1,
+          "raft_term": 2,
+          "record_count": 2,
+          "record_integrity_checked": true,
+          "revision": 8,
+          "source": "host-supervisor-linearizable-etcd-read"
+        },
+        "journal_state_after_kill": "possibly-committed",
+        "killed_worker": {
+          "exit_code": -9,
+          "marker": "after_handler_return_before_completion",
+          "signal": 9
+        },
+        "original_replay": {
+          "accepted": false,
+          "effect_state": "not-started",
+          "error_class": "authority-denied"
+        },
+        "recipient_after_kill": {
+          "count": 1,
+          "rows_digest": "c3d5c6f229fc72b09d8b9fcc45f908857343a3c10c4540deb9c37ca39acf3d35"
+        },
+        "recipient_after_recovery": {
+          "count": 1,
+          "rows_digest": "c3d5c6f229fc72b09d8b9fcc45f908857343a3c10c4540deb9c37ca39acf3d35"
+        },
+        "recipient_before": {
+          "count": 0,
+          "rows_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "replacement_capability_id": "cap_b354f763650cc9de2f766b8f",
+        "replacement_replay": {
+          "accepted": false,
+          "effect_state": "possibly-committed",
+          "error_class": "prior-effect-unknown"
+        },
+        "request_digest": "90c1ae2929b91304000dcc19d49f1c44b6f046ebaea43985988782a0e5bb67d0",
+        "scenario": "after_handler_return_before_completion",
+        "session_id": "ehk-crash-5bc486fefd2341"
+      },
+      {
+        "capability_id": "cap_68eb26228bb4a2643410cb7c",
+        "consumed_capabilities": 2,
+        "etcd_oracle": {
+          "additional_consumed_ids": [
+            "cap_d308508ee1175ae2b25e8eec"
+          ],
+          "backend": "etcd",
+          "capability_id": "cap_68eb26228bb4a2643410cb7c",
+          "claims_digest": "85433ed1984caccb5044c4598aa3850414111f290240d115ff644c3c0ddbeaca",
+          "cluster_id": "9941398530155181845",
+          "expires_at": 1791834535009,
+          "primary_record_count": 1,
+          "raft_term": 2,
+          "record_count": 2,
+          "record_integrity_checked": true,
+          "revision": 10,
+          "source": "host-supervisor-linearizable-etcd-read"
+        },
+        "journal_state_after_kill": "possibly-committed",
+        "killed_worker": {
+          "exit_code": -9,
+          "marker": "after_completion_before_client_ack",
+          "signal": 9
+        },
+        "original_replay": {
+          "accepted": false,
+          "effect_state": "not-started",
+          "error_class": "authority-denied"
+        },
+        "recipient_after_kill": {
+          "count": 1,
+          "rows_digest": "50057fce5becacfd6622ddb8b347d319756d4a685c87b2fe1ed98b7c0fe116f6"
+        },
+        "recipient_after_recovery": {
+          "count": 1,
+          "rows_digest": "50057fce5becacfd6622ddb8b347d319756d4a685c87b2fe1ed98b7c0fe116f6"
+        },
+        "recipient_before": {
+          "count": 0,
+          "rows_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        "replacement_capability_id": "cap_d308508ee1175ae2b25e8eec",
+        "replacement_replay": {
+          "accepted": false,
+          "effect_state": "possibly-committed",
+          "error_class": "prior-effect-unknown"
+        },
+        "request_digest": "9552bada79dfc163bdddb8b6c2a0c72b2363e1a635303f2b6ce1b7d9899749a6",
+        "scenario": "after_completion_before_client_ack",
+        "session_id": "ehk-crash-b1187e54b53d4f"
+      }
+    ],
+    "schema": "event-horizon.effect-process-crash.v1",
+    "source_commit": "c265afe38b5e3b20a226ef33a84e54172508f016",
+    "status": "PASS"
+  },
+  "signature": "MN4ENqU3CiB2njDayU9m0hte_zxK26-AMZSH2BREtsWwAOyxfuBYvGeknwtgRTWPCF0nyMqvY73rEDNnoRQ2DA",
+  "signer_public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAWLTlMGl9KvASgyCmU83gV/ymMuFBec69UY4gvmVI/gE=\n-----END PUBLIC KEY-----\n"
+}
