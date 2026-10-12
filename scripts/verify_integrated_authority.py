@@ -102,6 +102,8 @@ def verify_gateway_process_mode(report):
         if not bridged:
             require(marker is None and 'gateway_process_bridge' not in observed,
                     'baseline run cannot claim process bridge')
+            require('external_recipient' not in observed,
+                    'baseline run cannot claim external recipient')
             continue
         require(isinstance(marker, dict) and set(marker) == {
             'gateway_pid', 'supervisor_pid', 'independent_process',
