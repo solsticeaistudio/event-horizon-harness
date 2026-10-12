@@ -13,6 +13,7 @@ ADAPTIVE_STEPS=0
 ISOLATED_AUTHORITY=0
 EFFECT_CRASH=0
 BRIDGED_AUTHORITY=0
+BRIDGED_RECIPIENT=0
 if [[ "${1:-}" == "--isolated-authority" && $# == 1 ]]; then
   ISOLATED_AUTHORITY=1
   shift
