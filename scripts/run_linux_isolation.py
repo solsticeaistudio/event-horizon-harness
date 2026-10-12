@@ -725,6 +725,13 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         "verification_context": verify_options(context),
         "replay_database": str(state / "replay.sqlite3"), "decay_database": str(state / "decay.sqlite3"),
     }
+    if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
+        # Bind the side effect to the supervisor's exact signed guest request.
+        # Neither the untrusted package worker nor the VM selects its key.
+        service_config["recipient_effect_key"] = digest({
+            "session_id": request.session_id, "request_id": request.request_id,
+        })
+        service_config["recipient_request_digest"] = request.request_digest
     if package_lab is not None and package_lab.authority_config is not None:
         # Only the trusted supervisor can select the consensus backend.
         # These host-only fields never enter the compromised worker's
@@ -948,6 +955,32 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 if count != 1:
                     raise RuntimeError("authoritative consumption count is not one")
             observed["host_consumption_count"] = count
+            if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
+                from event_horizon.effect_outcome_journal import DurableEffectJournal
+                from scripts.effect_crash_recipient import observed_recipient
+                snapshot = observed_recipient(Path(service_config["recipient_database"]))
+                journal = DurableEffectJournal(service_config["outcome_journal"])
+                reservation = journal.observe(
+                    tenant="default", environment="synthetic",
+                    capability_id=capability.claims.capability_id,
+                )
+                recipient_pid = getattr(receiver, "recipient_pid", None)
+                if (snapshot["count"] != 1 or reservation is None
+                        or reservation["state"] != "possibly-committed"
+                        or reservation["request_digest"] != request.request_digest
+                        or reservation["claims_digest"] != digest(capability.claims.to_dict())
+                        or type(recipient_pid) is not int
+                        or recipient_pid <= 1 or recipient_pid == os.getpid()
+                        or recipient_pid == getattr(receiver, "gateway_pid", None)
+                        or not Path(f"/proc/{recipient_pid}").exists()):
+                    raise RuntimeError("durable recipient and journal did not match the one guest effect")
+                observed["external_recipient"] = {
+                    "count": snapshot["count"],
+                    "rows_digest": snapshot["rows_digest"],
+                    "recipient_pid": recipient_pid,
+                    "journal_state": reservation["state"],
+                    "request_digest": request.request_digest,
+                }
             if package_lab is not None and getattr(package_lab, "bridged_gateway", False):
                 gateway_pid = getattr(receiver, "gateway_pid", None)
                 if (type(gateway_pid) is not int or gateway_pid <= 1

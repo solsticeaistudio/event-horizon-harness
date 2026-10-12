@@ -183,3 +183,26 @@ class BridgedIntegratedPackageLab(IntegratedPackageLab):
             observer, recorder, config, self.target_thread,
         )
         return self.gate_receiver
+
+
+
+class RecipientBridgedIntegratedPackageLab(BridgedIntegratedPackageLab):
+    """Opt-in KVM run with independent durable recipient and effect reservation."""
+
+    external_recipient_mode = True
+
+    def prepare(self, run, control, state, config):
+        super().prepare(run, control, state, config)
+        if not config.get("recipient_request_digest") or not config.get("recipient_effect_key"):
+            raise RuntimeError("recipient identity not pinned to supervisor request")
+        config["recipient_socket"] = str(control / "effect-recipient.sock")
+        config["recipient_database"] = str(control / "effect-recipient.sqlite")
+        config["outcome_journal"] = str(control / "effect-outcomes.sqlite")
+
+    def receiver(self, observer, recorder, config):
+        from scripts.integrated_gateway_process_bridge import RecipientBridgedGateReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = RecipientBridgedGateReceiver(
+            observer, recorder, config, self.target_thread,
+        )
+        return self.gate_receiver
