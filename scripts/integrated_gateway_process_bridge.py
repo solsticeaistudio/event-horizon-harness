@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 from pathlib import Path
 import socket
 import shutil
@@ -19,6 +20,7 @@ from event_horizon.canonical import canonical_bytes
 from event_horizon.protocol import encode_frame, read_frame
 from scripts.isolated_effect_gateway_worker import start_effect_gateway
 from scripts.isolated_gateway_transport import exchange
+from scripts.gateway_evidence_contract import GatewayEventContract
 from scripts.run_package_isolation import GateReceiver
 
 
@@ -28,6 +30,10 @@ class BridgedGateReceiver(GateReceiver):
         self.gateway_pid = None
         self.gateway_failure = None
         self.record_failure = None
+        self.event_contract = None
+        self.gateway_process = None
+        self.gateway_pidfd = None
+        self.gateway_event_pid = None
 
     def _record_events(self, channel):
         try:
@@ -37,12 +43,18 @@ class BridgedGateReceiver(GateReceiver):
                         event = read_frame(stream)
                     except EOFError:
                         break
-                    if (not isinstance(event, dict)
-                            or set(event) != {"event_type", "payload", "source_id"}
-                            or not isinstance(event["event_type"], str)
-                            or not isinstance(event["payload"], dict)
-                            or event["source_id"] != "host-effect-service"):
-                        raise ValueError("gateway tried to send invalid evidence")
+                    if self.event_contract is None or self.gateway_process is None:
+                        raise RuntimeError("signed gateway evidence arrived without a pinned child")
+                    if self.gateway_process.poll() is not None:
+                        raise RuntimeError("gateway died before evidentiary confirmation")
+                    if self.gateway_pidfd is None or select.select([self.gateway_pidfd], [], [], 0)[0]:
+                        raise RuntimeError("trusted gateway pidfd no longer identifies a live child")
+                    self.event_contract.check(event)
+                    if event["event_type"] == "execution.completed" and self.config.get("recipient_database"):
+                        from scripts.effect_crash_recipient import observed_recipient
+                        snapshot = observed_recipient(Path(self.config["recipient_database"]))
+                        if snapshot["count"] != 1:
+                            raise RuntimeError("cannot sign completion without independent recipient commit")
                     written = self.recorder.append(
                         event["event_type"], event["payload"],
                         source_id="host-effect-service",
@@ -52,6 +64,7 @@ class BridgedGateReceiver(GateReceiver):
                         self.dispatches += 1
                         if event["payload"].get("dispatch_count") != self.dispatches:
                             raise RuntimeError("gateway dispatch count mismatch")
+                        self.gateway_event_pid = event["payload"]["gateway_pid"]
                     channel.sendall(encode_frame({"recorded": True}))
         except BaseException as exc:
             self.record_failure = exc
@@ -75,8 +88,18 @@ class BridgedGateReceiver(GateReceiver):
                     path, recorder_bridge=True,
                 )
                 self.gateway_pid = child.pid
+                self.gateway_process = child
                 if child.pid == os.getpid():
                     raise RuntimeError("gateway was not independently spawned")
+                # Linux pidfd binds supervision to this specific child lifetime,
+                # preventing PID reuse from substituting a different process.
+                self.gateway_pidfd = os.pidfd_open(child.pid)
+                self.event_contract = GatewayEventContract(
+                    gateway_pid=child.pid,
+                    request_digest=self.config["expected_request_digest"],
+                    request_id=self.config["expected_request_id"],
+                    capability_id=self.config["expected_capability_id"],
+                )
                 event_thread = threading.Thread(
                     target=self._record_events, args=(evidence_channel,), daemon=True,
                 )
@@ -89,7 +112,11 @@ class BridgedGateReceiver(GateReceiver):
                             break
                         if self.record_failure is not None:
                             raise RuntimeError("trusted evidence receiver failed")
-                        response = exchange(request_channel, request)
+                        self.event_contract.begin_request(request)
+                        try:
+                            response = exchange(request_channel, request)
+                        finally:
+                            self.event_contract.end_request()
                         self.channel.sendall(encode_frame(response))
         except BaseException as exc:
             self.failure = exc
@@ -109,6 +136,9 @@ class BridgedGateReceiver(GateReceiver):
                     self.failure = RuntimeError("real gateway child exited unexpectedly")
                 if child.stderr is not None:
                     child.stderr.close()
+            if self.gateway_pidfd is not None:
+                os.close(self.gateway_pidfd)
+                self.gateway_pidfd = None
             if evidence_channel is not None:
                 evidence_channel.close()
             if event_thread is not None:
