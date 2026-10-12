@@ -32,17 +32,34 @@ class DurableEffectJournal:
         self.path = Path(path)
         if str(path) == ":memory:" or not self.path.is_absolute():
             raise ValueError("durable effect journal requires an absolute disk path")
-        if not self.path.parent.is_dir():
-            raise ValueError("trusted journal directory must already exist")
-        # Local executor code must not control the trusted journal directory.
-        if self.path.parent.stat().st_mode & 0o022:
-            raise ValueError("trusted journal directory is writable by another principal")
+        # Do not trust a private leaf beneath a mutable or symlinked ancestor.
+        # The root-owned sticky /tmp and /var/tmp boundary is permitted; a
+        # mutable ancestor owned by an untrusted principal is not.
+        owner = os.geteuid()
+        current = self.path.parent
+        while True:
+            info = os.lstat(current)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid not in {0, owner}:
+                raise EffectJournalError("journal ancestor is not a trusted directory")
+            if current == self.path.parent and info.st_uid != owner:
+                raise EffectJournalError("journal directory owner differs from gateway")
+            writable = info.st_mode & 0o022
+            if writable and not (current != self.path.parent
+                                 and info.st_uid == 0
+                                 and info.st_mode & stat.S_ISVTX):
+                raise EffectJournalError("journal has a mutable untrusted ancestor")
+            if current == current.parent:
+                break
+            current = current.parent
         try:
-            fd = os.open(self.path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            fd = os.open(self.path, os.O_CREAT | os.O_RDWR |
+                         getattr(os, "O_NOFOLLOW", 0), 0o600)
             try:
                 info = os.fstat(fd)
-                if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
-                    raise EffectJournalError("trusted journal must be a private regular file")
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner
+                        or info.st_mode & 0o077 or info.st_nlink != 1):
+                    raise EffectJournalError(
+                        "trusted journal must be a privately owned regular file")
             finally:
                 os.close(fd)
             with self._db() as db:
