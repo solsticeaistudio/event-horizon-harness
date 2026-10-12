@@ -7,8 +7,11 @@ its outcome. This module does not provide exactly-once external effects.
 """
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
+import stat
+from contextlib import contextmanager
 from pathlib import Path
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -27,7 +30,17 @@ class DurableEffectJournal:
             raise ValueError("durable effect journal requires an absolute disk path")
         if not self.path.parent.is_dir():
             raise ValueError("trusted journal directory must already exist")
+        # Local executor code must not control the trusted journal directory.
+        if self.path.parent.stat().st_mode & 0o022:
+            raise ValueError("trusted journal directory is writable by another principal")
         try:
+            fd = os.open(self.path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+                    raise EffectJournalError("trusted journal must be a private regular file")
+            finally:
+                os.close(fd)
             with self._db() as db:
                 db.execute("""CREATE TABLE IF NOT EXISTS effects (
                     tenant TEXT NOT NULL, environment TEXT NOT NULL,
@@ -40,11 +53,15 @@ class DurableEffectJournal:
         except sqlite3.Error as exc:
             raise EffectJournalError("effect journal startup failed") from exc
 
+    @contextmanager
     def _db(self):
         db = sqlite3.connect(str(self.path), timeout=5, isolation_level=None)
-        db.execute("PRAGMA busy_timeout=5000")
-        db.execute("PRAGMA synchronous=FULL")
-        return db
+        try:
+            db.execute("PRAGMA busy_timeout=5000")
+            db.execute("PRAGMA synchronous=FULL")
+            yield db
+        finally:
+            db.close()
 
     @staticmethod
     def _validate(tenant, environment, capability_id, request_digest, claims_digest):
