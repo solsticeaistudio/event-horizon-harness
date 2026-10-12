@@ -175,6 +175,10 @@ if (( EFFECT_CRASH > 0 )); then
   "$PY" scripts/run_effect_crash_campaign.py \
     --backend etcd --etcd-endpoint http://127.0.0.1:2379 \
     --etcd-cluster-id "$CLUSTER_ID" --report "$REPORT"
+elif (( BRIDGED_RECIPIENT > 0 )); then
+  sudo "$PY" scripts/run_integrated_authority.py --bridged-recipient \
+    --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
+    --etcd-containers "${CONTAINERS[@]}" --report "$REPORT"
 elif (( BRIDGED_AUTHORITY > 0 )); then
   sudo "$PY" scripts/run_integrated_authority.py --bridged-gateway \
     --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
