@@ -37,6 +37,9 @@ def main():
     preflight()
     config={'authority_backend':'etcd','etcd_gateway':owned_etcd_config(args.etcd_endpoint,args.etcd_cluster_id),
             'etcd_cluster_id':args.etcd_cluster_id}
+    # Inner authority RPC must expire before the existing guest/worker channel
+    # deadline. A guest timeout is unknown, never evidence of successful denial.
+    config['etcd_gateway']['timeout_seconds']=0.5
     quorum=OwnedQuorum(args.etcd_containers,config)
     lockfd=os.open('/run/event-horizon-isolation.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
     report={'schema':'event-horizon.package-isolation.v4','status':'INCOMPLETE',
