@@ -36,7 +36,7 @@ class OwnedQuorum:
         for port in (2379,3379,4379):
             transport=EtcdV3TransactionTransport(EtcdGatewayConfig(
                 **(config['etcd_gateway']|{'endpoint':f'http://127.0.0.1:{port}'})))
-            header=transport({'compare':[],'success':[],'failure':[]})['header']
+            header=transport({'compare':[],'success':[{'requestRange':{'key':_b64(b'/event-horizon/lab/health'), 'serializable':False}}],'failure':[]})['header']
             if str(header['cluster_id'])!=config['etcd_cluster_id']:
                 raise RuntimeError('member belongs to a different cluster')
             self.member_headers.append(header)
@@ -54,10 +54,14 @@ class OwnedQuorum:
         for i in list(self.paused):
             subprocess.run(['docker','unpause',self.containers[i]],check=True,stdout=subprocess.DEVNULL)
             self.paused.remove(i)
+        return self.wait_healthy()
+
+    def wait_healthy(self):
         deadline=time.monotonic()+12
         while True:
             try:
-                result=self.transport({'compare':[], 'success':[], 'failure':[]})
+                result=self.transport({'compare':[], 'success':[{'requestRange':{
+                    'key':_b64(b'/event-horizon/lab/health'),'serializable':False}}], 'failure':[]})
                 if str(result['header']['cluster_id'])!=self.config['etcd_cluster_id']:
                     raise ValueError('cluster identity changed')
                 return result['header']
@@ -139,6 +143,7 @@ class IntegratedPackageLab(PackageLab):
         self.campaign[-1]['consumption_after_recovery']=empty
         self.recovery_header=restored
         self.quorum.pause([2])
+        self.quorum.wait_healthy()
         # The caller now sends its real valid guest request with two nodes live.
 
     def after_authorized(self,channel,message,receiver):
