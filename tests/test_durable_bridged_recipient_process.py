@@ -114,5 +114,31 @@ class DurableBridgedRecipientTests(unittest.TestCase):
         self.assertNotEqual(self.receiver.recipient_pid, os.getpid())
 
 
+
+class RecipientStartupFailureTests(unittest.TestCase):
+
+    def test_recipient_startup_failure_closes_service_channel(self):
+        # Exercise a pre-gateway failure without a guest or a live recipient.
+        from scripts.integrated_gateway_process_bridge import RecipientBridgedGateReceiver
+        with tempfile.TemporaryDirectory() as root:
+            host, service = socket.socketpair()
+            try:
+                bad = {
+                    "recipient_database": str(Path(root) / "missing" / "recipient.sqlite"),
+                    "recipient_socket": str(Path(root) / "recipient.sock"),
+                    "recipient_effect_key": "a" * 64,
+                    "recipient_request_digest": "b" * 64,
+                }
+                receiver = RecipientBridgedGateReceiver(
+                    host, object(), bad, isolated_recipient=False,
+                )
+                receiver.run()
+                self.assertTrue(receiver.recipient_ready.is_set())
+                self.assertIsInstance(receiver.failure, FileNotFoundError)
+                service.settimeout(1)
+                self.assertEqual(service.recv(1), b"")
+            finally:
+                service.close()
+
 if __name__ == "__main__":
     unittest.main()
