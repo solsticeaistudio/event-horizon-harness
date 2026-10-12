@@ -3,6 +3,7 @@
 import argparse
 import fcntl
 import hashlib
+import json
 import os
 import platform
 import subprocess
@@ -68,7 +69,7 @@ def main():
     finally:
         quorum.restore()
         args.report.parent.mkdir(parents=True,exist_ok=True)
-        content=canonical_bytes(report)
+        content=(json.dumps(report,sort_keys=True,indent=2,allow_nan=False)+'\n').encode('utf-8')
         with args.report.open('xb') as output:output.write(content)
         checksum=hashlib.sha256(content).hexdigest()
         with Path(str(args.report)+'.sha256').open('x') as output:output.write(checksum+'  '+args.report.name+'\n')

@@ -69,3 +69,16 @@ class IntegratedAuthorityTests(unittest.TestCase):
         # Fail before cgroup, VM, gateway or issuance work on an incompatible path.
         with self.assertRaises(ValueError):
             run_round(Path('/unused'),{},object(),None,authority_session=object())
+
+
+class AggregateEvidenceTests(unittest.TestCase):
+    def test_deep_transcripts_bind_by_hash_without_relaxing_rpc_limits(self):
+        from event_horizon.canonical import canonical_bytes
+        from scripts.integrated_authority_session import evidence_digest
+        value = {"leaf": "original"}
+        for _ in range(12): value = {"nested": value}
+        with self.assertRaises(ValueError): canonical_bytes(value)
+        pin = evidence_digest(value)
+        self.assertEqual(len(pin),64)
+        self.assertNotEqual(pin,evidence_digest({"replacement":value}))
+        canonical_bytes({"event_type":"isolation.context","payload":{"evidence_digest":pin}})

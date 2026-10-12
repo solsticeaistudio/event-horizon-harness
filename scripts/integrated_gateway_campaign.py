@@ -30,6 +30,16 @@ class OwnedQuorum:
         self.identities = [{'container_id':r['Id'],'name':r['Name'],
                             'image_id':r['Image'],'image':r['Config']['Image']} for r in records]
         self.transport=EtcdV3TransactionTransport(EtcdGatewayConfig(**config['etcd_gateway']))
+        self.member_headers=[]
+        for port in (2379,3379,4379):
+            transport=EtcdV3TransactionTransport(EtcdGatewayConfig(
+                **(config['etcd_gateway']|{'endpoint':f'http://127.0.0.1:{port}'})))
+            header=transport({'compare':[],'success':[],'failure':[]})['header']
+            if str(header['cluster_id'])!=config['etcd_cluster_id']:
+                raise RuntimeError('member belongs to a different cluster')
+            self.member_headers.append(header)
+        if len({str(h['member_id']) for h in self.member_headers})!=3:
+            raise RuntimeError('three endpoints are not distinct etcd members')
 
     def pause(self, indices):
         for i in indices:
@@ -126,7 +136,8 @@ class IntegratedPackageLab(PackageLab):
         if receiver.dispatches!=1: raise RuntimeError('recovery resurrected consumed authority')
         return {'scenarios':self.campaign,'single_node_loss_useful_dispatches':1,
                 'recovered_cluster_id':str(header['cluster_id']),
-                'containers':self.quorum.identities,'dispatches':receiver.dispatches}
+                'containers':self.quorum.identities,'member_headers':self.quorum.member_headers,
+                'dispatches':receiver.dispatches}
 
     def close(self):
         try:self.quorum.restore()

@@ -38,6 +38,13 @@ AUTHORITY_ATTACKS = (
 )
 
 
+def evidence_digest(value):
+    """Hash aggregate evidence without weakening bounded RPC canonicalization."""
+    import hashlib
+    encoded = json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class IsolatedSession:
     def __init__(self, *, distinct_uids=True, source_commit):
         self.distinct = distinct_uids
@@ -194,6 +201,9 @@ class IsolatedSession:
         CapabilityVerifier(self.public_key_pem,self.key_id).verify_and_consume(
             cap,request,**verify_options(self.session.context))
         self.evidence['authorization']=issue
+        self.evidence['capability_sha256']=digest(cap.to_dict())
+        self.evidence['request_digest']=request.request_digest
+        self.evidence['policy_digest']=self.session.policy.policy_digest
         for name in AUTHORITY_ATTACKS:
             result=self.client(name,issue['message']);self._check_transcript(result)
             if result['transcript'][-1]['answer']['ok'] is not False:

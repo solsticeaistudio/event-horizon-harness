@@ -5,7 +5,7 @@ from event_horizon.models import ActionRequest, IssuedCapability
 from event_horizon.session_authority import SessionAuthority
 from event_horizon.signed_guardian_authority import PinnedGuardianVerifier, SignedGuardianApproval
 from scripts.capability_fixture_support import verify_options
-from scripts.integrated_authority_session import AUTHORITY_ATTACKS
+from scripts.integrated_authority_session import AUTHORITY_ATTACKS, evidence_digest
 from scripts.integrated_gateway_campaign import GATE_ATTACKS
 
 
@@ -42,6 +42,10 @@ def verify_authority(value, *, require_os=True):
                             for key in sorted(pins.key_ids)])
         require(cap.claims.guardian_state_digest==signed_state,'capability does not bind the four approvals')
         require(cap.claims.max_output_bytes==512,'output ceiling changed')
+        if field=='authorization':
+            require(value['capability_sha256']==digest(cap.to_dict()) and
+                    value['request_digest']==request.request_digest and
+                    value['policy_digest']==session.policy.policy_digest,'authority digest mismatch')
         caps.append(cap)
     require(caps[0].claims.capability_id!=caps[1].claims.capability_id,'spare capability duplicated')
     require(value['process_cleanup'] is True and value['temporary_paths_removed'] is True,
@@ -80,7 +84,14 @@ def verify_integrated(report):
     require(report['attestation']=='synthetic-fixture' and report['build_manifest']['tpm2_enabled'] is False,
             'synthetic run misrepresents attestation')
     for run in report['rounds']:
-        observations=run['observations'];value=observations['isolated_authority']
+        observations=run['observations'];value=run['isolated_authority']
+        require(observations['isolated_authority_digest']==evidence_digest(value),
+                'authority attachment differs from signed observation')
+        context=next(e['payload'] for e in run['events'] if e['event_type']=='isolation.context')
+        original={k:v for k,v in value.items() if k not in {
+            'service_audit','process_cleanup','temporary_paths_removed'}}
+        require(context['isolated_authority_digest']==evidence_digest(original),
+                'execution context was not bound to pre-execution authority')
         session,caps=verify_authority(value)
         require(value['configuration']['source_commit']==report['source_commit'],'source revision mismatch')
         require(value['configuration']['build_artifacts']==report['build_manifest']['artifacts'],
@@ -97,6 +108,14 @@ def verify_integrated(report):
         require(gateway['dispatches']==gateway['single_node_loss_useful_dispatches']==1,
                 'missing useful operation under majority')
         require(gateway['recovered_cluster_id']==report['authority']['cluster_id'],'cluster changed during faults')
+        require(len(gateway['member_headers'])==3 and
+                len({str(h['member_id']) for h in gateway['member_headers']})==3 and
+                all(str(h['cluster_id'])==report['authority']['cluster_id'] for h in gateway['member_headers']),
+                'three independent member observations missing')
+        dispatch=[e for e in run['events'] if e['event_type']=='execution.dispatch']
+        require(len(dispatch)==1 and dispatch[0]['source_id']=='host-effect-service' and
+                dispatch[0]['payload']['request_digest']==session.request.request_digest,
+                'actual handler dispatch does not match authorized request')
         cases=gateway['scenarios']
         require(len(cases)==len(GATE_ATTACKS) and {c['name'] for c in cases}==set(GATE_ATTACKS),
                 'missing actual guest fault controls')

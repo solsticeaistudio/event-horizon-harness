@@ -675,6 +675,7 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     request = ActionRequest("dataset-read", run.name, "attacker-agent", "object.read",
                             resource_id, "exec-1", {"offset": 0, "length": len(content)}, "read approved inert bytes")
     if authority_session is not None:
+        from scripts.integrated_authority_session import evidence_digest
         capability, spare, context = authority_session.authorize_pair(request, manifest)
         issuer_public, issuer_key_id = authority_session.public_key_pem, authority_session.key_id
     else:
@@ -780,7 +781,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             "attestation_mode": "tpm2-requested" if manifest.get("tpm2_enabled") else "synthetic-fixture",
             "session_id": request.session_id, "capability_id": capability.claims.capability_id,
             **({"package_context": package_lab.context()} if package_lab is not None else {}),
-            **({"isolated_authority": authority_session.evidence} if authority_session else {}),
+            **({"isolated_authority_digest": evidence_digest(authority_session.evidence)}
+               if authority_session else {}),
         }, source_id="host-supervisor")["receipt"])
         with (control / "service.log").open("wb") as service_log:
             service_command = [
@@ -1018,7 +1020,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             raise RuntimeError("retired effect endpoint remains reachable")
     if authority_session is not None:
         authority_session.close()
-        observed["isolated_authority"] = authority_session.evidence
+        from scripts.integrated_authority_session import evidence_digest
+        observed["isolated_authority_digest"] = evidence_digest(authority_session.evidence)
     for event_type, payload in (("isolation.observed", observed), ("teardown.verified", teardown)):
         receiver.receipts.append(recorder.append(event_type, payload, source_id="host-supervisor")["receipt"])
     valid, tip = recorder.verify()
@@ -1027,6 +1030,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     report = {"run_directory": str(run), "observations": observed, "teardown": teardown,
               "evidence_chain_tip": tip, "recorder_public_key_pem": recorder.public_key_pem,
               "events": recorder.events(), "receipts": receiver.receipts}
+    if authority_session is not None:
+        report["isolated_authority"] = authority_session.evidence
     write_durable_json(control / "result.json", report)
     return report, effect_message(request, spare), attestation_mode
 
