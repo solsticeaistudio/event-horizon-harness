@@ -808,6 +808,11 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         sender.close()
         thread = threading.Thread(target=receiver.run, daemon=True)
         thread.start()
+        if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
+            if not receiver.recipient_ready.wait(timeout=16):
+                raise RuntimeError("recipient startup did not finish before guest launch")
+            if receiver.failure is not None:
+                raise RuntimeError("independent recipient startup failed") from receiver.failure
         with (control / "console.log").open("wb") as console:
             vm = subprocess.Popen([
                 "unshare", "--net", "--", str(assets / "jailer"), "--id", "cell",
