@@ -39,6 +39,7 @@ from event_horizon.models import ActionRequest, IssuedCapability
 from event_horizon.trusted_effect_gateway import TrustedEffectGateway, select_consumption_store
 from scripts.capability_fixture_support import authority_context, issue_options
 from scripts.package_authority_oracle import inspect_committed_consumption, owned_etcd_config
+from scripts.effect_crash_process_supervisor import kill_at_checkpoint
 
 SCHEMA = "event-horizon.effect-process-crash.v1"
 PHASES = (
@@ -262,16 +263,9 @@ def _execute_once(path: Path, phase: str, token: str, *, expect_crash: bool):
                            "--phase", phase, "--token", token])
     try:
         if expect_crash:
-            reached = _read_line(proc, "PHASE:")
-            if reached != phase:
-                raise RuntimeError("unexpected or skipped crash checkpoint")
-            if proc.poll() is not None:
-                raise RuntimeError("worker died before supervisor sent SIGKILL")
-            proc.kill()
-            _, stderr = proc.communicate(timeout=5)
-            if proc.returncode != -signal.SIGKILL:
-                raise RuntimeError(f"worker did not die from real SIGKILL: {stderr[-400:]}")
-            return {"marker": reached, "signal": signal.SIGKILL, "exit_code": proc.returncode}
+            observation = kill_at_checkpoint(proc, phase)
+            return {"marker": observation.marker, "signal": observation.signal,
+                    "exit_code": observation.exit_code}
         response = _read_line(proc, "RESULT:")
         stdout, stderr = proc.communicate(timeout=6)
         if proc.returncode != 0:
