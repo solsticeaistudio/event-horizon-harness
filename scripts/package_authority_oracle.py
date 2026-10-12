@@ -79,7 +79,7 @@ def inspect_committed_consumption(
     path, but still trusts the configured etcd cluster and transport.
     """
     if (not isinstance(session_id, str) or not session_id.startswith("ehk-")
-            or any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789-" for ch in session_id)):
+            or any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for ch in session_id)):
         raise ValueError("session must be an owned temporary isolation ID")
     if not isinstance(cluster_id, str) or not cluster_id.isdecimal() or int(cluster_id) <= 0:
         raise ValueError("invalid pinned cluster")

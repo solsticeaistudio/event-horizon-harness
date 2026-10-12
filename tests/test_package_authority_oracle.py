@@ -81,6 +81,15 @@ class IndependentPackageOracleTests(unittest.TestCase):
         self.assertEqual(base64.b64decode(query["key"]), PREFIX.encode())
         self.assertEqual(base64.b64decode(query["range_end"]), PREFIX[:-1].encode() + b"0")
 
+    def test_real_tempfile_session_underscore_is_safe_and_bound_exactly(self):
+        candidate = reply(key=PREFIX.replace("ehk-abc123", "ehk-a_b123").encode()+CAP.encode())
+        result = inspect_committed_consumption(lambda _: candidate, cluster_id=CLUSTER,
+            session_id="ehk-a_b123", capability_id=CAP, claims_digest=BINDING, expires_at=EXPIRY)
+        self.assertEqual(result["record_count"],1)
+        with self.assertRaises(ValueError):
+            inspect_committed_consumption(lambda _: candidate, cluster_id=CLUSTER,
+                session_id="ehk-a/../b", capability_id=CAP, claims_digest=BINDING, expires_at=EXPIRY)
+
     def test_known_retired_fault_consumption_is_distinct_from_primary(self):
         fault = "cap_aaaaaaaaaaaaaaaaaaaaaaaa"
         candidate = reply()
