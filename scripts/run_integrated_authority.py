@@ -14,7 +14,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT),str(ROOT/'src')]
 from event_horizon.canonical import canonical_bytes
 from scripts.integrated_authority_session import IsolatedSession
-from scripts.integrated_gateway_campaign import IntegratedPackageLab, BridgedIntegratedPackageLab, OwnedQuorum
+from scripts.integrated_gateway_campaign import IntegratedPackageLab, BridgedIntegratedPackageLab, RecipientBridgedIntegratedPackageLab, OwnedQuorum
 from scripts.package_authority_oracle import owned_etcd_config
 from scripts.run_linux_isolation import preflight, checked_assets, run_round
 from scripts.run_package_isolation import build_worker
@@ -24,7 +24,9 @@ from scripts.verify_package_isolation import verify_report
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--assets',type=Path,default=ROOT/'firecracker/build/isolation')
-    parser.add_argument('--bridged-gateway',action='store_true',help='Opt-in actual guest to child-gateway bridge')
+    modes=parser.add_mutually_exclusive_group()
+    modes.add_argument('--bridged-gateway',action='store_true',help='Opt-in guest to child-gateway bridge')
+    modes.add_argument('--bridged-recipient',action='store_true',help='Opt-in KVM gateway, durable journal and external recipient')
     parser.add_argument('--etcd-endpoint',required=True)
     parser.add_argument('--etcd-cluster-id',required=True)
     parser.add_argument('--etcd-containers',nargs=3,required=True)
@@ -44,8 +46,9 @@ def main():
     quorum=OwnedQuorum(args.etcd_containers,config)
     lockfd=os.open('/run/event-horizon-isolation.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
     report={'schema':'event-horizon.package-isolation.v4','status':'INCOMPLETE',
-            'experiment_mode':('isolated-authority-firecracker-etcd-bridged' if args.bridged_gateway
-                               else 'isolated-authority-firecracker-etcd'),
+            'experiment_mode':('isolated-authority-firecracker-etcd-bridged-recipient' if args.bridged_recipient
+                               else ('isolated-authority-firecracker-etcd-bridged' if args.bridged_gateway
+                                     else 'isolated-authority-firecracker-etcd')),
             'source_commit':source,'rounds':[]}
     try:
         with os.fdopen(lockfd,'w') as lock:
@@ -59,7 +62,9 @@ def main():
                 try:
                     result,previous,attestation=run_round(assets,manifest,None,previous,
                         stop_mode='supervisor-channel-loss' if i==2 else 'requested',authority_session=session,
-                        package_lab=(BridgedIntegratedPackageLab if args.bridged_gateway else IntegratedPackageLab)(
+                        package_lab=(RecipientBridgedIntegratedPackageLab if args.bridged_recipient
+                                     else (BridgedIntegratedPackageLab if args.bridged_gateway
+                                           else IntegratedPackageLab))(
                             mode,binary,worker_build,authority_config=config,quorum=quorum))
                     if attestation!='synthetic-fixture':raise RuntimeError('attestation mode changed')
                     report['rounds'].append(result)
