@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -58,6 +59,13 @@ class OutcomeJournalTests(unittest.TestCase):
         self.assertFalse(restarted.reserve(**reservation()))
         self.assertEqual(restarted.observe(tenant="fixture-tenant", environment="synthetic",
                                            capability_id=CAP)["state"], "possibly-committed")
+
+    def test_concurrent_reservation_admits_only_one_dispatch(self):
+        def attempt(_):
+            return self.journal().reserve(**reservation())
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(attempt, (1, 2)))
+        self.assertEqual(sorted(outcomes), [False, True])
 
     def test_changed_binding_is_rejected_not_treated_as_replay(self):
         journal = self.journal()
