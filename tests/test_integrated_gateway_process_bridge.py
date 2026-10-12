@@ -48,6 +48,9 @@ class GuestGatewayBridgeTests(unittest.TestCase):
             "replay_database": str(root / "replay.sqlite"),
             "decay_database": str(root / "decay.sqlite"),
             "observe_integrated_dispatch": True,
+            "expected_request_digest": self.request.request_digest,
+            "expected_request_id": self.request.request_id,
+            "expected_capability_id": self.cap.claims.capability_id,
         }
         self.recorder = ExternalRecorder(root / "events.jsonl")
         self.host, self.service = socket.socketpair()

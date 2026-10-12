@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import sqlite3
+import os
+from types import SimpleNamespace
+from unittest.mock import patch
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 import unittest
@@ -48,6 +51,52 @@ class OutcomeJournalTests(unittest.TestCase):
 
     def journal(self):
         return DurableEffectJournal(self.path)
+
+    def test_unsafe_ancestor_even_if_leaf_private_is_rejected(self):
+        ancestor = self.path.parent / "writable"
+        ancestor.mkdir(mode=0o700)
+        private = ancestor / "private"
+        private.mkdir(mode=0o700)
+        ancestor.chmod(0o777)
+        with self.assertRaises(EffectJournalError):
+            DurableEffectJournal(private / "journal.sqlite")
+
+    def test_symlinked_ancestor_is_rejected(self):
+        target = self.path.parent / "actual"
+        target.mkdir(mode=0o700)
+        symlink = self.path.parent / "alias"
+        symlink.symlink_to(target, target_is_directory=True)
+        with self.assertRaises(EffectJournalError):
+            DurableEffectJournal(symlink / "journal.sqlite")
+
+    def test_mismatched_parent_ownership_is_rejected(self):
+        original = os.lstat
+        parent = self.path.parent
+        def substituted(path):
+            value = original(path)
+            if Path(path) == parent:
+                return SimpleNamespace(
+                    st_mode=value.st_mode, st_uid=os.geteuid() + 1001,
+                )
+            return value
+        with patch("event_horizon.effect_outcome_journal.os.lstat",
+                   side_effect=substituted):
+            with self.assertRaises(EffectJournalError):
+                DurableEffectJournal(self.path)
+
+    def test_mismatched_file_ownership_is_rejected(self):
+        self.path.touch(mode=0o600)
+        original = os.fstat
+        def substituted(fd):
+            value = original(fd)
+            return SimpleNamespace(
+                st_mode=value.st_mode, st_uid=os.geteuid() + 1001,
+                st_nlink=value.st_nlink,
+            )
+        with patch("event_horizon.effect_outcome_journal.os.fstat",
+                   side_effect=substituted):
+            with self.assertRaises(EffectJournalError):
+                DurableEffectJournal(self.path)
 
     def test_absolute_disk_path_required(self):
         with self.assertRaises(ValueError):
