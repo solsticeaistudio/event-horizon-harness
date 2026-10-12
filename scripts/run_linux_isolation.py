@@ -948,6 +948,19 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 if count != 1:
                     raise RuntimeError("authoritative consumption count is not one")
             observed["host_consumption_count"] = count
+            if package_lab is not None and getattr(package_lab, "bridged_gateway", False):
+                gateway_pid = getattr(receiver, "gateway_pid", None)
+                if (type(gateway_pid) is not int or gateway_pid <= 1
+                        or gateway_pid == os.getpid()
+                        or not Path(f"/proc/{gateway_pid}").exists()):
+                    raise RuntimeError("independent trusted gateway not alive during guest test")
+                observed["gateway_process_bridge"] = {
+                    "gateway_pid": gateway_pid,
+                    "supervisor_pid": os.getpid(),
+                    "independent_process": True,
+                    "guest_vsock_request_path": True,
+                    "recorder_resides_in_supervisor": True,
+                }
             observed["unredeemed_capability_at_teardown"] = spare.claims.capability_id
             authority_state = ((state / "replay.sqlite3",)
                                if service_config.get("authority_backend", "sqlite") == "sqlite" else ())

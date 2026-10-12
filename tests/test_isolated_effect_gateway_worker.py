@@ -59,6 +59,9 @@ class RealGatewaySubprocessTests(unittest.TestCase):
             reply = exchange(channel, {"unexpected": "guest-controlled"})
             self.assertFalse(reply["success"])
             self.assertEqual(reply["effect_state"], "not-started")
+            # Multi-request gateway now exits only when the owning supervisor
+            # closes its request stream. A single request is not a shutdown.
+            channel.shutdown(1)
             self.assertEqual(proc.wait(timeout=5), 0)
             self.assertTrue((self.path.parent / "evidence.jsonl").is_file())
         finally:

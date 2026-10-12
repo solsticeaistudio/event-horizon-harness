@@ -12,8 +12,13 @@ IMAGE="${EHH_LAB_ETCD_IMAGE:-quay.io/coreos/etcd:v3.6.0}"
 ADAPTIVE_STEPS=0
 ISOLATED_AUTHORITY=0
 EFFECT_CRASH=0
+BRIDGED_AUTHORITY=0
 if [[ "${1:-}" == "--isolated-authority" && $# == 1 ]]; then
   ISOLATED_AUTHORITY=1
+  shift
+fi
+if [[ "${1:-}" == "--bridged-authority" && $# == 1 ]]; then
+  BRIDGED_AUTHORITY=1
   shift
 fi
 if [[ "${1:-}" == "--effect-crash" && $# == 1 ]]; then
@@ -21,7 +26,7 @@ if [[ "${1:-}" == "--effect-crash" && $# == 1 ]]; then
   shift
 fi
 if (( $# > 2 )); then
-  echo "Usage: bash scripts/run_package_etcd_lab.sh [--isolated-authority | --effect-crash | --adaptive-steps 1..4]" >&2
+  echo "Usage: bash scripts/run_package_etcd_lab.sh [--isolated-authority | --bridged-authority | --effect-crash | --adaptive-steps 1..4]" >&2
   exit 2
 fi
 if (( $# > 0 )); then
@@ -152,6 +157,7 @@ mkdir -p artifacts/reports
 RUN_NAME="package-etcd-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 if (( ADAPTIVE_STEPS > 0 )); then RUN_NAME+="-adaptive"; fi
 if (( ISOLATED_AUTHORITY > 0 )); then RUN_NAME+="-isolated-authority"; fi
+if (( BRIDGED_AUTHORITY > 0 )); then RUN_NAME+="-bridged-authority"; fi
 if (( EFFECT_CRASH > 0 )); then RUN_NAME="effect-crash-$(date -u +%Y%m%dT%H%M%SZ)-$"; fi
 REPORT="artifacts/reports/${RUN_NAME}.json"
 echo "Source revision: $(git rev-parse HEAD)"
@@ -163,6 +169,10 @@ if (( EFFECT_CRASH > 0 )); then
   "$PY" scripts/run_effect_crash_campaign.py \
     --backend etcd --etcd-endpoint http://127.0.0.1:2379 \
     --etcd-cluster-id "$CLUSTER_ID" --report "$REPORT"
+elif (( BRIDGED_AUTHORITY > 0 )); then
+  sudo "$PY" scripts/run_integrated_authority.py --bridged-gateway \
+    --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
+    --etcd-containers "${CONTAINERS[@]}" --report "$REPORT"
 elif (( ISOLATED_AUTHORITY > 0 )); then
   sudo "$PY" scripts/run_integrated_authority.py \
     --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
@@ -185,7 +195,7 @@ else
 fi
 (
   cd "$(dirname "$REPORT")"
-  if (( ISOLATED_AUTHORITY == 0 && EFFECT_CRASH == 0 )); then
+  if (( ISOLATED_AUTHORITY == 0 && BRIDGED_AUTHORITY == 0 && EFFECT_CRASH == 0 )); then
     sha256sum "$(basename "$REPORT")" > "$(basename "$REPORT").sha256"
   fi
   sha256sum -c "$(basename "$REPORT").sha256"
