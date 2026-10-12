@@ -8,6 +8,7 @@ itself prove an effect committed: independent recipient/etcd observations do.
 from __future__ import annotations
 
 import re
+import threading
 
 HEX = re.compile(r"^[0-9a-f]{64}$")
 
@@ -33,8 +34,29 @@ class GatewayEventContract:
         self.authorized = False
         self.dispatched = False
         self.finished = False
+        self.current_capability = None
+        self._lock = threading.RLock()
+
+    def begin_request(self, message: object) -> None:
+        with self._lock:
+            if self.current_capability is not None:
+                raise GatewayEvidenceContractError("concurrent gateway exchange")
+            claim = None
+            if isinstance(message, dict):
+                token = message.get("capability")
+                if isinstance(token, dict) and isinstance(token.get("claims"), dict):
+                    claim = token["claims"].get("capability_id")
+            self.current_capability = claim if isinstance(claim, str) else None
+
+    def end_request(self) -> None:
+        with self._lock:
+            self.current_capability = None
 
     def check(self, event: dict) -> None:
+        with self._lock:
+            self._check(event)
+
+    def _check(self, event: dict) -> None:
         if (not isinstance(event, dict)
                 or set(event) != {"event_type", "payload", "source_id"}
                 or event.get("source_id") != "host-effect-service"
@@ -57,10 +79,12 @@ class GatewayEventContract:
             return
         if kind == "execution.authorized":
             if (keys != {"request_id", "request_digest", "capability_id"}
-                    or self.authorized or self.finished
-                    or payload != {"request_id": self.request_id,
-                                   "request_digest": self.digest,
-                                   "capability_id": self.capability_id}):
+                    or (self.authorized and not self.finished)
+                    or payload.get("request_id") != self.request_id
+                    or payload.get("request_digest") != self.digest
+                    or payload.get("capability_id") != self.current_capability
+                    or (not self.authorized and
+                        payload.get("capability_id") != self.capability_id)):
                 raise GatewayEvidenceContractError("forged or repeated authorization evidence")
             self.authorized = True
             return
