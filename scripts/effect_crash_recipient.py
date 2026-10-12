@@ -10,11 +10,23 @@ import os
 from pathlib import Path
 import socket
 import sqlite3
+import stat
 
 from event_horizon.canonical import digest
 
 
 def _recipient_db(path: Path) -> sqlite3.Connection:
+    # The external recipient owns its SQLite journal. Create it privately,
+    # without following symlinks; never silently accept attacker-owned files.
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        metadata = os.fstat(fd)
+        if (not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or metadata.st_mode & 0o077 or metadata.st_nlink != 1):
+            raise RuntimeError("recipient ledger is not a private owned file")
+    finally:
+        os.close(fd)
     db = sqlite3.connect(path, timeout=5, isolation_level=None)
     db.execute("PRAGMA synchronous=FULL")
     db.execute("""CREATE TABLE IF NOT EXISTS commits (
