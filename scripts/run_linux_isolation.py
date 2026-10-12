@@ -725,6 +725,11 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         "verification_context": verify_options(context),
         "replay_database": str(state / "replay.sqlite3"), "decay_database": str(state / "decay.sqlite3"),
     }
+    if package_lab is not None and getattr(package_lab, "bridged_gateway", False):
+        # Pinned before guest launch, never based on gateway-authored events.
+        service_config["expected_request_digest"] = request.request_digest
+        service_config["expected_request_id"] = request.request_id
+        service_config["expected_capability_id"] = capability.claims.capability_id
     if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
         # Bind the side effect to the supervisor's exact signed guest request.
         # Neither the untrusted package worker nor the VM selects its key.
@@ -1002,12 +1007,17 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                         or gateway_pid == os.getpid()
                         or not Path(f"/proc/{gateway_pid}").exists()):
                     raise RuntimeError("independent trusted gateway not alive during guest test")
+                if receiver.gateway_event_pid != gateway_pid:
+                    raise RuntimeError("gateway's signed dispatch PID is not supervisor's child PID")
+                if receiver.gateway_process is None or receiver.gateway_process.poll() is not None:
+                    raise RuntimeError("gateway child exited before independent identity observation")
                 observed["gateway_process_bridge"] = {
                     "gateway_pid": gateway_pid,
                     "supervisor_pid": os.getpid(),
                     "independent_process": True,
                     "guest_vsock_request_path": True,
                     "recorder_resides_in_supervisor": True,
+                    "identity_binding": "pidfd-dispatch-v1",
                 }
             observed["unredeemed_capability_at_teardown"] = spare.claims.capability_id
             authority_state = ((state / "replay.sqlite3",)
