@@ -205,7 +205,7 @@ else
 fi
 (
   cd "$(dirname "$REPORT")"
-  if (( ISOLATED_AUTHORITY == 0 && BRIDGED_AUTHORITY == 0 && EFFECT_CRASH == 0 )); then
+  if (( ISOLATED_AUTHORITY == 0 && BRIDGED_AUTHORITY == 0 && BRIDGED_RECIPIENT == 0 && EFFECT_CRASH == 0 )); then
     sha256sum "$(basename "$REPORT")" > "$(basename "$REPORT").sha256"
   fi
   sha256sum -c "$(basename "$REPORT").sha256"
