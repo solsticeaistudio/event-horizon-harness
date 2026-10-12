@@ -31,7 +31,7 @@ if [[ "${1:-}" == "--effect-crash" && $# == 1 ]]; then
   shift
 fi
 if (( $# > 2 )); then
-  echo "Usage: bash scripts/run_package_etcd_lab.sh [--isolated-authority | --bridged-authority | --effect-crash | --adaptive-steps 1..4]" >&2
+  echo "Usage: bash scripts/run_package_etcd_lab.sh [--isolated-authority | --bridged-authority | --bridged-recipient | --effect-crash | --adaptive-steps 1..4]" >&2
   exit 2
 fi
 if (( $# > 0 )); then
@@ -163,6 +163,7 @@ RUN_NAME="package-etcd-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 if (( ADAPTIVE_STEPS > 0 )); then RUN_NAME+="-adaptive"; fi
 if (( ISOLATED_AUTHORITY > 0 )); then RUN_NAME+="-isolated-authority"; fi
 if (( BRIDGED_AUTHORITY > 0 )); then RUN_NAME+="-bridged-authority"; fi
+if (( BRIDGED_RECIPIENT > 0 )); then RUN_NAME+="-bridged-recipient"; fi
 if (( EFFECT_CRASH > 0 )); then RUN_NAME="effect-crash-$(date -u +%Y%m%dT%H%M%SZ)-$"; fi
 REPORT="artifacts/reports/${RUN_NAME}.json"
 echo "Source revision: $(git rev-parse HEAD)"
