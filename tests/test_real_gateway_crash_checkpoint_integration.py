@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 import select
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
@@ -25,7 +24,7 @@ from scripts.capability_fixture_support import authority_context, issue_options,
 from scripts.effect_crash_process_supervisor import kill_at_checkpoint
 from scripts.effect_crash_recipient import observed_recipient
 from scripts.isolated_effect_gateway_worker import start_effect_gateway
-from scripts.isolated_gateway_transport import exchange, GatewayTransportError
+from scripts.isolated_gateway_transport import exchange
 from scripts.real_gateway_crash_checkpoints import PHASES
 
 
@@ -74,37 +73,6 @@ class RealGatewayCrashCheckpointTests(unittest.TestCase):
         }
         self.config_path = self.root / "gateway.json"
         self.config_path.write_text(json.dumps(config, sort_keys=True))
-        recipient_config = {
-            "recipient_socket": str(self.recipient_socket),
-            "recipient_database": str(self.recipient_path),
-            "effect_key": config["boundary"]["recipient_effect_key"],
-            "request_digest": self.request.request_digest,
-        }
-        cfg = self.root / "recipient.json"
-        cfg.write_text(json.dumps(recipient_config, sort_keys=True))
-        self.recipient = subprocess.Popen(
-            [sys.executable, "-u", "-m", "scripts.kvm_effect_recipient_service",
-             "--config", str(cfg)],
-            cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True,
-        )
-        self.addCleanup(self.stop_recipient)
-        ready, _, _ = select.select([self.recipient.stdout], [], [], 10)
-        self.assertTrue(ready, "recipient did not signal ready")
-        self.assertEqual(self.recipient.stdout.readline().strip(), b"READY")
-
-    def stop_recipient(self):
-        if self.recipient.poll() is None:
-            self.recipient.terminate()
-            try:
-                self.recipient.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self.recipient.kill()
-                self.recipient.wait(timeout=3)
-        self.recipient.stdout.close()
-        self.recipient.stderr.close()
-
     def payload(self, cap):
         return {"request": self.request.canonical_payload(), "capability": cap.to_dict()}
 
