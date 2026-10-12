@@ -131,6 +131,7 @@ class RecipientBridgedGateReceiver(BridgedGateReceiver):
         self.isolated_recipient = isolated_recipient
         self.recipient_pid = None
         self.recipient_status = None
+        self.recipient_ready = threading.Event()
 
     def run(self):
         import select
@@ -160,17 +161,33 @@ class RecipientBridgedGateReceiver(BridgedGateReceiver):
             )
             self.recipient_pid = recipient.pid
             ready, _, _ = select.select([recipient.stdout], [], [], 12)
-            if not ready or recipient.stdout.readline().strip() != b"READY":
-                raise RuntimeError("independent recipient failed to become ready")
-            if recipient.poll() is not None:
-                raise RuntimeError("recipient exited unexpectedly during startup")
+            if not ready:
+                raise RuntimeError("independent recipient readiness deadline expired")
+            line = recipient.stdout.readline().strip()
+            if line != b"READY" or recipient.poll() is not None:
+                error = b""
+                if recipient.poll() is not None and recipient.stderr is not None:
+                    error = recipient.stderr.read(2048)
+                raise RuntimeError(
+                    "independent recipient did not start: "
+                    + repr(line) + " " + error.decode("utf-8", errors="replace")
+                )
+            self.recipient_ready.set()
             super().run()
             if recipient.poll() is not None:
                 raise RuntimeError("recipient died while trusted gateway was active")
         except BaseException as exc:
             if self.failure is None:
                 self.failure = exc
+            # Never leave the guest's package worker connected to an inert
+            # socket when startup failed before BridgedGateReceiver.run().
+            try:
+                self.channel.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.channel.close()
         finally:
+            self.recipient_ready.set()
             if recipient is not None:
                 if recipient.poll() is None:
                     recipient.terminate()
