@@ -1,6 +1,7 @@
 """Actual guest/gateway and owned Docker quorum faults, never simulated results."""
 import copy
 import json
+import threading
 import subprocess
 import time
 
@@ -168,3 +169,17 @@ class IntegratedPackageLab(PackageLab):
     def close(self):
         try:self.quorum.restore()
         finally:super().close()
+
+
+class BridgedIntegratedPackageLab(IntegratedPackageLab):
+    """Opt-in lab using the real Firecracker guest and an out-of-process gate."""
+
+    bridged_gateway = True
+
+    def receiver(self, observer, recorder, config):
+        from scripts.integrated_gateway_process_bridge import BridgedGateReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = BridgedGateReceiver(
+            observer, recorder, config, self.target_thread,
+        )
+        return self.gate_receiver
