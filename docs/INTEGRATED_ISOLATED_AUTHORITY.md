@@ -27,8 +27,9 @@ five bytes and a 4096-byte ceiling. The new trusted session adapter pins the
 actual `dataset-read` request, ephemeral `ehk-*` session, package artifact,
 exact arguments, executor, synthetic measurement of Firecracker asset digests,
 and a 512-byte ceiling. No RPC accepts a new policy, compiled ceiling, verifier
-pin or measurement. The signer compiles its ceiling locally and limits issuance
-to three independently approved tokens: the useful operation, a retired quorum-fault
+pin or measurement. The signer pins its locally compiled ceiling at trusted service startup;
+its issue API accepts no externally supplied ceiling. The session permits
+at most three independently approved tokens: the useful operation, a retired quorum-fault
 probe, and an unused prior-session negative-control token.
 
 ## Trust architecture and execution order
@@ -133,7 +134,16 @@ remain explicit opt-ins.
 
 The [local validation record](evidence/2026-10-12-integrated-authority-validation.md)
 records the actual source revision, results and original report fingerprint.
-Raw evidence remains local for operator review.
+The original successful report and SHA-256 sidecar were subsequently published in
+[the 2026-10-12 evidence archive](evidence/artifacts/2026-10-12/README.md)
+through PR #32. The validation record describes the earlier pre-publication
+state. The report still requires an independently trusted witness before making
+external hardware-provenance claims.
+
+The exact experiment source commit `8f0ef678540d282f8b8b9aa1f67e8950fb0d5add`
+is preserved on the archival branch
+`evidence/source-2026-10-12-firecracker-etcd` (not on the squash-merged
+`main` lineage). Fetch that branch when independently reproducing the run.
 
 ## Remaining assumptions
 
