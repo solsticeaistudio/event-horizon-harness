@@ -66,9 +66,9 @@ class BridgedEvidenceModeTests(unittest.TestCase):
         mutations = (
             ("gateway_pid", 4000),
             ("gateway_pid", True),
-            ("gateway_pid", 1100),
-            ("gateway_pid", 2000),
-            ("supervisor_pid", 2000),
+            ("gateway_pid", 1120),
+            ("gateway_pid", 2001),
+            ("supervisor_pid", 2001),
             ("independent_process", False),
             ("guest_vsock_request_path", False),
             ("recorder_resides_in_supervisor", False),
