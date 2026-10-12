@@ -167,6 +167,10 @@ def guardian_decision(identity: str, request: ActionRequest, reference_time: flo
 
 
 def guardian_main(arguments) -> None:
+    session = None
+    if arguments.session_config:
+        from .session_authority import SessionAuthority
+        session = SessionAuthority(json.loads(Path(arguments.session_config).read_text()))
     signer = GuardianSigningKey(
         arguments.guardian, Ed25519PrivateKey.generate(),
     )
@@ -181,10 +185,13 @@ def guardian_main(arguments) -> None:
             raise ValueError("unsupported guardian method")
         request = ActionRequest.from_dict(message["request"])
         vote = signer.approve(
-            guardian_decision(signer.identity, request, arguments.reference_time),
+            (session.evaluate(signer.identity, request) if session else
+             guardian_decision(signer.identity, request, arguments.reference_time)),
             challenge=message["challenge"],
-            policy_digest=fixture_policy().policy_digest,
+            policy_digest=(session.policy if session else fixture_policy()).policy_digest,
         )
+        if session:
+            print(json.dumps({"audit": "guardian", "approval": vote.to_dict()}), flush=True)
         return vote.to_dict()
 
     serve(arguments.listener_fd, arguments.coordinator_uid, handle)
@@ -198,17 +205,25 @@ def signer_main(arguments) -> None:
         raise ValueError("signer config schema invalid")
     if configuration["reference_time"] != arguments.reference_time:
         raise ValueError("signer fixture clock was altered")
+    session = None
+    if arguments.session_config:
+        from .session_authority import SessionAuthority
+        session = SessionAuthority(json.loads(Path(arguments.session_config).read_text()))
     verifier = PinnedGuardianVerifier(configuration["public_keys"])
     broker = CapabilityBroker(ttl_seconds=60)
     issuer = PinnedGuardianCapabilityIssuer(
-        broker=broker, static_policy=fixture_policy(), verifier=verifier,
+        broker=broker, static_policy=session.policy if session else fixture_policy(), verifier=verifier,
+        challenge_ttl_seconds=2.0 if session else 15.0,
     )
     print(json.dumps({
         "type": "signer-ready", "public_key": broker.public_key_pem,
         "key_id": broker.key_id, "pid": os.getpid(), "uid": os.geteuid(),
     }), flush=True)
 
+    issued_count = 0
+
     def handle(message: dict) -> dict:
+        nonlocal issued_count
         kind = message.get("method")
         if kind == "challenge":
             if set(message) != {"method", "request"}:
@@ -228,16 +243,34 @@ def signer_main(arguments) -> None:
             approvals.append(SignedGuardianApproval(item["payload"], item["signature"]))
         # Crucial: compiled ceiling and fixture policy originate inside the
         # signer, not from coordinator RPC input.
-        context = authority_context(fixture_request(), arguments.reference_time)
-        if request.canonical_payload() != fixture_request().canonical_payload():
+        context = session.context if session else authority_context(fixture_request(), arguments.reference_time)
+        expected = session.request if session else fixture_request()
+        if request.canonical_payload() != expected.canonical_payload():
             raise GuardianAuthorityError("only exact approved fixture request is issuable")
+        if session and issued_count >= 2:
+            raise GuardianAuthorityError("session issuance budget exhausted")
         issued = issuer.issue(
             request, message["challenge"], approvals,
             context["compiled_ceiling"],
         )
+        issued_count += 1
         return {"capability": issued.to_dict(), "attestation": context["attestation"]}
 
-    serve(arguments.listener_fd, arguments.coordinator_uid, handle)
+    def audited(message):
+        from .canonical import digest
+        try:
+            result = handle(message)
+        except (ValueError, TypeError, KeyError, PermissionError) as exc:
+            if session:
+                print(json.dumps({"audit": "signer", "message_digest": digest(message),
+                                  "accepted": False, "error_class": type(exc).__name__}), flush=True)
+            raise
+        if session:
+            print(json.dumps({"audit": "signer", "message_digest": digest(message),
+                              "accepted": True, "result_digest": digest(result)}), flush=True)
+        return result
+
+    serve(arguments.listener_fd, arguments.coordinator_uid, audited)
 
 
 def _challenge(signer: str, request: ActionRequest) -> str:
@@ -342,6 +375,7 @@ def main() -> None:
     parser.add_argument("--coordinator-uid", type=int)
     parser.add_argument("--guardian")
     parser.add_argument("--pins-path")
+    parser.add_argument("--session-config")
     parser.add_argument("--reference-time", type=float)
     parser.add_argument("--scenario")
     parser.add_argument("--guardian-paths")

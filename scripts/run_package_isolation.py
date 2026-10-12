@@ -48,6 +48,7 @@ class GateReceiver:
         self.receipts = []
         self.failure = None
         self.target_thread = target_thread
+        self.dispatches = 0
 
     def append(self, event_type, payload):
         event = self.recorder.append(event_type, payload, source_id="host-effect-service")
@@ -60,6 +61,14 @@ class GateReceiver:
             if self.target_thread is not None:
                 self.target_thread.start()
             gate = DatasetEffectBoundary(self.config, self)
+            if self.config.get("observe_integrated_dispatch") is True:
+                original = gate.gateway.effects["object.read"]
+                def observed_dispatch(request):
+                    self.dispatches += 1
+                    self.append("execution.dispatch", {"request_digest": request.request_digest,
+                                                       "dispatch_count": self.dispatches})
+                    return original(request)
+                gate.gateway.effects["object.read"] = observed_dispatch
             with self.channel, self.channel.makefile("rb") as stream:
                 for _ in range(24):
                     message = read_frame(stream)

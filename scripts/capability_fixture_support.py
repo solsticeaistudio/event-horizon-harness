@@ -29,6 +29,7 @@ def authority_context(
     method: str = "simulator",
     required_trust: str = "simulated",
     measurement: str = "1" * 64,
+    max_output_bytes: int = 4_096,
 ) -> dict[str, Any]:
     verifier_policy_digest = digest({"fixture-verifier": request.executor_id})
     attestation: dict[str, Any] = {
@@ -59,7 +60,7 @@ def authority_context(
             request.operation: OperationRule(
                 resources=frozenset({request.resource_id}),
                 allowed_argument_keys=frozenset(request.arguments),
-                max_output_bytes=4_096,
+                max_output_bytes=max_output_bytes,
             )
         },
         allowed_agents=frozenset({request.agent_id}),
@@ -73,7 +74,7 @@ def authority_context(
         action_resources={request.operation: (request.resource_id,)},
         argument_constraints={request.operation: tuple(request.arguments)},
         data_classes=("internal",),
-        maximum_read_bytes=4_096,
+        maximum_read_bytes=max_output_bytes,
         maximum_write_bytes=0,
         maximum_calls=1,
         maximum_parallelism=1,

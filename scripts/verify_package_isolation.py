@@ -21,10 +21,11 @@ from scripts.verify_linux_isolation import verify_rounds  # noqa: E402
 def verify_report(report: dict) -> None:
     schema = report["schema"]
     if schema not in {"event-horizon.package-isolation.v1", "event-horizon.package-isolation.v2",
-                      "event-horizon.package-isolation.v3"}:
+                      "event-horizon.package-isolation.v3", "event-horizon.package-isolation.v4"}:
         raise ValueError("unknown package experiment evidence schema")
     adaptive = schema.endswith(".v3")
-    distributed = schema.endswith((".v2", ".v3"))
+    distributed = schema.endswith((".v2", ".v3", ".v4"))
+    integrated = schema.endswith(".v4")
     if adaptive:
         cfg = report.get("adaptive")
         if (not isinstance(cfg, dict) or set(cfg) != {
@@ -49,7 +50,8 @@ def verify_report(report: dict) -> None:
             raise ValueError("invalid pinned distributed authority context")
     elif authority != {"backend": "sqlite"}:
         raise ValueError("local package evidence cannot advertise distributed authority")
-    verify_rounds(report, schema=schema, triggers=["requested-stop"] * 3)
+    verify_rounds(report, schema=schema, triggers=(["requested-stop", "requested-stop", "supervisor-channel-closed"]
+                                                 if integrated else ["requested-stop"] * 3))
     for index, run in enumerate(report["rounds"]):
         observed = run["observations"]
         package = observed["package"]
@@ -197,6 +199,10 @@ def verify_report(report: dict) -> None:
                 raise ValueError("invalid measured duration")
         if package["automatic_attack_detection"] is not False or package["detection_delay_ms"] is not None:
             raise ValueError("this lab does not measure automatic detection")
+
+    if integrated:
+        from scripts.verify_integrated_authority import verify_integrated
+        verify_integrated(report)
 
 
 def main() -> int:
