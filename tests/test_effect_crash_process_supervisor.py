@@ -45,14 +45,15 @@ class CrashSupervisorTests(unittest.TestCase):
         self.assertIsNotNone(proc.poll())
 
     def test_invalid_markers_rejected(self):
-        proc = self.child("import time; time.sleep(30)")
-        try:
-            for marker in ("", "a:b", "a\\nb"):
+        for marker in ("", "a:b", "a\nb"):
+            proc = self.child("import time; time.sleep(30)")
+            try:
                 with self.assertRaises(ValueError):
                     kill_at_checkpoint(proc, marker, timeout=1)
-        finally:
-            proc.kill()
-            proc.wait(timeout=5)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
 
 
 if __name__ == "__main__":
