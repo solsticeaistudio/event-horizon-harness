@@ -70,7 +70,26 @@ class DatasetEffectBoundary:
             tenant=context["tenant"],
             environment=context["environment"],
             outcome_journal=self.outcome_journal,
+            pre_dispatch_rules={"object.read": self._preflight_read_ceiling},
         )
+
+    def _preflight_read_ceiling(self, request: ActionRequest, claims: Any) -> bool:
+        """Bound the known read response BEFORE invoking a side-effect handler.
+
+        The post-dispatch response-size check stays as defense in depth.
+        Unpredictable external actions need a separate trusted preflight policy.
+        """
+        values = self.config["dataset"]
+        offset = request.arguments.get("offset")
+        length = request.arguments.get("length")
+        ceiling = getattr(claims, "max_output_bytes", None)
+        if (type(offset) is not int or type(length) is not int
+                or type(ceiling) is not int or ceiling < 0
+                or not (0 <= offset < len(values) and
+                        0 < length <= 512 and offset + length <= len(values))):
+            return False
+        output = values[offset:offset + length]
+        return len(json.dumps(output, sort_keys=True, default=str).encode("utf-8")) <= ceiling
 
     def _read_dataset(self, request: ActionRequest) -> str:
         offset, length = request.arguments["offset"], request.arguments["length"]

@@ -103,7 +103,11 @@ def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None,
                 raise ValueError("crash hooks require durable external recipient and journal")
             probe = GatewayCrashProbe(crash_phase)
 
+            existing_rule = boundary.gateway.pre_dispatch_rules.get("object.read")
+
             def before_reserve(_request, _claims):
+                if existing_rule is not None and existing_rule(_request, _claims) is not True:
+                    return False
                 probe.mark("before_reservation")
                 return True
 
