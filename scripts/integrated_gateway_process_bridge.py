@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -118,6 +119,38 @@ class BridgedGateReceiver(GateReceiver):
                 self.failure = self.record_failure
 
 
+
+# Explicit import allowlist. The restricted process must not depend on
+# traversing an operator's private checkout after all DAC caps are dropped.
+_RECIPIENT_MODULES = {
+    "scripts/__init__.py": "scripts/__init__.py",
+    "scripts/kvm_effect_recipient_service.py": "scripts/kvm_effect_recipient_service.py",
+    "scripts/effect_crash_recipient.py": "scripts/effect_crash_recipient.py",
+    "src/event_horizon/__init__.py": "event_horizon/__init__.py",
+    "src/event_horizon/canonical.py": "event_horizon/canonical.py",
+}
+
+
+def stage_private_recipient_runtime(control_dir: Path) -> Path:
+    """Stage only required host-trusted modules under a private root-owned dir.
+
+    The owner can traverse these files with UID 0 after setpriv removes DAC
+    override capabilities. No code or resource gets exposed to the VM or
+    compromised package worker.
+    """
+    source_root = Path(__file__).resolve().parents[1]
+    runtime = control_dir / "recipient-runtime"
+    runtime.mkdir(mode=0o700)
+    runtime.chmod(0o700)
+    for source, destination in _RECIPIENT_MODULES.items():
+        original = source_root / source
+        target = runtime / destination
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target.write_bytes(original.read_bytes())
+        target.chmod(0o400)
+    return runtime
+
+
 class RecipientBridgedGateReceiver(BridgedGateReceiver):
     """Independent durable recipient, kept alive outside gateway lifetime.
 
@@ -149,13 +182,16 @@ class RecipientBridgedGateReceiver(BridgedGateReceiver):
         try:
             path.write_bytes(canonical_bytes(recipient_config))
             path.chmod(0o600)
-            cmd = [sys.executable, "-u", "-m",
+            # Stage a minimal runtime before privilege reduction. A root process
+            # without DAC override cannot necessarily traverse /home/<user>.
+            runtime = stage_private_recipient_runtime(path.parent)
+            cmd = [sys.executable, "-E", "-u", "-m",
                    "scripts.kvm_effect_recipient_service", "--config", str(path)]
             if self.isolated_recipient:
                 cmd = ["unshare", "--net", "--", "setpriv",
                        "--bounding-set=-all", "--no-new-privs", "--", *cmd]
             recipient = subprocess.Popen(
-                cmd, cwd=Path(__file__).resolve().parents[1],
+                cmd, cwd=runtime,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, start_new_session=True,
             )
