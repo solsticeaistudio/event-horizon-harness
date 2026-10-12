@@ -994,12 +994,27 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                         or recipient_pid == getattr(receiver, "gateway_pid", None)
                         or not Path(f"/proc/{recipient_pid}").exists()):
                     raise RuntimeError("durable recipient and journal did not match the one guest effect")
+                # The trusted supervisor independently reads the recipient
+                # ledger before confirming the journal. No negative/absence
+                # result ever frees a reservation for redispatch.
+                from scripts.recipient_journal_reconciliation import reconcile_durable_commit
+                reconciled = reconcile_durable_commit(
+                    recipient_database=service_config["recipient_database"],
+                    journal=journal, tenant="default", environment="synthetic",
+                    effect_key=service_config["recipient_effect_key"],
+                    capability_id=capability.claims.capability_id,
+                    request_digest=request.request_digest,
+                    claims_digest=digest(capability.claims.to_dict()),
+                )
+                if reconciled["receipt_digest"] != snapshot["rows_digest"]:
+                    raise RuntimeError("recipient observation changed during reconciliation")
                 observed["external_recipient"] = {
                     "count": snapshot["count"],
                     "rows_digest": snapshot["rows_digest"],
                     "recipient_pid": recipient_pid,
-                    "journal_state": reservation["state"],
+                    "journal_state": reconciled["state"],
                     "request_digest": request.request_digest,
+                    "receipt_digest": reconciled["receipt_digest"],
                 }
             if package_lab is not None and getattr(package_lab, "bridged_gateway", False):
                 gateway_pid = getattr(receiver, "gateway_pid", None)
