@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from event_horizon.effect_outcome_journal import DurableEffectJournal, EffectJournalError
+from event_horizon.effect_outcome_journal import DurableEffectJournal, EffectJournalError, EffectAlreadyReserved
 from event_horizon.models import ActionRequest
 from event_horizon.trusted_effect_gateway import TrustedEffectGateway
 
@@ -22,7 +22,8 @@ RECEIPT = "c" * 64
 
 def reservation():
     return dict(tenant="fixture-tenant", environment="synthetic",
-                capability_id=CAP, request_digest=HASH, claims_digest=CLAIMS)
+                effect_key="e" * 64, capability_id=CAP,
+                request_digest=HASH, claims_digest=CLAIMS)
 
 
 def request(*, length=5):
@@ -70,9 +71,18 @@ class OutcomeJournalTests(unittest.TestCase):
     def test_changed_binding_is_rejected_not_treated_as_replay(self):
         journal = self.journal()
         journal.reserve(**reservation())
-        with self.assertRaises(EffectJournalError):
+        with self.assertRaises(EffectAlreadyReserved):
             journal.reserve(**(reservation() | {"request_digest": "d" * 64}))
         self.assertFalse(journal.reserve(**reservation()))
+
+    def test_new_capability_cannot_repeat_same_logical_effect(self):
+        journal = self.journal()
+        self.assertTrue(journal.reserve(**reservation()))
+        new_token = reservation() | {"capability_id": "cap_different",
+                                     "claims_digest": "f" * 64}
+        with self.assertRaises(EffectAlreadyReserved):
+            self.journal().reserve(**new_token)
+        self.assertFalse(self.journal().reserve(**reservation()))
 
     def test_confirm_only_from_explicit_trusted_recipient_observation(self):
         journal = self.journal()
@@ -114,6 +124,38 @@ class OutcomeJournalTests(unittest.TestCase):
         self.assertEqual(denied.effect_state, "possibly-committed")
         self.assertEqual(denied.error_class, "prior-dispatch-unknown")
         self.assertEqual(executed, ["recipient committed"])
+
+    def test_gateway_blocks_new_capability_for_same_logical_action(self):
+        actions = []
+        args = dict(executor_measurement="fixture", device_id="fixture",
+                    verifier_policy_digest="policy", policy_digest="policy")
+        current = request()
+
+        class FreshVerifier:
+            def __init__(self, cap_id):
+                self.cap_id = cap_id
+            def verify_and_consume(self, capability, request, **kwargs):
+                return SimpleNamespace(
+                    capability_id=self.cap_id, max_output_bytes=64,
+                    to_dict=lambda: {"capability_id": self.cap_id, "max_output_bytes": 64},
+                )
+
+        def make_gate(cap_id, effect):
+            return TrustedEffectGateway(FreshVerifier(cap_id), {"object.read": effect},
+                                        Mock(), outcome_journal=self.journal())
+
+        first_id = "cap_original"
+        second_id = "cap_new"
+        first = make_gate(first_id, lambda _: actions.append("committed") or "ok")
+        self.assertTrue(first.execute(current,
+            SimpleNamespace(claims=SimpleNamespace(capability_id=first_id)), {},
+            **args).accepted)
+        second = make_gate(second_id, lambda _: actions.append("UNSAFE SECOND DISPATCH"))
+        blocked = second.execute(current,
+            SimpleNamespace(claims=SimpleNamespace(capability_id=second_id)), {}, **args)
+        self.assertEqual(blocked.effect_state, "possibly-committed")
+        self.assertEqual(blocked.error_class, "prior-effect-unknown")
+        self.assertEqual(actions, ["committed"])
 
     def test_trusted_pre_dispatch_rule_prevents_oversized_known_read(self):
         journal = self.journal()
