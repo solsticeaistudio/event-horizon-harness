@@ -16,10 +16,10 @@ The base inspected was `e13160b55af2b4c3eda93b8e8a10b0026573c80f`.
 |---|---|---|
 | `signed_guardian_authority.py` | Already verifies four pinned Ed25519 approvals, request/policy/challenge bindings and local policy; signer challenge is single-use | Reused without replacing its authorization contract |
 | `isolated_authority_lab.py` | Services generated private keys after privilege drop but pinned a different static fixture | Optional trusted session configuration; existing peer-credential RPC and private service audit pipes |
-| `run_linux_isolation.run_round()` | Issued both usable and spare capability via in-process broker for a new session | Explicit `authority_session`; rejects any supplied broker; requests both capabilities from isolated signer |
+| `run_linux_isolation.run_round()` | Issued both usable and spare capability via in-process broker for a new session | Explicit `authority_session`; rejects any supplied broker; requests the useful, fault-probe and spare capabilities from the isolated signer |
 | `run_package_isolation.GateReceiver` | Trusted host gateway owns replay state, pins and effect callback; worker holds only request descriptor | Optional direct handler-dispatch observation; existing gateway still makes every authority decision |
 | `authority_backends.py` | etcd VERSION==0 compare-and-put; pinned response cluster, revision/term and exact collision record; no retry/fallback | Reused unchanged |
-| `package_authority_oracle.py` | Separate host linearizable range verifies exact capability, claims digest, expiry and record count | Reused unchanged after actual guest execution |
+| `package_authority_oracle.py` | Separate host linearizable range verifies exact capability, claims digest, expiry and record count | Retains exact primary binding; permits one separately bound retired fault token and records primary/total counts separately |
 | Evidence verifiers | v1/v2/v3 package reports describe baseline/static/adaptive experiments | v4 adds integrated authority, guest fault controls and supervisor-channel-loss teardown |
 
 The incompatible original fixture used a fixed session, `synthetic-dataset`,
@@ -130,6 +130,10 @@ Portable CI runs real AF_UNIX services under one UID, adapter/contract regressio
 and deterministic verifier-tampering tests. It does not claim Firecracker or
 privileged namespace coverage. Existing live etcd and privileged KVM experiments
 remain explicit opt-ins.
+
+The [local validation record](evidence/2026-10-12-integrated-authority-validation.md)
+records the actual source revision, results and original report fingerprint.
+Raw evidence remains local for operator review.
 
 ## Remaining assumptions
 
