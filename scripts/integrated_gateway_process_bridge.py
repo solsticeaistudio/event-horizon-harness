@@ -116,3 +116,71 @@ class BridgedGateReceiver(GateReceiver):
                     self.failure = RuntimeError("gateway evidence relay failed to terminate")
             if self.record_failure is not None and self.failure is None:
                 self.failure = self.record_failure
+
+
+class RecipientBridgedGateReceiver(BridgedGateReceiver):
+    """Independent durable recipient, kept alive outside gateway lifetime.
+
+    The host alone owns the recipient config and SQLite database. A missing
+    readiness acknowledgement fails this run; it cannot become a test denial.
+    """
+
+    def __init__(self, channel, recorder, config, target_thread=None,
+                 *, isolated_recipient=True):
+        super().__init__(channel, recorder, config, target_thread)
+        self.isolated_recipient = isolated_recipient
+        self.recipient_pid = None
+        self.recipient_status = None
+
+    def run(self):
+        import select
+        import sys
+
+        cfg = self.config
+        path = Path(cfg["recipient_database"]).with_name("recipient-config.json")
+        recipient_config = {
+            "recipient_socket": cfg["recipient_socket"],
+            "recipient_database": cfg["recipient_database"],
+            "effect_key": cfg["recipient_effect_key"],
+            "request_digest": cfg["recipient_request_digest"],
+        }
+        recipient = None
+        try:
+            path.write_bytes(canonical_bytes(recipient_config))
+            path.chmod(0o600)
+            cmd = [sys.executable, "-u", "-m",
+                   "scripts.kvm_effect_recipient_service", "--config", str(path)]
+            if self.isolated_recipient:
+                cmd = ["unshare", "--net", "--", "setpriv",
+                       "--bounding-set=-all", "--no-new-privs", "--", *cmd]
+            recipient = subprocess.Popen(
+                cmd, cwd=Path(__file__).resolve().parents[1],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, start_new_session=True,
+            )
+            self.recipient_pid = recipient.pid
+            ready, _, _ = select.select([recipient.stdout], [], [], 12)
+            if not ready or recipient.stdout.readline().strip() != b"READY":
+                raise RuntimeError("independent recipient failed to become ready")
+            if recipient.poll() is not None:
+                raise RuntimeError("recipient exited unexpectedly during startup")
+            super().run()
+            if recipient.poll() is not None:
+                raise RuntimeError("recipient died while trusted gateway was active")
+        except BaseException as exc:
+            if self.failure is None:
+                self.failure = exc
+        finally:
+            if recipient is not None:
+                if recipient.poll() is None:
+                    recipient.terminate()
+                    try:
+                        recipient.wait(timeout=4)
+                    except subprocess.TimeoutExpired:
+                        recipient.kill()
+                        recipient.wait(timeout=4)
+                self.recipient_status = recipient.returncode
+                if recipient.stdout is not None:
+                    recipient.stdout.close()
+                if recipient.stderr is not None:
+                    recipient.stderr.close()
