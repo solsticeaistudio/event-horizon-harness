@@ -40,6 +40,7 @@ from event_horizon.trusted_effect_gateway import TrustedEffectGateway, select_co
 from scripts.capability_fixture_support import authority_context, issue_options
 from scripts.package_authority_oracle import inspect_committed_consumption, owned_etcd_config
 from scripts.effect_crash_process_supervisor import kill_at_checkpoint
+from scripts.effect_crash_recipient import observed_recipient, recipient_main
 
 SCHEMA = "event-horizon.effect-process-crash.v1"
 PHASES = (
@@ -56,66 +57,6 @@ def _write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
     os.chmod(path, 0o600)
 
-
-def _recipient_db(path: Path) -> sqlite3.Connection:
-    db = sqlite3.connect(path, timeout=5, isolation_level=None)
-    db.execute("PRAGMA synchronous=FULL")
-    db.execute("""CREATE TABLE IF NOT EXISTS commits (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        effect_key TEXT NOT NULL,
-        request_digest TEXT NOT NULL
-    )""")
-    return db
-
-
-def observed_recipient(path: Path) -> dict:
-    """Independent supervisor read, not the gateway's return value."""
-    with _recipient_db(path) as db:
-        rows = db.execute(
-            "SELECT effect_key, request_digest FROM commits ORDER BY id"
-        ).fetchall()
-    return {"count": len(rows), "rows_digest": digest([list(row) for row in rows])}
-
-
-def recipient_main(config: dict) -> int:
-    """Separate recipient service; its journal remains alive across gateway kills."""
-    socket_path = config["recipient_socket"]
-    db_path = Path(config["recipient_database"])
-    if os.path.lexists(socket_path):
-        raise RuntimeError("recipient endpoint already exists")
-    with _recipient_db(db_path):
-        pass
-    service = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    service.bind(socket_path)
-    os.chmod(socket_path, 0o600)
-    service.listen(4)
-    service.settimeout(1)
-    print("READY", flush=True)
-    try:
-        while True:
-            try:
-                client, _ = service.accept()
-            except socket.timeout:
-                continue
-            with client:
-                client.settimeout(3)
-                data = client.recv(4096)
-                payload = json.loads(data)
-                if (set(payload) != {"effect_key", "request_digest"}
-                        or payload["effect_key"] != config["effect_key"]
-                        or payload["request_digest"] != config["request_digest"]):
-                    client.sendall(b'{"error":"invalid-binding"}\n')
-                    continue
-                with _recipient_db(db_path) as db:
-                    db.execute("BEGIN IMMEDIATE")
-                    db.execute(
-                        "INSERT INTO commits(effect_key, request_digest) VALUES (?, ?)",
-                        (payload["effect_key"], payload["request_digest"]),
-                    )
-                    db.execute("COMMIT")
-                client.sendall(b'{"committed":true}\n')
-    finally:
-        service.close()
 
 
 def mark(phase: str) -> None:
