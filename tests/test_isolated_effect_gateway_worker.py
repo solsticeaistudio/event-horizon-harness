@@ -14,6 +14,7 @@ import unittest
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from event_horizon.broker import capability_key_id
 
 from scripts.isolated_effect_gateway_worker import start_effect_gateway
 from scripts.isolated_gateway_transport import exchange, GatewayTransportError
@@ -40,7 +41,7 @@ class RealGatewaySubprocessTests(unittest.TestCase):
                 "replay_database": str(root / "replay.sqlite"),
                 "decay_database": str(root / "decay.sqlite"),
                 "public_key_pem": public,
-                "key_id": "fixture-key",
+                "key_id": capability_key_id(private.public_key()),
                 "verification_context": {"tenant": "default", "environment": "synthetic"},
             },
         }
