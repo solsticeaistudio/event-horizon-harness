@@ -17,6 +17,7 @@ import sys
 from event_horizon.effect_boundary import DatasetEffectBoundary
 from event_horizon.protocol import encode_frame, read_frame
 from event_horizon.recorder import ExternalRecorder
+from scripts.real_gateway_crash_checkpoints import PHASES, GatewayCrashProbe, ReservationProbe, RecorderProbe
 
 
 class HostRecorderProxy:
@@ -41,10 +42,13 @@ class HostRecorderProxy:
         self.channel.close()
 
 
-def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False):
+def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False,
+                         crash_phase: str | None = None):
     """Return a child and request socket; optionally a supervisor recorder socket."""
     if not config_path.is_file():
         raise FileNotFoundError(config_path)
+    if crash_phase is not None and crash_phase not in PHASES:
+        raise ValueError("untrusted gateway crash phase")
     parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
     record_parent, record_child = (
         socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -55,12 +59,15 @@ def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False):
             sys.executable, "-m", "scripts.isolated_effect_gateway_worker",
             "--fd", str(child.fileno()), "--config", str(config_path),
         ]
+        if crash_phase is not None:
+            command += ["--crash-phase", crash_phase]
         fds = [child.fileno()]
         if record_child is not None:
             command += ["--recorder-fd", str(record_child.fileno())]
             fds.append(record_child.fileno())
         proc = subprocess.Popen(
-            command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            command, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE if crash_phase is not None else subprocess.DEVNULL,
             stderr=subprocess.PIPE, close_fds=True, pass_fds=tuple(fds),
             start_new_session=True,
         )
@@ -76,7 +83,8 @@ def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False):
             record_child.close()
 
 
-def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None) -> None:
+def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None,
+                crash_phase: str | None = None) -> None:
     """Serve up to 24 guest-shaped requests via the genuine trusted boundary."""
     config = json.loads(config_path.read_text())
     if not isinstance(config, dict) or set(config) != {"boundary", "recorder_path"}:
@@ -89,6 +97,29 @@ def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None) -
     boundary = None
     try:
         boundary = DatasetEffectBoundary(boundary_config, recorder)
+        if crash_phase is not None:
+            # Test instrumentation stays outside TrustedEffectGateway itself.
+            if boundary.gateway.outcome_journal is None or not boundary_config.get("recipient_socket"):
+                raise ValueError("crash hooks require durable external recipient and journal")
+            probe = GatewayCrashProbe(crash_phase)
+
+            def before_reserve(_request, _claims):
+                probe.mark("before_reservation")
+                return True
+
+            boundary.gateway.pre_dispatch_rules["object.read"] = before_reserve
+            boundary.gateway.outcome_journal = ReservationProbe(
+                boundary.gateway.outcome_journal, probe,
+            )
+            original_handler = boundary.gateway.effects["object.read"]
+
+            def commit_then_pause(request):
+                output = original_handler(request)
+                probe.mark("after_recipient_commit_before_gateway_ack")
+                return output
+
+            boundary.gateway.effects["object.read"] = commit_then_pause
+            boundary.gateway.recorder = RecorderProbe(boundary.gateway.recorder, probe)
         if recorder_fd is not None and boundary_config.get("observe_integrated_dispatch"):
             original = boundary.gateway.effects["object.read"]
 
@@ -117,6 +148,8 @@ def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None) -
                     response = boundary.execute(
                         message, peer_uid=boundary_config["vm_uid"],
                     )
+                    if crash_phase == "after_completion_before_client_ack" and response.get("success"):
+                        probe.mark("after_completion_before_client_ack")
                     channel.sendall(encode_frame(response))
     finally:
         if boundary is not None:
@@ -130,8 +163,10 @@ def main() -> None:
     parser.add_argument("--fd", type=int, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--recorder-fd", type=int)
+    parser.add_argument("--crash-phase", choices=PHASES)
     args = parser.parse_args()
-    run_gateway(args.fd, args.config, recorder_fd=args.recorder_fd)
+    run_gateway(args.fd, args.config, recorder_fd=args.recorder_fd,
+                crash_phase=args.crash_phase)
 
 
 if __name__ == "__main__":
