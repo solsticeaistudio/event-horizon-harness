@@ -17,12 +17,12 @@ jobs:
     name: Python 3.11
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
           cache: pip
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: npm
@@ -47,7 +47,7 @@ jobs:
           python scripts/verify_effect_crash_campaign.py "$RUNNER_TEMP/ehh-effect-crash.json"
       - name: Publish signed host-process SIGKILL evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ehh-effect-crash-${{ github.run_id }}
           path: |
@@ -59,7 +59,7 @@ jobs:
         run: python scripts/run_gateway_socket_campaign.py --report "$RUNNER_TEMP/ehh-gateway-attack.json"
       - name: Publish actual-gateway attack outcomes
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ehh-gateway-attack-${{ github.run_id }}
           path: ${{ runner.temp }}/ehh-gateway-attack.json
@@ -73,7 +73,7 @@ jobs:
             --distinct-uids --report "$RUNNER_TEMP/ehh-coordinator-isolation-uids.json"
       - name: Publish coordinator-compromise results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ehh-coordinator-isolation-${{ github.run_id }}
           path: |
@@ -88,8 +88,8 @@ jobs:
     name: TypeScript / Node 20
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: npm
@@ -107,12 +107,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [python, typescript]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
           cache: pip
@@ -132,7 +132,7 @@ jobs:
       - name: Independently verify adversarial evidence bundle
         run: python scripts/verify_adversarial_boundary.py "$RUNNER_TEMP/eh-adversarial/report.json"
       - name: Publish synthetic adversarial evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: eh-adversarial-evidence
           path: |
@@ -147,5 +147,7 @@ jobs:
         run: python scripts/verify_certificate.py "$RUNNER_TEMP/event-horizon-artifacts/latest-containment-certificate.json" --trusted-key "$RUNNER_TEMP/event-horizon-artifacts/latest-certificate-signer-public.pem"
       - name: Verify selected fixed vectors
         run: python scripts/verify_capability_vectors.py test-vectors/valid-capability.json test-vectors/replayed-capability.json test-vectors/unknown-field.json test-vectors/invalid-signature.json
+      - name: Enforce immutable GitHub Actions references
+        run: python scripts/check_action_sha_pins.py
       - name: Enforce tracked-artifact and secret policy
         run: python scripts/check_repository_policy.py
