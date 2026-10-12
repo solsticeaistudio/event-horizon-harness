@@ -80,9 +80,51 @@ def verify_authority(value, *, require_os=True):
     return session,caps
 
 
+BASE_MODE = 'isolated-authority-firecracker-etcd'
+BRIDGED_MODE = 'isolated-authority-firecracker-etcd-bridged'
+
+
+def verify_gateway_process_mode(report):
+    """Mode-specific signed observations; never reinterpret host-only tests as KVM.
+
+    Called *in addition* to all original v4 guardian, etcd, guest, receipt and
+    teardown checks, not instead of any existing condition.
+    """
+    mode = report.get('experiment_mode')
+    require(mode in (BASE_MODE, BRIDGED_MODE), 'wrong experiment mode')
+    bridged = mode == BRIDGED_MODE
+    require(len(report['rounds']) == 3, 'integrated run must contain three rounds')
+    for run in report['rounds']:
+        observed = run['observations']
+        marker = observed.get('gateway_process_bridge')
+        if not bridged:
+            require(marker is None and 'gateway_process_bridge' not in observed,
+                    'baseline run cannot claim process bridge')
+            continue
+        require(isinstance(marker, dict) and set(marker) == {
+            'gateway_pid', 'supervisor_pid', 'independent_process',
+            'guest_vsock_request_path', 'recorder_resides_in_supervisor',
+        }, 'missing or malformed gateway process bridge evidence')
+        gateway_pid, supervisor_pid = marker['gateway_pid'], marker['supervisor_pid']
+        require(type(gateway_pid) is int and type(supervisor_pid) is int
+                and gateway_pid > 1 and supervisor_pid > 1
+                and gateway_pid != supervisor_pid,
+                'gateway process is not distinct from supervisor')
+        require(all(marker[field] is True for field in (
+            'independent_process', 'guest_vsock_request_path',
+            'recorder_resides_in_supervisor',
+        )), 'gateway process or guest path claim missing')
+        authority = run['isolated_authority']
+        role_pids = {role['pid'] for role in authority['roles'].values()}
+        coordinator_pids = {row['pid'] for row in authority.get('coordinators', [])}
+        require(gateway_pid not in role_pids | coordinator_pids
+                and supervisor_pid not in role_pids | coordinator_pids,
+                'gateway or supervisor shares guardian/coordinator process')
+
+
 def verify_integrated(report):
     require(report['schema']=='event-horizon.package-isolation.v4','not integrated evidence')
-    require(report['experiment_mode']=='isolated-authority-firecracker-etcd','wrong experiment mode')
+    verify_gateway_process_mode(report)
     require(report['attestation']=='synthetic-fixture' and report['build_manifest']['tpm2_enabled'] is False,
             'synthetic run misrepresents attestation')
     for run in report['rounds']:
