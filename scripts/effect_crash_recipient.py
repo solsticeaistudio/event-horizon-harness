@@ -73,9 +73,16 @@ def observed_recipient(path: Path) -> dict:
     return {"count": len(rows), "rows_digest": digest([list(row) for row in rows])}
 
 
-def recipient_main(config: dict, *, crash_phase: str | None = None) -> int:
-    """Separate recipient service; with opt-in fault checkpoints for tests only."""
+def recipient_main(config: dict, *, crash_phase: str | None = None,
+                   pause_before_commit_fd: int | None = None) -> int:
+    """Separate durable recipient, with opt-in supervisor-owned fault controls."""
+    if crash_phase is not None and pause_before_commit_fd is not None:
+        raise ValueError("recipient kill and delayed-commit controls are exclusive")
+    if pause_before_commit_fd is not None and (
+            type(pause_before_commit_fd) is not int or pause_before_commit_fd < 3):
+        raise ValueError("recipient delayed commit requires a private control fd")
     probe = RecipientCrashProbe(crash_phase) if crash_phase is not None else None
+    delayed_once = False
     socket_path = config["recipient_socket"]
     db_path = Path(config["recipient_database"])
     if os.path.lexists(socket_path):
@@ -105,6 +112,18 @@ def recipient_main(config: dict, *, crash_phase: str | None = None) -> int:
                     continue
                 if probe is not None:
                     probe.mark("before_commit")
+                # Fault injection only: the recipient has validated the exact
+                # logical effect but has NOT entered its SQLite transaction.
+                # A private supervisor-held pipe may release it AFTER the
+                # gateway dies. EOF must abort instead of permitting commit.
+                if pause_before_commit_fd is not None and not delayed_once:
+                    delayed_once = True
+                    print("PHASE:inflight_before_commit", flush=True)
+                    release = os.read(pause_before_commit_fd, 1)
+                    os.close(pause_before_commit_fd)
+                    pause_before_commit_fd = None
+                    if release != b"R":
+                        raise RuntimeError("trusted recipient release not confirmed")
                 with _recipient_db(db_path) as db:
                     db.execute("BEGIN IMMEDIATE")
                     db.execute(
@@ -114,7 +133,13 @@ def recipient_main(config: dict, *, crash_phase: str | None = None) -> int:
                     db.execute("COMMIT")
                 if probe is not None:
                     probe.mark("after_commit_before_ack")
-                client.sendall(b'{"committed":true}\n')
+                try:
+                    client.sendall(b'{"committed":true}\n')
+                except (BrokenPipeError, ConnectionResetError):
+                    # Commit is already durable. The gateway may have been
+                    # SIGKILLed during delivery; NEVER roll back or retry it.
+                    # Continue serving independent requests.
+                    pass
     finally:
         service.close()
 
