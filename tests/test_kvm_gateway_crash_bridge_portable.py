@@ -7,6 +7,7 @@ denial tests. No hardware Firecracker or four-guardian claim is made here.
 from __future__ import annotations
 
 import os
+import copy
 from pathlib import Path
 import signal
 import socket
@@ -26,6 +27,7 @@ from scripts.capability_fixture_support import authority_context, issue_options,
 from scripts.effect_crash_recipient import observed_recipient
 from scripts.kvm_gateway_crash_bridge import KvmGatewayCrashReceiver
 from scripts.real_gateway_crash_checkpoints import PHASES
+from scripts.verify_kvm_gateway_crash_bridge import verify_crash_bridge
 
 
 @unittest.skipUnless(sys.platform.startswith("linux") and hasattr(os, "pidfd_open"),
@@ -124,6 +126,28 @@ class CrashBridgeSupervisorTests(unittest.TestCase):
                 self.assertTrue(recorder.verify()[0])
                 self.assertEqual(len([row for row in recorder.events()
                                       if row["event_type"] == "gateway.crash-observed"]), 1)
+                valid, tip = recorder.verify()
+                self.assertTrue(valid)
+                evidence = dict(
+                    phase=phase,
+                    crashed=receiver.crash_report,
+                    recovery=receiver.recovery_report,
+                    events=recorder.events(),
+                    receipts=receiver.receipts,
+                    tip=tip,
+                    public_key_pem=recorder.public_key_pem,
+                    request_digest=request.request_digest,
+                    effect_key=config["recipient_effect_key"],
+                )
+                self.assertTrue(verify_crash_bridge(**evidence))
+                tampered = copy.deepcopy(evidence)
+                tampered["recovery"]["recovery_pid"] = receiver.crashed_gateway_pid
+                with self.assertRaises(ValueError):
+                    verify_crash_bridge(**tampered)
+                forged = copy.deepcopy(evidence)
+                forged["events"][-1]["payload"]["recovery_pid"] = 1
+                with self.assertRaises(ValueError):
+                    verify_crash_bridge(**forged)
 
 
 if __name__ == "__main__":
