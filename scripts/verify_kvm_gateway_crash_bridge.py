@@ -63,12 +63,16 @@ def verify_crash_bridge(*, phase, crashed, recovery, events, receipts,
     require(set(crashed) == {
         "phase", "gateway_pid", "signal", "exit_code",
         "recipient_before", "recipient_after_kill", "expected_commits",
+        "journal_state_after_kill", "effect_key", "request_digest",
     }, "invalid crash observation schema")
     require(set(recovery) == {
         "phase", "killed_pid", "recovery_pid", "recipient_after_recovery",
         "journal_state_after_kill", "original_replay", "replacement_replay",
     }, "invalid recovery observation schema")
     expected = 0 if phase in PHASES[:2] else 1
+    require(crashed["effect_key"] == effect_key
+            and crashed["request_digest"] == request_digest,
+            "crash observation not bound to signed exact effect")
     require(crashed["phase"] == recovery["phase"] == phase
             and type(crashed["gateway_pid"]) is int and crashed["gateway_pid"] > 1
             and type(recovery["recovery_pid"]) is int and recovery["recovery_pid"] > 1
@@ -90,7 +94,8 @@ def verify_crash_bridge(*, phase, crashed, recovery, events, receipts,
                 and row["rows_digest"] == (digest([]) if count == 0 else expected_digest),
                 f"independent recipient {name} observation invalid")
     state = None if phase == PHASES[0] else "possibly-committed"
-    require(recovery["journal_state_after_kill"] == state,
+    require(recovery["journal_state_after_kill"] == state
+            and crashed["journal_state_after_kill"] == state,
             "journal observation contradicts reservation state")
     require(recovery["original_replay"] == {
         "success": False, "error": "authority-denied",
