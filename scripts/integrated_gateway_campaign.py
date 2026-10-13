@@ -419,3 +419,22 @@ class FencedRecipientCrashKvmLab(FencedRecoveryKvmCrashLab):
             phase=self.recipient_crash_phase,
         )
         return self.gate_receiver
+
+
+class FencedAckLossKvmLab(FencedRecoveryKvmCrashLab):
+    """Firecracker recipient ACK-loss lab: both processes remain alive."""
+    kvm_fenced_crash_mode = False
+    kvm_ack_loss_mode = True
+
+    def __init__(self, mode, binary, worker_build, **kwargs):
+        from scripts.isolated_effect_gateway_worker import FENCED_KVM_CRASH_PHASES
+        super().__init__(mode, binary, worker_build,
+                         crash_phase=FENCED_KVM_CRASH_PHASES[0], **kwargs)
+
+    def receiver(self, observer, recorder, config):
+        from scripts.kvm_fenced_ack_loss_bridge import KvmLostAckReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = KvmLostAckReceiver(
+            observer, recorder, config, self.target_thread,
+        )
+        return self.gate_receiver
