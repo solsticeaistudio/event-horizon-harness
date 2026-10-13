@@ -20,6 +20,7 @@ KVM_FENCED_BASELINE=0
 KVM_FENCED_CRASH=0
 KVM_RECIPIENT_CRASH=0
 KVM_ACK_LOSS=0
+KVM_RACING_RECOVERY=0
 if [[ "${1:-}" == "--isolated-authority" && $# == 1 ]]; then
   ISOLATED_AUTHORITY=1
   shift
@@ -34,6 +35,10 @@ if [[ "${1:-}" == "--bridged-recipient" && $# == 1 ]]; then
 fi
 if [[ "${1:-}" == "--kvm-crash" && $# == 1 ]]; then
   KVM_CRASH=1
+  shift
+fi
+if [[ "${1:-}" == "--kvm-racing-recovery" && $# == 1 ]]; then
+  KVM_RACING_RECOVERY=1
   shift
 fi
 if [[ "${1:-}" == "--kvm-ack-loss" && $# == 1 ]]; then
@@ -61,7 +66,7 @@ if [[ "${1:-}" == "--effect-crash" && $# == 1 ]]; then
   shift
 fi
 if (( $# > 2 )); then
-  echo "Usage: bash scripts/run_package_etcd_lab.sh [--isolated-authority | --bridged-authority | --bridged-recipient | --kvm-crash | --kvm-delayed-commit | --kvm-fenced-baseline | --kvm-fenced-crash | --kvm-recipient-crash | --kvm-ack-loss | --effect-crash | --adaptive-steps 1..4]" >&2
+  echo "Usage: bash scripts/run_package_etcd_lab.sh [--isolated-authority | --bridged-authority | --bridged-recipient | --kvm-crash | --kvm-delayed-commit | --kvm-fenced-baseline | --kvm-fenced-crash | --kvm-recipient-crash | --kvm-ack-loss | --kvm-racing-recovery | --effect-crash | --adaptive-steps 1..4]" >&2
   exit 2
 fi
 if (( $# > 0 )); then
@@ -201,6 +206,7 @@ if (( KVM_FENCED_BASELINE > 0 )); then RUN_NAME+="-kvm-fenced-baseline"; fi
 if (( KVM_FENCED_CRASH > 0 )); then RUN_NAME+="-kvm-fenced-crash"; fi
 if (( KVM_RECIPIENT_CRASH > 0 )); then RUN_NAME+="-kvm-recipient-crash"; fi
 if (( KVM_ACK_LOSS > 0 )); then RUN_NAME+="-kvm-ack-loss"; fi
+if (( KVM_RACING_RECOVERY > 0 )); then RUN_NAME+="-kvm-racing-recovery"; fi
 if (( EFFECT_CRASH > 0 )); then RUN_NAME="effect-crash-$(date -u +%Y%m%dT%H%M%SZ)-$"; fi
 REPORT="artifacts/reports/${RUN_NAME}.json"
 echo "Source revision: $(git rev-parse HEAD)"
@@ -212,6 +218,10 @@ if (( EFFECT_CRASH > 0 )); then
   "$PY" scripts/run_effect_crash_campaign.py \
     --backend etcd --etcd-endpoint http://127.0.0.1:2379 \
     --etcd-cluster-id "$CLUSTER_ID" --report "$REPORT"
+elif (( KVM_RACING_RECOVERY > 0 )); then
+  sudo "$PY" scripts/run_integrated_kvm_racing_recovery.py \
+    --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
+    --etcd-containers "${CONTAINERS[@]}" --report "$REPORT"
 elif (( KVM_ACK_LOSS > 0 )); then
   sudo "$PY" scripts/run_integrated_kvm_ack_loss.py \
     --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
@@ -261,6 +271,8 @@ else
 fi
 if (( EFFECT_CRASH > 0 )); then
   "$PY" scripts/verify_effect_crash_campaign.py "$REPORT"
+elif (( KVM_RACING_RECOVERY > 0 )); then
+  "$PY" scripts/verify_integrated_kvm_racing_recovery.py "$REPORT"
 elif (( KVM_ACK_LOSS > 0 )); then
   "$PY" scripts/verify_integrated_kvm_ack_loss.py "$REPORT"
 elif (( KVM_RECIPIENT_CRASH > 0 )); then
@@ -278,7 +290,7 @@ else
 fi
 (
   cd "$(dirname "$REPORT")"
-  if (( ISOLATED_AUTHORITY == 0 && BRIDGED_AUTHORITY == 0 && BRIDGED_RECIPIENT == 0 && KVM_CRASH == 0 && KVM_DELAYED == 0 && KVM_FENCED_BASELINE == 0 && KVM_FENCED_CRASH == 0 && KVM_RECIPIENT_CRASH == 0 && KVM_ACK_LOSS == 0 && EFFECT_CRASH == 0 )); then
+  if (( ISOLATED_AUTHORITY == 0 && BRIDGED_AUTHORITY == 0 && BRIDGED_RECIPIENT == 0 && KVM_CRASH == 0 && KVM_DELAYED == 0 && KVM_FENCED_BASELINE == 0 && KVM_FENCED_CRASH == 0 && KVM_RECIPIENT_CRASH == 0 && KVM_ACK_LOSS == 0 && KVM_RACING_RECOVERY == 0 && EFFECT_CRASH == 0 )); then
     sha256sum "$(basename "$REPORT")" > "$(basename "$REPORT").sha256"
   fi
   sha256sum -c "$(basename "$REPORT").sha256"
