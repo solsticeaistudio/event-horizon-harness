@@ -262,15 +262,19 @@ def serve_fenced_recipient(
                         else:
                             op = body["operation"]
                             if op == "apply" and "output" in body:
-                                if checkpoint is not None:
-                                    checkpoint("before_commit")
+                                if checkpoint is not None and checkpoint("before_commit") is True:
+                                    # Host-only transport fault: no business commit,
+                                    # but gateway must treat EOF as indeterminate.
+                                    continue
                                 value = recipient.apply(
                                     effect_key=body["effect_key"],
                                     request_digest=body["request_digest"],
                                     output=body["output"],
                                 )
-                                if checkpoint is not None:
-                                    checkpoint("after_commit_before_reply")
+                                if checkpoint is not None and checkpoint("after_commit_before_reply") is True:
+                                    # The durable transaction completed. Intentionally
+                                    # suppress only the ACK; no replay clearance follows.
+                                    continue
                                 answer = {"receipt": _serialize(value)}
                             elif op == "observe" and "output" not in body:
                                 value = recipient.observe(

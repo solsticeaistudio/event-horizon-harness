@@ -63,9 +63,9 @@ class FencedRecipientKvmReceiver(BridgedGateReceiver):
                "scripts.fenced_recipient_service", "--config",
                str(self._recipient_config_path)]
         if fault_phase is not None:
-            from scripts.fenced_recipient_service import PHASES
-            if fault_phase not in PHASES:
-                raise ValueError("invalid host-only recipient crash checkpoint")
+            from scripts.fenced_recipient_service import PHASES, TRANSPORT_FAULTS
+            if fault_phase not in PHASES + TRANSPORT_FAULTS:
+                raise ValueError("invalid host-only recipient fault checkpoint")
             cmd += ["--lab-fault", fault_phase]
         cmd = ["unshare", "--net", "--", "setpriv",
                "--bounding-set=-all", "--no-new-privs", "--", *cmd]
