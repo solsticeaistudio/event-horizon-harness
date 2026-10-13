@@ -239,10 +239,63 @@ class FencedRecoveryTests(unittest.TestCase):
             fresh, self.gateway(output_factory=lambda _: "CHANGED"),
         )
         self.assertFalse(outcome.accepted)
-        self.assertEqual(outcome.error_class, "recipient-indeterminate")
+        self.assertEqual(outcome.error_class, "effect-binding-conflict")
         self.assertEqual(self.effects.observe(
             effect_key=self.key(), request_digest=self.request.request_digest,
         ).output, "owned-value")
+        self.assertEqual(self.effects.commit_count(), 1)
+
+    def test_legacy_reserved_effect_cannot_be_mistaken_for_atomic_fence(self):
+        old = self.token()
+        self.journal.reserve(
+            tenant="default", environment="synthetic", effect_key=self.key(),
+            capability_id=old.claims.capability_id,
+            request_digest=self.request.request_digest,
+            claims_digest=digest(old.claims.to_dict()),
+        )
+        actual = self.run_token(self.token())
+        self.assertFalse(actual.accepted)
+        self.assertEqual(actual.error_class, "effect-binding-conflict")
+        self.assertEqual(self.effects.commit_count(), 0)
+        self.assertIsNone(self.journal.observe_effect(
+            tenant="default", environment="synthetic", effect_key=self.key(),
+        )["fenced_protocol"])
+
+    def test_migrate_existing_legacy_sqlite_journal_without_upgrading_authority(self):
+        legacy_db = self.root / "old-layout.sqlite"
+        with sqlite3.connect(legacy_db) as conn:
+            conn.execute("""CREATE TABLE effects (
+                tenant TEXT NOT NULL, environment TEXT NOT NULL,
+                effect_key TEXT NOT NULL, capability_id TEXT NOT NULL,
+                request_digest TEXT NOT NULL, claims_digest TEXT NOT NULL,
+                state TEXT NOT NULL,
+                receipt_digest TEXT,
+                PRIMARY KEY (tenant, environment, capability_id),
+                UNIQUE (tenant, environment, effect_key))""")
+            conn.execute(
+                "INSERT INTO effects VALUES(?,?,?,?,?,?,?,?)",
+                ("default", "synthetic", self.key(), "cap_legacy",
+                 self.request.request_digest, "a" * 64, "possibly-committed", None),
+            )
+        os.chmod(legacy_db, 0o600)
+        upgraded = DurableEffectJournal(legacy_db)
+        row = upgraded.observe_effect(
+            tenant="default", environment="synthetic", effect_key=self.key(),
+        )
+        self.assertIsNone(row["fenced_protocol"])
+        self.assertIsNone(row["fenced_recipient_id"])
+        result = self.run_token(self.token(), self.gateway(journal=upgraded))
+        self.assertEqual(result.error_class, "effect-binding-conflict")
+        self.assertEqual(self.effects.commit_count(), 0)
+
+    def test_different_cooperating_recipient_identity_cannot_hijack_recovery(self):
+        self.assertTrue(self.run_token(self.token()).accepted)
+        elsewhere = FencedSqliteRecipient(
+            self.root / "other-recipient.sqlite", recipient_id="other-recipient",
+        )
+        response = self.run_token(self.token(), self.gateway(recipient=elsewhere))
+        self.assertEqual(response.error_class, "effect-binding-conflict")
+        self.assertEqual(elsewhere.commit_count(), 0)
         self.assertEqual(self.effects.commit_count(), 1)
 
     def test_corrupted_recipient_receipt_fails_closed(self):
@@ -278,12 +331,12 @@ class FencedRecoveryTests(unittest.TestCase):
 
     def test_journal_failure_never_reaches_recipient(self):
         journal = self.journal
-        original = journal.reserve
+        original = journal.reserve_fenced
         try:
-            journal.reserve = Mock(side_effect=OSError("no disk"))
+            journal.reserve_fenced = Mock(side_effect=OSError("no disk"))
             got = self.run_token(self.token())
         finally:
-            journal.reserve = original
+            journal.reserve_fenced = original
         self.assertEqual(got.error_class, "effect-journal-unavailable")
         self.assertEqual(self.effects.commit_count(), 0)
 
