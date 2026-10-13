@@ -18,6 +18,7 @@ from event_horizon.fenced_recipient_transport import serve_fenced_recipient
 
 
 PHASES = ("before_commit", "after_commit_before_reply")
+TRANSPORT_FAULTS = ("drop_before_commit", "drop_ack_after_commit")
 
 
 def load_config(path: Path) -> dict:
@@ -40,19 +41,30 @@ def load_config(path: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("--lab-fault", choices=PHASES, default=None)
+    parser.add_argument("--lab-fault", choices=PHASES + TRANSPORT_FAULTS, default=None)
     args = parser.parse_args()
     config = load_config(args.config)
     key = bytes.fromhex(config["auth_key_hex"])
     used = False
 
-    def checkpoint(phase: str) -> None:
+    def checkpoint(phase: str) -> bool:
         nonlocal used
+        # These modes are selected only by the trusted host supervisor.
+        # Never infer non-commit from an unreadable/missing reply.
+        drop_phase = {
+            "drop_before_commit": "before_commit",
+            "drop_ack_after_commit": "after_commit_before_reply",
+        }.get(args.lab_fault)
+        if phase == drop_phase and not used:
+            used = True
+            print("DROPPED:" + str(args.lab_fault), flush=True)
+            return True
         if phase == args.lab_fault and not used:
             used = True
             print("PHASE:" + phase, flush=True)
             while True:
                 signal.pause()
+        return False
 
     serve_fenced_recipient(
         config["socket_path"], config["recipient_database"],
