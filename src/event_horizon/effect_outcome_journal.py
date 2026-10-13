@@ -70,9 +70,24 @@ class DurableEffectJournal:
                     claims_digest TEXT NOT NULL, state TEXT NOT NULL
                       CHECK(state IN ('possibly-committed', 'recipient-confirmed')),
                     receipt_digest TEXT,
+                    fenced_protocol TEXT,
+                    fenced_recipient_id TEXT,
+                    fenced_output_digest TEXT,
                     PRIMARY KEY (tenant, environment, capability_id),
                     UNIQUE (tenant, environment, effect_key)
                 )""")
+                # Old journals may have existing LEGACY reservations. Upgrade
+                # the schema but leave legacy rows NULL: they must NEVER be
+                # eligible for fenced recovery. Serialize migration on SQLite.
+                db.execute("BEGIN IMMEDIATE")
+                columns = {
+                    row[1] for row in db.execute("PRAGMA table_info(effects)")
+                }
+                for column in ("fenced_protocol", "fenced_recipient_id",
+                               "fenced_output_digest"):
+                    if column not in columns:
+                        db.execute(f"ALTER TABLE effects ADD COLUMN {column} TEXT")
+                db.execute("COMMIT")
         except sqlite3.Error as exc:
             raise EffectJournalError("effect journal startup failed") from exc
 
@@ -134,6 +149,61 @@ class DurableEffectJournal:
         except sqlite3.Error as exc:
             raise EffectJournalError("effect journal reservation unavailable") from exc
 
+    def reserve_fenced(self, *, tenant: str, environment: str,
+                       effect_key: str, capability_id: str,
+                       request_digest: str, claims_digest: str,
+                       recipient_id: str, output_digest: str) -> bool:
+        """Opt in AT FIRST RESERVATION to a pinned atomic recipient.
+
+        A preexisting legacy row, any different recipient ID or result binding,
+        or any different original capability is an incompatible reservation.
+        A later fresh capability may observe it read-only but never rewrite it.
+        """
+        self._validate(tenant, environment, effect_key, capability_id,
+                       request_digest, claims_digest)
+        if (not isinstance(recipient_id, str) or not recipient_id
+                or len(recipient_id) > 128
+                or not isinstance(output_digest, str)
+                or not HEX64.fullmatch(output_digest)):
+            raise ValueError("invalid fenced recipient binding")
+        expected = (effect_key, capability_id, request_digest, claims_digest,
+                    "atomic-sqlite-v1", recipient_id, output_digest)
+        try:
+            with self._db() as db:
+                try:
+                    db.execute("BEGIN IMMEDIATE")
+                    existing = db.execute(
+                        "SELECT effect_key,capability_id,request_digest,claims_digest,"
+                        "fenced_protocol,fenced_recipient_id,fenced_output_digest "
+                        "FROM effects WHERE tenant=? AND environment=? "
+                        "AND (effect_key=? OR capability_id=?)",
+                        (tenant, environment, effect_key, capability_id),
+                    ).fetchone()
+                    if existing is not None:
+                        if existing != expected:
+                            raise EffectAlreadyReserved(
+                                "effect previously reserved under incompatible protocol or authority"
+                            )
+                        db.execute("COMMIT")
+                        return False
+                    db.execute(
+                        "INSERT INTO effects (tenant,environment,effect_key,capability_id,"
+                        "request_digest,claims_digest,state,fenced_protocol,"
+                        "fenced_recipient_id,fenced_output_digest) "
+                        "VALUES (?,?,?,?,?,?,'possibly-committed',?,?,?)",
+                        (tenant, environment, effect_key, capability_id,
+                         request_digest, claims_digest, "atomic-sqlite-v1",
+                         recipient_id, output_digest),
+                    )
+                    db.execute("COMMIT")
+                    return True
+                except BaseException:
+                    if db.in_transaction:
+                        db.execute("ROLLBACK")
+                    raise
+        except sqlite3.Error as exc:
+            raise EffectJournalError("fenced reservation unavailable") from exc
+
     def observe(self, *, tenant: str, environment: str, capability_id: str):
         try:
             with self._db() as db:
@@ -148,6 +218,35 @@ class DurableEffectJournal:
             return None
         return {"request_digest": row[0], "claims_digest": row[1],
                 "state": row[2], "receipt_digest": row[3]}
+
+    def observe_effect(self, *, tenant: str, environment: str, effect_key: str):
+        """Pinned original reservation for an explicitly authorized recovery.
+
+        A negative read is NEVER evidence that an earlier in-flight effect has
+        stopped. This method does not release or modify a journal reservation.
+        """
+        if (not isinstance(tenant, str) or not tenant or len(tenant) > 256
+                or not isinstance(environment, str) or not environment
+                or len(environment) > 256
+                or not isinstance(effect_key, str) or not HEX64.fullmatch(effect_key)):
+            raise ValueError("invalid trusted effect observation identity")
+        try:
+            with self._db() as db:
+                row = db.execute(
+                    "SELECT capability_id, request_digest, claims_digest, state, "
+                    "receipt_digest,fenced_protocol,fenced_recipient_id,fenced_output_digest "
+                    "FROM effects WHERE tenant=? AND environment=? AND effect_key=?",
+                    (tenant, environment, effect_key),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise EffectJournalError("effect-key journal observation unavailable") from exc
+        if row is None:
+            return None
+        return {"capability_id": row[0], "request_digest": row[1],
+                "claims_digest": row[2], "state": row[3],
+                "receipt_digest": row[4], "fenced_protocol": row[5],
+                "fenced_recipient_id": row[6],
+                "fenced_output_digest": row[7]}
 
     def confirm_from_trusted_recipient(self, *, tenant: str, environment: str,
                                        effect_key: str, capability_id: str,
