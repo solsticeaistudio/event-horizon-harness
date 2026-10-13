@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import os
+import select
 from pathlib import Path
 import signal
 import socket
@@ -99,7 +100,16 @@ class SixthWindowLiveBridgeTests(unittest.TestCase):
                         except Exception as exc:
                             process_status = (receiver.gateway_process.poll()
                                               if receiver.gateway_process is not None else None)
+                            gateway_trace = ""
+                            if (receiver.gateway_process is not None):
+                                stream = receiver.gateway_process.stderr
+                                if stream is not None and select.select(
+                                        [stream], [], [], 0)[0]:
+                                    gateway_trace = os.read(stream.fileno(), 8192).decode(
+                                        "utf-8", errors="replace"
+                                    )
                             self.fail(
+                                f"gateway_trace={gateway_trace!r}; "
                                 f"preflight {name} failed: {exc!r}; "
                                 f"bridge_failure={receiver.failure!r}; "
                                 f"record_failure={receiver.record_failure!r}; "
