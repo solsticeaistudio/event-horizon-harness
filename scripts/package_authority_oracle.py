@@ -71,12 +71,16 @@ def inspect_committed_consumption(
     claims_digest: str,
     expires_at: int,
     extra_bindings: Mapping[str, tuple[str, int]] | None = None,
+    allow_crash_recovery_spare: bool = False,
 ) -> dict[str, Any]:
     """Linearizable range of one session's entire replay partition.
 
     Check both the *number* of writes and the precise binding. This host-side
     oracle runs independently from the compromised worker and gateway code
-    path, but still trusts the configured etcd cluster and transport.
+    path, but still trusts the configured etcd cluster and transport. A
+    separate explicit crash-recovery option can expect both the retired fault
+    capability and a fresh four-guardian spare; normal v4 remains limited
+    to one extra token.
     """
     if (not isinstance(session_id, str) or not session_id.startswith("ehk-")
             or any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for ch in session_id)):
@@ -99,7 +103,9 @@ def inspect_committed_consumption(
         "compare": [],
         "success": [{"requestRange": {
             "key": _b64(prefix), "range_end": _b64(end),
-            "serializable": False, "limit": "3" if extra_bindings else "2",
+            "serializable": False, "limit": (
+                "4" if allow_crash_recovery_spare else ("3" if extra_bindings else "2")
+            ),
         }}],
         "failure": [],
     })
@@ -123,9 +129,10 @@ def inspect_committed_consumption(
         raise ValueError("etcd oracle has no range response")
     entries = value.get("kvs")
     if extra_bindings is not None:
-        if (not isinstance(extra_bindings, Mapping) or len(extra_bindings) != 1
+        permitted = 2 if allow_crash_recovery_spare else 1
+        if (not isinstance(extra_bindings, Mapping) or len(extra_bindings) != permitted
                 or capability_id in extra_bindings):
-            raise ValueError("integrated oracle allows only one distinct retired fault token")
+            raise ValueError("integrated oracle has an unexpected number of explicitly pinned tokens")
     expected = {capability_id: (claims_digest, expires_at), **(extra_bindings or {})}
     if not isinstance(entries, list) or not 1 <= len(entries) <= len(expected):
         raise ValueError("unexpected committed capability consumption count")
