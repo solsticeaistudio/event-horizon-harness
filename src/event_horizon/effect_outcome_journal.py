@@ -149,6 +149,33 @@ class DurableEffectJournal:
         return {"request_digest": row[0], "claims_digest": row[1],
                 "state": row[2], "receipt_digest": row[3]}
 
+    def observe_effect(self, *, tenant: str, environment: str, effect_key: str):
+        """Pinned original reservation for an explicitly authorized recovery.
+
+        A negative read is NEVER evidence that an earlier in-flight effect has
+        stopped. This method does not release or modify a journal reservation.
+        """
+        if (not isinstance(tenant, str) or not tenant or len(tenant) > 256
+                or not isinstance(environment, str) or not environment
+                or len(environment) > 256
+                or not isinstance(effect_key, str) or not HEX64.fullmatch(effect_key)):
+            raise ValueError("invalid trusted effect observation identity")
+        try:
+            with self._db() as db:
+                row = db.execute(
+                    "SELECT capability_id, request_digest, claims_digest, state, "
+                    "receipt_digest FROM effects WHERE tenant=? AND environment=? "
+                    "AND effect_key=?",
+                    (tenant, environment, effect_key),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise EffectJournalError("effect-key journal observation unavailable") from exc
+        if row is None:
+            return None
+        return {"capability_id": row[0], "request_digest": row[1],
+                "claims_digest": row[2], "state": row[3],
+                "receipt_digest": row[4]}
+
     def confirm_from_trusted_recipient(self, *, tenant: str, environment: str,
                                        effect_key: str, capability_id: str,
                                        request_digest: str, claims_digest: str,
