@@ -740,11 +740,6 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         # Guest fault-injection may arm ONLY on the exact bytes of the original
         # host-approved signed envelope, not on spoofable request/capability IDs.
         service_config["expected_signed_effect_message_digest"] = digest(message)
-    if package_lab is not None and getattr(package_lab, "kvm_delayed_commit_mode", False):
-        # A forged signature can reuse the right request digest and ID.
-        # Only the exact *signed* guardian-issued guest envelope may arm the
-        # host fault window, never a guest-supplied approximate match.
-        service_config["expected_signed_guest_message_digest"] = digest(message)
     if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
         # Bind the side effect to the supervisor's exact signed guest request.
         # Neither the untrusted package worker nor the VM selects its key.
