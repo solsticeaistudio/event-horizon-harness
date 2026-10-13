@@ -682,7 +682,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         if (getattr(package_lab, "kvm_crash_mode", False)
                 or getattr(package_lab, "kvm_delayed_commit_mode", False)
                 or getattr(package_lab, "kvm_fenced_crash_mode", False)
-                or getattr(package_lab, "kvm_recipient_crash_mode", False)):
+                or getattr(package_lab, "kvm_recipient_crash_mode", False)
+                or getattr(package_lab, "kvm_ack_loss_mode", False)):
             package_lab.spare_capability = spare
     else:
         context = authority_context(request, time.time(), measurement=digest(manifest["artifacts"]))
@@ -738,12 +739,14 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     if package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
                                 or getattr(package_lab, "kvm_delayed_commit_mode", False)
                                 or getattr(package_lab, "kvm_fenced_crash_mode", False)
-                or getattr(package_lab, "kvm_recipient_crash_mode", False)):
+                or getattr(package_lab, "kvm_recipient_crash_mode", False)
+                or getattr(package_lab, "kvm_ack_loss_mode", False)):
         service_config["expected_recovery_capability_id"] = spare.claims.capability_id
     if package_lab is not None and (
             getattr(package_lab, "kvm_delayed_commit_mode", False)
             or getattr(package_lab, "kvm_fenced_crash_mode", False)
-                or getattr(package_lab, "kvm_recipient_crash_mode", False)):
+                or getattr(package_lab, "kvm_recipient_crash_mode", False)
+                or getattr(package_lab, "kvm_ack_loss_mode", False)):
         # Guest fault-injection may arm ONLY on the exact bytes of the original
         # host-approved signed envelope, not on spoofable request/capability IDs.
         service_config["expected_signed_effect_message_digest"] = digest(message)
@@ -837,7 +840,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 raise RuntimeError("independent recipient startup failed") from receiver.failure
             if (getattr(package_lab, "kvm_delayed_commit_mode", False)
                     or getattr(package_lab, "kvm_fenced_crash_mode", False)
-                or getattr(package_lab, "kvm_recipient_crash_mode", False)):
+                or getattr(package_lab, "kvm_recipient_crash_mode", False)
+                or getattr(package_lab, "kvm_ack_loss_mode", False)):
                 # Unlike the original five windows, this new bridge requires a
                 # separate true gateway READY; recipient readiness alone is
                 # not permission to launch a guest that will send real probes.
@@ -987,7 +991,9 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             if authority_session is not None:
                 package_lab.before_authorized(channel, message, receiver)
             if package_lab is not None and (getattr(package_lab, "kvm_fenced_crash_mode", False)
-                                        or getattr(package_lab, "kvm_recipient_crash_mode", False)):
+                                        or getattr(package_lab, "kvm_recipient_crash_mode", False)
+                                        or getattr(package_lab, "kvm_ack_loss_mode", False)
+                or getattr(package_lab, "kvm_ack_loss_mode", False)):
                 # A real KVM guest, not the supervisor, must trigger the exact
                 # approved signed effect. The SIGKILL proof is made by the
                 # host-pinned child PID and its verified commit checkpoint.
@@ -995,7 +1001,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 if (interrupted.get("success") is not False
                         or interrupted.get("effect_state") != "possibly-committed"
                         or interrupted.get("error") != ("recipient-indeterminate"
-                            if getattr(package_lab, "kvm_recipient_crash_mode", False)
+                            if (getattr(package_lab, "kvm_recipient_crash_mode", False)
+                                or getattr(package_lab, "kvm_ack_loss_mode", False))
                             else "gateway-killed")):
                     raise RuntimeError("actual KVM fenced gateway was not interrupted")
                 old_replay = guest_effect(channel, message)
@@ -1007,9 +1014,10 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                         or recovery.get("output") != content
                         or recovery.get("effect_state") != "completed"):
                     raise RuntimeError("fresh signed KVM recovery did not return durable result")
-                observed["kvm_recipient_guest_replies" if getattr(
-                    package_lab, "kvm_recipient_crash_mode", False
-                ) else "kvm_fenced_guest_replies"] = {
+                observed[("kvm_ack_loss_guest_replies" if getattr(package_lab, "kvm_ack_loss_mode", False)
+                    else "kvm_recipient_guest_replies" if getattr(
+                        package_lab, "kvm_recipient_crash_mode", False
+                    ) else "kvm_fenced_guest_replies")] = {
                     "interrupted": {
                         "success": interrupted["success"],
                         "error": interrupted["error"],
@@ -1225,7 +1233,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             if package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
                                             or getattr(package_lab, "kvm_delayed_commit_mode", False)
                                             or getattr(package_lab, "kvm_fenced_crash_mode", False)
-                or getattr(package_lab, "kvm_recipient_crash_mode", False)):
+                or getattr(package_lab, "kvm_recipient_crash_mode", False)
+                or getattr(package_lab, "kvm_ack_loss_mode", False)):
                 # A replacement token is intentionally consumed in crash
                 # windows 2-5; never call it "unredeemed" in signed evidence.
                 observed["recovery_capability_id"] = spare.claims.capability_id
@@ -1233,6 +1242,7 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     (getattr(package_lab, "kvm_delayed_commit_mode", False)
                      or getattr(package_lab, "kvm_fenced_crash_mode", False)
                 or getattr(package_lab, "kvm_recipient_crash_mode", False)
+                or getattr(package_lab, "kvm_ack_loss_mode", False)
                      or package_lab.kvm_crash_phase != "before_reservation")
                 )
             else:
@@ -1308,10 +1318,13 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         raise RuntimeError("teardown incomplete")
     if package_lab is not None:
         if (getattr(package_lab, "kvm_fenced_crash_mode", False)
-                or getattr(package_lab, "kvm_recipient_crash_mode", False)):
+                or getattr(package_lab, "kvm_recipient_crash_mode", False)
+                or getattr(package_lab, "kvm_ack_loss_mode", False)):
             from event_horizon.fenced_recipient import FencedSqliteRecipient
             from event_horizon.effect_outcome_journal import DurableEffectJournal
-            if receiver.crash_report is None or receiver.recovery_report is None:
+            if (receiver.recovery_report is None
+                    or (getattr(package_lab, "kvm_ack_loss_mode", False) and receiver.ack_loss_report is None)
+                    or (not getattr(package_lab, "kvm_ack_loss_mode", False) and receiver.crash_report is None)):
                 raise RuntimeError("real KVM fenced SIGKILL or recovery report missing")
             ledger = FencedSqliteRecipient(
                 service_config["recipient_database"],
@@ -1328,7 +1341,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 request_digest=request.request_digest,
             )
             recovery_evidence = receiver.recovery_report
-            crash_evidence = receiver.crash_report
+            crash_evidence = (receiver.ack_loss_report if getattr(package_lab, "kvm_ack_loss_mode", False)
+                              else receiver.crash_report)
             if (ledger.commit_count() != 1 or received is None
                     or original is None or original["state"] != "recipient-confirmed"
                     or original["capability_id"] != capability.claims.capability_id
@@ -1337,7 +1351,10 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     or recovery_evidence["row_count"] != 1
                     or crash_evidence["original_capability_id"] != capability.claims.capability_id):
                 raise RuntimeError("KVM fenced post-crash independent observation invalid")
-            if getattr(package_lab, "kvm_recipient_crash_mode", False):
+            if getattr(package_lab, "kvm_ack_loss_mode", False):
+                observed["kvm_ack_loss"] = crash_evidence
+                observed["kvm_ack_recovery"] = recovery_evidence
+            elif getattr(package_lab, "kvm_recipient_crash_mode", False):
                 observed["kvm_recipient_crash"] = crash_evidence
                 observed["kvm_recipient_recovery"] = recovery_evidence
             else:
