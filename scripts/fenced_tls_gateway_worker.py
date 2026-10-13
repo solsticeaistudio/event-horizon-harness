@@ -43,7 +43,7 @@ def run(config: dict) -> dict:
     v = config["verification_context"]
     if type(v) is not dict or set(v) != {
         "attestation", "executor_measurement", "device_id",
-        "verifier_policy_digest", "policy_digest",
+        "verifier_policy_digest", "policy_digest", "tenant", "environment",
     }:
         raise ValueError("signed verification context must be explicit")
     store = select_consumption_store(
@@ -67,6 +67,7 @@ def run(config: dict) -> dict:
             ExternalRecorder(config["recorder_path"]),
             DurableEffectJournal(config["journal_path"]),
             client, output_factory=lambda _: config["output"],
+            tenant=v["tenant"], environment=v["environment"],
         )
         result = gate.execute(
             request, cap, v["attestation"],
