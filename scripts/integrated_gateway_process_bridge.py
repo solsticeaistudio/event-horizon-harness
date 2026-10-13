@@ -127,6 +127,8 @@ class BridgedGateReceiver(GateReceiver):
                     request_digest=self.config["expected_request_digest"],
                     request_id=self.config["expected_request_id"],
                     capability_id=self.config["expected_capability_id"],
+                    fenced_recipient_id=(self.config["fenced_recipient"]["recipient_id"]
+                                         if "fenced_recipient" in self.config else None),
                 )
                 event_thread = threading.Thread(
                     target=self._record_events, args=(evidence_channel,), daemon=True,
