@@ -36,6 +36,11 @@ class FencedRecipientKvmReceiver(BridgedGateReceiver):
         self.recipient_ready = threading.Event()
         self.recipient_status = None
 
+    def _run_gateway(self):
+        # Baseline runs the existing bridged host gateway. Opt-in KVM fault
+        # receivers override ONLY this method; the recipient stays alive.
+        return BridgedGateReceiver.run(self)
+
     def run(self):
         cfg = self.config
         fence = cfg["fenced_recipient"]
@@ -71,7 +76,7 @@ class FencedRecipientKvmReceiver(BridgedGateReceiver):
                     + repr(message) + " " + error.decode(errors="replace")
                 )
             self.recipient_ready.set()
-            super().run()
+            self._run_gateway()
             if service.poll() is not None:
                 raise RuntimeError("independent fenced recipient unexpectedly exited")
         except BaseException as exc:
