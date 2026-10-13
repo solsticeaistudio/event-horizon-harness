@@ -54,6 +54,8 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
         # Recipient READY is not sufficient: the KVM guest must not issue
         # negative-control probes before the real gateway is initialized.
         self.gateway_ready = threading.Event()
+        # Fixed bounded lab-only transport trace; no secrets or payloads.
+        self.transport_steps = []
 
     def _snapshot(self):
         return observed_recipient(Path(self.config["recipient_database"]))
@@ -165,8 +167,11 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                     try:
                         if sock is None or gateway_reader is None:
                             raise EOFError("no live gateway reader")
+                        self.transport_steps.append("gateway:send")
                         sock.sendall(encode_frame(message))
+                        self.transport_steps.append("gateway:await-reply")
                         reply = read_frame(gateway_reader)
+                        self.transport_steps.append("gateway:reply")
                     except (OSError, EOFError, ValueError) as exc:
                         raise GatewayTransportError(
                             "gateway channel failed; outcome unknown"
@@ -201,6 +206,7 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                             break
                         if self.record_failure is not None:
                             raise RuntimeError("signing bridge already failed") from self.record_failure
+                        self.transport_steps.append("guest:request")
                         self.event_contract.begin_request(message)
                         try:
                             if not killed and target(message):
@@ -285,7 +291,9 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                                     }
                         finally:
                             self.event_contract.end_request()
+                        self.transport_steps.append("guest:send")
                         self.channel.sendall(encode_frame(response))
+                        self.transport_steps.append("guest:sent")
                         if killed and self.recovery_gateway_pid is None:
                             close_child()
                             launch(recovery=True)
