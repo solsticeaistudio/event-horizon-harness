@@ -438,3 +438,56 @@ class FencedAckLossKvmLab(FencedRecoveryKvmCrashLab):
             observer, recorder, config, self.target_thread,
         )
         return self.gate_receiver
+
+
+class FencedCompetingRecoveryKvmLab(FencedAckLossKvmLab):
+    """Two distinct recipient recovery gateways; original guest sees lost ACK.
+
+    The original quorum-majority-loss test burns a special fault token. This
+    opt-in race MUST retain that third genuine signer capability as the second
+    recovery identity instead. It still performs all four signed request
+    mutation negatives and a genuine single-node etcd loss, but does not
+    claim to have executed the separate majority-loss negative control.
+    """
+    kvm_ack_loss_mode = False
+    kvm_racing_recovery_mode = True
+
+    def before_authorized(self, channel, message, receiver):
+        import copy
+        for name in GATE_ATTACKS[:4]:
+            attempt = copy.deepcopy(message)
+            if name == "gateway_resource_substitution":
+                attempt["request"]["resource_id"] = "forbidden"
+            elif name == "gateway_executor_substitution":
+                attempt["request"]["executor_id"] = "wrong"
+            elif name == "gateway_ceiling_expansion":
+                attempt["capability"]["claims"]["max_output_bytes"] = 999999
+            else:
+                attempt["public_key_pem"] = "coordinator-selected pin"
+            self.deny(name, channel, attempt, receiver)
+        # Keep the signed fault token alive as an independently authorized
+        # racing recovery; do not reclassify it as an outage test.
+        self.quorum.pause([2])
+        self.quorum.wait_healthy()
+
+    def after_authorized(self, channel, message, receiver):
+        if receiver.dispatches != 1:
+            raise RuntimeError("competing gateways did not converge to one durable effect")
+        header = self.quorum.restore()
+        self.deny("replay_after_quorum_recovery", channel, message, receiver)
+        return {
+            "scenarios": self.campaign,
+            "single_node_loss_useful_dispatches": 1,
+            "recovered_cluster_id": str(header["cluster_id"]),
+            "containers": self.quorum.identities,
+            "member_headers": self.quorum.member_headers,
+            "dispatches": receiver.dispatches,
+        }
+
+    def receiver(self, observer, recorder, config):
+        from scripts.kvm_competing_recovery_bridge import KvmCompetingRecoveryReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = KvmCompetingRecoveryReceiver(
+            observer, recorder, config, self.target_thread,
+        )
+        return self.gate_receiver
