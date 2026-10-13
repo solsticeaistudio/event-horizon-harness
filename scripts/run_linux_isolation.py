@@ -1018,7 +1018,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 if count != 1:
                     raise RuntimeError("authoritative consumption count is not one")
             observed["host_consumption_count"] = count
-            if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
+            if (package_lab is not None and getattr(package_lab, "external_recipient_mode", False)
+                    and not getattr(package_lab, "kvm_crash_mode", False)):
                 from event_horizon.effect_outcome_journal import DurableEffectJournal
                 from scripts.effect_crash_recipient import observed_recipient
                 snapshot = observed_recipient(Path(service_config["recipient_database"]))
@@ -1059,7 +1060,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     "request_digest": request.request_digest,
                     "receipt_digest": reconciled["receipt_digest"],
                 }
-            if package_lab is not None and getattr(package_lab, "bridged_gateway", False):
+            if (package_lab is not None and getattr(package_lab, "bridged_gateway", False)
+                    and not getattr(package_lab, "kvm_crash_mode", False)):
                 gateway_pid = getattr(receiver, "gateway_pid", None)
                 if (type(gateway_pid) is not int or gateway_pid <= 1
                         or gateway_pid == os.getpid()
@@ -1093,8 +1095,13 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                             raise RuntimeError("trusted state accessible to a forbidden principal")
             observed["authoritative_state_read_write_denials"] = True
             completed = [event for event in recorder.events() if event["event_type"] == "execution.completed"]
-            if len(completed) != 1:
-                raise RuntimeError("independent completion evidence count is not one")
+            if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+                from scripts.real_gateway_crash_checkpoints import PHASES
+                expected_completions = 1 if package_lab.kvm_crash_phase == PHASES[4] else 0
+            else:
+                expected_completions = 1
+            if len(completed) != expected_completions:
+                raise RuntimeError("completion evidence contradicts actual crash checkpoint")
             if stop_mode == "deadline":
                 watchdog.wait(timeout=15)
             elif stop_mode == "supervisor-channel-loss":
