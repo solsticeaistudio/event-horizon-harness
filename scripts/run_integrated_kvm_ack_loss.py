@@ -83,7 +83,7 @@ def main():
                         authority_session=session,
                         package_lab=FencedAckLossKvmLab(
                             "protected", worker, worker_build,
-                            
+
                             authority_config=config, quorum=quorum,
                         ),
                     )
