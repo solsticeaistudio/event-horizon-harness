@@ -222,19 +222,52 @@ def verify(
             or str(database) != baseline["database"]
             or not database.is_file()):
         raise ValueError("original durable recipient database unavailable or rebound")
-    recipient = FencedSqliteRecipient(
-        database, recipient_id=baseline["recipient_id"],
-    )
-    row = recipient.observe(
-        effect_key=baseline["effect_key"],
-        request_digest=baseline["request_digest"],
-    )
-    if (recipient.commit_count() != 1 or row is None or row.newly_committed
-            or row.sequence != baseline["sequence"]
-            or row.receipt_digest != baseline["receipt_digest"]
-            or row.output_digest != baseline["output_digest"]
-            or row.output != _OUTPUT):
-        raise ValueError("original SQLite commit missing/corrupt/duplicated after boot")
+    # Read-only, strict SQLite inspection: never create or migrate tables,
+    # even if the recovered database is empty, corrupted or replaced.
+    import sqlite3
+    from .canonical import digest
+    leaf = os.lstat(database)
+    parent = os.lstat(database.parent)
+    if (not stat.S_ISREG(leaf.st_mode) or leaf.st_uid != os.geteuid()
+            or leaf.st_nlink != 1 or leaf.st_mode & 0o077
+            or not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.geteuid()
+            or parent.st_mode & 0o022):
+        raise ValueError("postboot database is not original trusted private storage")
+    try:
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
+            db.execute("PRAGMA query_only=ON")
+            identity = db.execute(
+                "SELECT recipient_id FROM recipient_identity WHERE singleton=1"
+            ).fetchone()
+            count = db.execute("SELECT COUNT(*) FROM effects").fetchone()[0]
+            row = db.execute(
+                "SELECT sequence,request_digest,output_json,output_digest,receipt_digest "
+                "FROM effects WHERE effect_key=?",
+                (baseline["effect_key"],),
+            ).fetchone()
+    except sqlite3.Error as exc:
+        raise ValueError("postboot durable recipient unreadable or incomplete") from exc
+    if row is None or identity != (baseline["recipient_id"],) or count != 1:
+        raise ValueError("original recipient identity/effect count not preserved")
+    seq, binding, raw, output_digest, receipt_digest = row
+    try:
+        decoded = strict_json_loads(raw, require_canonical=True)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("corrupt original recipient output") from exc
+    expected_receipt = digest({
+        "schema": "event-horizon.fenced-recipient-receipt.v1",
+        "recipient_id": baseline["recipient_id"],
+        "effect_key": baseline["effect_key"],
+        "request_digest": baseline["request_digest"],
+        "output_digest": output_digest,
+        "sequence": seq,
+    })
+    if (seq != baseline["sequence"] or binding != baseline["request_digest"]
+            or decoded != _OUTPUT or output_digest != digest(decoded)
+            or output_digest != baseline["output_digest"]
+            or receipt_digest != expected_receipt
+            or receipt_digest != baseline["receipt_digest"]):
+        raise ValueError("original SQLite commit missing/corrupt/rebound after boot")
     report = {
         "schema": "event-horizon.boot-separated-recipient-durability-result.v1",
         "status": "PASS",
@@ -246,7 +279,7 @@ def verify(
         "boot_id_before": baseline["boot_id_before"],
         "boot_id_after": boot,
         "effect_key": baseline["effect_key"],
-        "receipt_digest": row.receipt_digest,
+        "receipt_digest": receipt_digest,
         "final_durable_row_count": 1,
         "first_commit_preserved": True,
         "hardware_power_measurement": "not-verified-by-software",
