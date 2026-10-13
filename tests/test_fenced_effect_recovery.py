@@ -339,6 +339,98 @@ class FencedRecoveryTests(unittest.TestCase):
         self.assertEqual(len({r.receipt_digest for r in receipts}), 1)
         self.assertEqual(self.effects.commit_count(), 1)
 
+    def _real_sigkill_then_recover(self, phase):
+        import json
+        import select
+        import signal
+        import subprocess
+        import sys
+
+        first = self.token()
+        config = {
+            "public_key_pem": self.broker.public_key_pem,
+            "key_id": self.broker.key_id,
+            "request": self.request.canonical_payload(),
+            "capability": first.to_dict(),
+            "verification_context": verify_options(self.context),
+            "recipient_path": str(self.recipient_db),
+            "recipient_id": "owned-recipient-v1",
+            "journal_path": str(self.journal_db),
+            "replay_path": str(self.replay_db),
+            "recorder_path": str(self.root / "killed-gateway-events.jsonl"),
+            "output": "owned-value",
+        }
+        path = self.root / "trusted-kill-config.json"
+        path.write_text(json.dumps(config))
+        proc = subprocess.Popen(
+            [sys.executable, "-u", "-m", "scripts.fenced_recovery_sigkill_worker",
+             "--config", str(path), "--phase", phase],
+            cwd=Path(__file__).resolve().parents[1],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, start_new_session=True,
+        )
+        try:
+            ready, _, _ = select.select([proc.stdout], [], [], 12)
+            marker = proc.stdout.readline().strip() if ready else b""
+            if marker != ("PHASE:" + phase).encode():
+                raise AssertionError(
+                    "child never reached verified transaction checkpoint: "
+                    + repr(marker) + " status=" + repr(proc.poll())
+                    + " stderr=" + (proc.stderr.read(3000).decode(errors="replace")
+                                    if proc.poll() is not None else "running")
+                )
+            self.assertIsNone(proc.poll())
+            expected_at_kill = (1 if phase == "after_recipient_commit" else 0)
+            self.assertEqual(self.effects.commit_count(), expected_at_kill)
+            reservation = self.journal.observe_effect(
+                tenant="default", environment="synthetic", effect_key=self.key(),
+            )
+            self.assertIsNotNone(reservation)
+            self.assertEqual(reservation["state"], "possibly-committed")
+            self.assertEqual(reservation["capability_id"], first.claims.capability_id)
+            killed_pid = proc.pid
+            proc.kill()
+            self.assertEqual(proc.wait(timeout=5), -signal.SIGKILL)
+            # Original signed capability is already durably consumed.
+            self.assertEqual(self.run_token(first).error_class, "authority-denied")
+            fresh = self.token()
+            result = self.run_token(fresh, self.gateway())
+            self.assertTrue(result.accepted)
+            self.assertEqual(result.effect_state, "completed")
+            self.assertEqual(result.output, "owned-value")
+            self.assertEqual(self.effects.commit_count(), 1)
+            self.assertEqual(self.journal.observe_effect(
+                tenant="default", environment="synthetic", effect_key=self.key(),
+            )["state"], "recipient-confirmed")
+            reconciliation = [
+                e for e in self.recorder.events()
+                if e["event_type"] == "fenced.recipient-confirmed"
+            ]
+            self.assertEqual(len(reconciliation), 1)
+            self.assertEqual(reconciliation[0]["payload"]["original_capability_id"],
+                             first.claims.capability_id)
+            self.assertEqual(reconciliation[0]["payload"]["recovery"], True)
+            self.assertEqual(reconciliation[0]["payload"]["new_effect_commit"],
+                             expected_at_kill == 0)
+            self.assertNotEqual(killed_pid, os.getpid())
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)
+            proc.stdout.close()
+            proc.stderr.close()
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "pidfd_open"),
+                         "real gateway SIGKILL requires Linux")
+    def test_real_gateway_sigkill_before_recipient_commit_then_progress(self):
+        self._real_sigkill_then_recover("before_recipient_commit")
+
+    @unittest.skipUnless(os.name == "posix" and hasattr(os, "pidfd_open"),
+                         "real gateway SIGKILL requires Linux")
+    def test_real_gateway_sigkill_after_recipient_commit_before_ack(self):
+        self._real_sigkill_then_recover("after_recipient_commit")
+
+
 
 if __name__ == "__main__":
     unittest.main()
