@@ -244,6 +244,44 @@ class RemoteRecipientTlsTests(unittest.TestCase):
             tenant="default", environment="synthetic", effect_key=key,
         )["capability_id"], original.claims.capability_id)
 
+    def test_signed_remote_tls_gateway_worker_end_to_end(self):
+        from scripts.fenced_tls_gateway_worker import run
+        def cfg(token, tag):
+            return {
+                "public_key_pem": self.broker.public_key_pem,
+                "key_id": self.broker.key_id,
+                "request": self.request.canonical_payload(),
+                "capability": token.to_dict(),
+                "verification_context": verify_options(self.context),
+                "tls_recipient": {
+                    "host": "127.0.0.1",
+                    "port": self.port,
+                    "server_name": "recipient.lab.test",
+                    "ca_file": self.material["ca"],
+                    "client_cert_file": self.material["client"]["cert"],
+                    "client_key_file": self.material["client"]["key"],
+                    "server_cert_sha256": self.material["server"]["pin"],
+                    "recipient_id": self.recipient_id,
+                    "auth_key_hex": self.key.hex(),
+                },
+                "journal_path": str(self.journal.path),
+                "replay_path": str(self.root / "worker-replay.sqlite"),
+                "recorder_path": str(self.root / (tag + ".jsonl")),
+                "output": "owned-value",
+            }
+        first = self._token()
+        one = run(cfg(first, "signed-first"))
+        self.assertTrue(one["accepted"], one)
+        self.assertEqual(self._ledger().commit_count(), 1)
+        second = self._token()
+        two = run(cfg(second, "signed-second"))
+        self.assertTrue(two["accepted"], two)
+        self.assertEqual(self._ledger().commit_count(), 1)
+        self.assertEqual(run(cfg(first, "signed-replay"))["error_class"],
+                         "authority-denied")
+        with self.assertRaises(ValueError):
+            run(cfg(self._token(), "badconfig") | {"guest_endpoint": "override"})
+
     def test_partition_returns_indeterminate_not_fabricated_rollback(self):
         self._stop()
         original = self._token()
