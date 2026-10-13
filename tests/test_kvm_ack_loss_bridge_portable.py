@@ -139,7 +139,7 @@ class KvmAckLossBridgePortableTests(unittest.TestCase):
                 left, right = socket.socketpair()
                 recorder = ExternalRecorder(root / "events.jsonl")
                 receiver = KvmLostAckReceiver(
-                    left, recorder, config, 
+                    left, recorder, config,
                 )
                 receiver.recipient_process = service
                 receiver.recipient_pid = service.pid
