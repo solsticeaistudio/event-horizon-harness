@@ -51,6 +51,9 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
         self.recovery_gateway_pid = None
         self.original_replay = None
         self.replacement_replay = None
+        # Recipient READY is not sufficient: the KVM guest must not issue
+        # negative-control probes before the real gateway is initialized.
+        self.gateway_ready = threading.Event()
 
     def _snapshot(self):
         return observed_recipient(Path(self.config["recipient_database"]))
@@ -86,8 +89,23 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                 def launch(recovery=False):
                     nonlocal gateway, sock, evidence, relay
                     gateway, sock, evidence = start_effect_gateway(
-                        path, recorder_bridge=True,
+                        path, recorder_bridge=True, ready_stdout=True,
                     )
+                    # Do not conflate recipient readiness with gateway
+                    # readiness. A cold etcd/credential initialization can
+                    # outlive the guest's first three-second effect deadline.
+                    # The marker originates inside the gateway after its
+                    # trusted verifier + journal have been constructed.
+                    readable, _, _ = select.select([gateway.stdout], [], [], 12)
+                    line = gateway.stdout.readline().strip() if readable else b""
+                    if line != b"READY" or gateway.poll() is not None:
+                        stderr = b""
+                        if gateway.poll() is not None and gateway.stderr is not None:
+                            stderr = gateway.stderr.read(2048)
+                        raise RuntimeError(
+                            "real gateway did not reach trusted READY: "
+                            + repr(line) + " " + stderr.decode("utf-8", errors="replace")
+                        )
                     if gateway.pid == os.getpid():
                         raise RuntimeError("gateway not an independent process")
                     self.gateway_pid = gateway.pid
@@ -136,6 +154,7 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                         raise RuntimeError("sixth-window recorder rejected child evidence") from self.record_failure
 
                 launch()
+                self.gateway_ready.set()
                 self.crashed_gateway_pid = gateway.pid
                 before = self._snapshot()
                 if before["count"] != 0:
