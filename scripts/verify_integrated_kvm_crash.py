@@ -114,6 +114,10 @@ def verify_report(report):
                 and guest["replacement_replay"] == recovered["replacement_replay"]
                 and obs["replay_denied"] is True,
                 "actual KVM guest replies do not prove fail-closed restart")
+        require(obs.get("recovery_capability_id") == spare.claims.capability_id
+                and obs.get("recovery_capability_redeemed") is (idx != 0)
+                and "unredeemed_capability_at_teardown" not in obs,
+                "signed recovery capability state contradicts replay experiment")
         recipient_pid = obs["kvm_recipient_pid"]
         role_pids = {role["pid"] for role in isolation["roles"].values()}
         coordinator_pids = {role["pid"] for role in isolation.get("coordinators", [])}
