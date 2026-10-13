@@ -730,6 +730,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         service_config["expected_request_digest"] = request.request_digest
         service_config["expected_request_id"] = request.request_id
         service_config["expected_capability_id"] = capability.claims.capability_id
+    if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+        service_config["expected_recovery_capability_id"] = spare.claims.capability_id
     if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
         # Bind the side effect to the supervisor's exact signed guest request.
         # Neither the untrusted package worker nor the VM selects its key.
