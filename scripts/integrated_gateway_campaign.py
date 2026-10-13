@@ -257,4 +257,5 @@ class FirecrackerCrashPackageLab(RecipientBridgedIntegratedPackageLab):
                     digest(spare.claims.to_dict()), spare.claims.expires_at,
                 ),
             },
+            allow_crash_recovery_spare=True,
         )
