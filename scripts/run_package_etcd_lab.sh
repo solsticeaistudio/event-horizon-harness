@@ -16,6 +16,7 @@ BRIDGED_AUTHORITY=0
 BRIDGED_RECIPIENT=0
 KVM_CRASH=0
 KVM_DELAYED=0
+KVM_FENCED_BASELINE=0
 if [[ "${1:-}" == "--isolated-authority" && $# == 1 ]]; then
   ISOLATED_AUTHORITY=1
   shift
@@ -32,6 +33,10 @@ if [[ "${1:-}" == "--kvm-crash" && $# == 1 ]]; then
   KVM_CRASH=1
   shift
 fi
+if [[ "${1:-}" == "--kvm-fenced-baseline" && $# == 1 ]]; then
+  KVM_FENCED_BASELINE=1
+  shift
+fi
 if [[ "${1:-}" == "--kvm-delayed-commit" && $# == 1 ]]; then
   KVM_DELAYED=1
   shift
@@ -41,7 +46,7 @@ if [[ "${1:-}" == "--effect-crash" && $# == 1 ]]; then
   shift
 fi
 if (( $# > 2 )); then
-  echo "Usage: bash scripts/run_package_etcd_lab.sh [--isolated-authority | --bridged-authority | --bridged-recipient | --kvm-crash | --kvm-delayed-commit | --effect-crash | --adaptive-steps 1..4]" >&2
+  echo "Usage: bash scripts/run_package_etcd_lab.sh [--isolated-authority | --bridged-authority | --bridged-recipient | --kvm-crash | --kvm-delayed-commit | --kvm-fenced-baseline | --effect-crash | --adaptive-steps 1..4]" >&2
   exit 2
 fi
 if (( $# > 0 )); then
@@ -177,6 +182,7 @@ if (( BRIDGED_AUTHORITY > 0 )); then RUN_NAME+="-bridged-authority"; fi
 if (( BRIDGED_RECIPIENT > 0 )); then RUN_NAME+="-bridged-recipient"; fi
 if (( KVM_CRASH > 0 )); then RUN_NAME+="-kvm-crash"; fi
 if (( KVM_DELAYED > 0 )); then RUN_NAME+="-kvm-delayed-commit"; fi
+if (( KVM_FENCED_BASELINE > 0 )); then RUN_NAME+="-kvm-fenced-baseline"; fi
 if (( EFFECT_CRASH > 0 )); then RUN_NAME="effect-crash-$(date -u +%Y%m%dT%H%M%SZ)-$"; fi
 REPORT="artifacts/reports/${RUN_NAME}.json"
 echo "Source revision: $(git rev-parse HEAD)"
@@ -188,6 +194,10 @@ if (( EFFECT_CRASH > 0 )); then
   "$PY" scripts/run_effect_crash_campaign.py \
     --backend etcd --etcd-endpoint http://127.0.0.1:2379 \
     --etcd-cluster-id "$CLUSTER_ID" --report "$REPORT"
+elif (( KVM_FENCED_BASELINE > 0 )); then
+  sudo "$PY" scripts/run_integrated_kvm_fenced_baseline.py \
+    --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
+    --etcd-containers "${CONTAINERS[@]}" --report "$REPORT"
 elif (( KVM_DELAYED > 0 )); then
   sudo "$PY" scripts/run_integrated_kvm_delayed_commit.py \
     --etcd-endpoint http://127.0.0.1:2379 --etcd-cluster-id "$CLUSTER_ID" \
@@ -221,6 +231,8 @@ else
 fi
 if (( EFFECT_CRASH > 0 )); then
   "$PY" scripts/verify_effect_crash_campaign.py "$REPORT"
+elif (( KVM_FENCED_BASELINE > 0 )); then
+  "$PY" scripts/verify_integrated_kvm_fenced_baseline.py "$REPORT"
 elif (( KVM_DELAYED > 0 )); then
   "$PY" scripts/verify_integrated_kvm_delayed_commit.py "$REPORT"
 elif (( KVM_CRASH > 0 )); then
@@ -230,7 +242,7 @@ else
 fi
 (
   cd "$(dirname "$REPORT")"
-  if (( ISOLATED_AUTHORITY == 0 && BRIDGED_AUTHORITY == 0 && BRIDGED_RECIPIENT == 0 && KVM_CRASH == 0 && KVM_DELAYED == 0 && EFFECT_CRASH == 0 )); then
+  if (( ISOLATED_AUTHORITY == 0 && BRIDGED_AUTHORITY == 0 && BRIDGED_RECIPIENT == 0 && KVM_CRASH == 0 && KVM_DELAYED == 0 && KVM_FENCED_BASELINE == 0 && EFFECT_CRASH == 0 )); then
     sha256sum "$(basename "$REPORT")" > "$(basename "$REPORT").sha256"
   fi
   sha256sum -c "$(basename "$REPORT").sha256"
