@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import sys
@@ -17,7 +18,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 
-from event_horizon.canonical import digest, strict_json_loads
+from event_horizon.canonical import digest
 from scripts.real_gateway_crash_checkpoints import PHASES
 from scripts.verify_integrated_authority import verify_authority
 from scripts.verify_kvm_gateway_crash_bridge import verify_crash_bridge
@@ -169,6 +170,38 @@ def verify_report(report):
     return True
 
 
+def parse_report_json(raw: bytes):
+    """Parse immutable evidence (which contains valid float timestamps).
+
+    The request-protocol canonical parser intentionally rejects all floats.
+    Full evidence reports instead require JSON-compatible, finite timing
+    measurements, strict UTF-8 and no duplicated keys.
+    """
+    def unique_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key in evidence report")
+            result[key] = value
+        return result
+
+    def finite_number(encoded):
+        value = float(encoded)
+        if not math.isfinite(value):
+            raise ValueError("non-finite JSON number in evidence report")
+        return value
+
+    def invalid_constant(encoded):
+        raise ValueError("invalid non-finite JSON constant in evidence report")
+
+    return json.loads(
+        raw.decode("utf-8", errors="strict"),
+        object_pairs_hook=unique_keys,
+        parse_float=finite_number,
+        parse_constant=invalid_constant,
+    )
+
+
 def verify_file(path):
     raw = Path(path).read_bytes()
     sidecar = Path(str(path) + ".sha256")
@@ -176,7 +209,7 @@ def verify_file(path):
         require(sidecar.read_text() == (
             hashlib.sha256(raw).hexdigest() + "  " + path.name + "\n"),
             "original report checksum mismatch")
-    return verify_report(strict_json_loads(raw))
+    return verify_report(parse_report_json(raw))
 
 
 if __name__ == "__main__":
