@@ -30,7 +30,7 @@ from scripts.effect_crash_recipient import observed_recipient
 from scripts.gateway_evidence_contract import GatewayEventContract
 from scripts.integrated_gateway_process_bridge import RecipientBridgedGateReceiver
 from scripts.isolated_effect_gateway_worker import start_effect_gateway
-from scripts.isolated_gateway_transport import exchange, GatewayTransportError
+from scripts.isolated_gateway_transport import GatewayTransportError
 
 
 PHASE = "inflight_before_commit"
@@ -71,7 +71,7 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
         )["receipt"])
 
     def _run_gateway(self):
-        gateway = sock = evidence = relay = None
+        gateway = sock = evidence = relay = gateway_reader = None
         killed = False
         pending = None
         pending_result = {}
@@ -87,7 +87,7 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                 path.chmod(0o600)
 
                 def launch(recovery=False):
-                    nonlocal gateway, sock, evidence, relay
+                    nonlocal gateway, sock, evidence, relay, gateway_reader
                     gateway, sock, evidence = start_effect_gateway(
                         path, recorder_bridge=True, ready_stdout=True,
                     )
@@ -108,6 +108,11 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                         )
                     if gateway.pid == os.getpid():
                         raise RuntimeError("gateway not an independent process")
+                    sock.settimeout(3)
+                    # A single persistent reader must own the lifetime of
+                    # the channel; reopening buffered makefile readers across
+                    # frames can strand a subsequent response.
+                    gateway_reader = sock.makefile("rb")
                     self.gateway_pid = gateway.pid
                     self.gateway_process = gateway
                     self.gateway_pidfd = os.pidfd_open(gateway.pid)
@@ -126,7 +131,10 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                     relay.start()
 
                 def close_child():
-                    nonlocal gateway, sock, evidence, relay
+                    nonlocal gateway, sock, evidence, relay, gateway_reader
+                    if gateway_reader is not None:
+                        gateway_reader.close()
+                        gateway_reader = None
                     if sock is not None:
                         sock.close()
                         sock = None
@@ -152,6 +160,20 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                         self.gateway_pidfd = None
                     if self.record_failure is not None:
                         raise RuntimeError("sixth-window recorder rejected child evidence") from self.record_failure
+
+                def exchange_gateway(message):
+                    try:
+                        if sock is None or gateway_reader is None:
+                            raise EOFError("no live gateway reader")
+                        sock.sendall(encode_frame(message))
+                        reply = read_frame(gateway_reader)
+                    except (OSError, EOFError, ValueError) as exc:
+                        raise GatewayTransportError(
+                            "gateway channel failed; outcome unknown"
+                        ) from exc
+                    if not isinstance(reply, dict):
+                        raise GatewayTransportError("invalid gateway reply")
+                    return reply
 
                 launch()
                 self.gateway_ready.set()
@@ -186,7 +208,7 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                                     raise RuntimeError("second authorized target")
                                 def dispatch():
                                     try:
-                                        pending_result["value"] = exchange(sock, message)
+                                        pending_result["value"] = exchange_gateway(message)
                                     except BaseException as exc:
                                         pending_result["error"] = exc
                                 pending = threading.Thread(target=dispatch, daemon=True)
@@ -244,7 +266,7 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                             else:
                                 if killed and self.recovery_gateway_pid is None:
                                     raise RuntimeError("guest replay reached dead gateway")
-                                response = exchange(sock, message)
+                                response = exchange_gateway(message)
                                 if killed and self.original_replay is None:
                                     if response.get("success") is not False or response.get("error") != "authority-denied":
                                         raise RuntimeError("original capability replay accepted")
@@ -329,6 +351,9 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                 pending.join(timeout=4)
                 if pending.is_alive() and self.failure is None:
                     self.failure = RuntimeError("gateway dispatch still running")
+            if gateway_reader is not None:
+                gateway_reader.close()
+                gateway_reader = None
             if sock is not None:
                 sock.close()
             if gateway is not None:
