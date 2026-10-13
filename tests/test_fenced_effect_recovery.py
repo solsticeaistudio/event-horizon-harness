@@ -355,6 +355,22 @@ class FencedRecoveryTests(unittest.TestCase):
         self.assertEqual(result.error_class, "pre-dispatch-denied")
         self.assertEqual(self.effects.commit_count(), 0)
 
+    def test_nonrecoverable_float_output_is_rejected_before_fencing(self):
+        decision = self.run_token(
+            self.token(), self.gateway(output_factory=lambda _: {"value": 1.25}),
+        )
+        self.assertEqual(decision.error_class, "pre-dispatch-denied")
+        self.assertEqual(self.effects.commit_count(), 0)
+        self.assertIsNone(self.journal.observe_effect(
+            tenant="default", environment="synthetic", effect_key=self.key(),
+        ))
+        with self.assertRaises(ValueError):
+            self.effects.apply(
+                effect_key=self.key(), request_digest=self.request.request_digest,
+                output={"value": 1.25},
+            )
+        self.assertEqual(self.effects.commit_count(), 0)
+
     def test_failed_completion_evidence_can_be_recovered(self):
         first, fresh = self.token(), self.token()
         recorder = Mock()
