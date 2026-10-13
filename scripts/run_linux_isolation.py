@@ -1166,10 +1166,12 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             actual = observed_recipient(Path(service_config["recipient_database"]))
             if actual != receiver.recovery_report["recipient_after_recovery"]:
                 raise RuntimeError("post-kill recipient ledger was substituted")
-            journal = DurableEffectJournal(service_config["outcome_journal"])
-            recorded = journal.observe(
-                tenant=context["tenant"], environment=context["environment"],
+            from scripts.kvm_crash_journal_evidence import observe_crash_reservation
+            recorded = observe_crash_reservation(
+                service_config,
                 capability_id=capability.claims.capability_id,
+                request_digest=request.request_digest,
+                claims_digest=digest(capability.claims.to_dict()),
             )
             if (recorded["state"] if recorded else None) != (
                     receiver.crash_report["journal_state_after_kill"]):
