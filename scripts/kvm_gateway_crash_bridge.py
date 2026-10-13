@@ -22,6 +22,7 @@ import threading
 from event_horizon.canonical import canonical_bytes
 from event_horizon.protocol import encode_frame, read_frame
 from event_horizon.models import ActionRequest
+from event_horizon.effect_outcome_journal import DurableEffectJournal
 from scripts.effect_crash_process_supervisor import kill_at_checkpoint
 from scripts.effect_crash_recipient import observed_recipient
 from scripts.gateway_evidence_contract import GatewayEventContract
@@ -44,6 +45,7 @@ class KvmGatewayCrashReceiver(RecipientBridgedGateReceiver):
                          isolated_recipient=isolated_recipient)
         self.crash_phase = crash_phase
         self.crash_report = None
+        self.recovery_report = None
         self.crash_error = None
         self.crashed_gateway_pid = None
         self.recovery_gateway_pid = None
@@ -219,6 +221,47 @@ class KvmGatewayCrashReceiver(RecipientBridgedGateReceiver):
                     raise RuntimeError("no host-confirmed SIGKILL: crash run incomplete")
                 if self.recovery_gateway_pid is None:
                     raise RuntimeError("gateway was not restarted")
+                expected = self.crash_report["expected_commits"]
+                after_recovery = observed_recipient(Path(self.config["recipient_database"]))
+                if after_recovery != self.crash_report["recipient_after_kill"]:
+                    raise RuntimeError("recipient ledger changed during crash recovery")
+                state = DurableEffectJournal(self.config["outcome_journal"]).observe(
+                    tenant=self.config["verification_context"]["tenant"],
+                    environment=self.config["verification_context"]["environment"],
+                    capability_id=self.config["expected_capability_id"],
+                )
+                expected_state = None if self.crash_phase == PHASES[0] else "possibly-committed"
+                if (state["state"] if state else None) != expected_state:
+                    raise RuntimeError("crashed effect journal contradicts recipient checkpoint")
+                if (len(self.replay_responses) != (1 if expected_state is None else 2)
+                        or self.replay_responses[0].get("success") is not False
+                        or self.replay_responses[0].get("error") != "authority-denied"):
+                    raise RuntimeError("consumed original capability was not denied after restart")
+                if expected_state is not None and (
+                        self.replay_responses[1].get("success") is not False
+                        or self.replay_responses[1].get("effect_state") != "possibly-committed"
+                        or self.replay_responses[1].get("error") != "prior-effect-unknown"):
+                    raise RuntimeError("newly signed capability was not fenced by journal")
+                self.recovery_report = {
+                    "phase": self.crash_phase,
+                    "killed_pid": self.crashed_gateway_pid,
+                    "recovery_pid": self.recovery_gateway_pid,
+                    "recipient_after_recovery": after_recovery,
+                    "journal_state_after_kill": expected_state,
+                    "original_replay": {
+                        "success": self.replay_responses[0]["success"],
+                        "error": self.replay_responses[0]["error"],
+                    },
+                    "replacement_replay": (None if expected_state is None else {
+                        "success": self.replay_responses[1]["success"],
+                        "effect_state": self.replay_responses[1]["effect_state"],
+                        "error": self.replay_responses[1]["error"],
+                    }),
+                }
+                self.receipts.append(self.recorder.append(
+                    "gateway.recovery-observed", self.recovery_report,
+                    source_id="host-supervisor",
+                )["receipt"])
         except BaseException as exc:
             if self.failure is None:
                 self.failure = exc
