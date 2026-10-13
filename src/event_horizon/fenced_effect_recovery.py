@@ -97,12 +97,14 @@ class FencedEffectRecoveryGateway:
         recovered = False
         try:
             try:
-                first = self.journal.reserve(
+                first = self.journal.reserve_fenced(
                     tenant=self.tenant, environment=self.environment,
                     effect_key=effect_key,
                     capability_id=claims.capability_id,
                     request_digest=request.request_digest,
                     claims_digest=claims_digest,
+                    recipient_id=self.recipient.recipient_id,
+                    output_digest=digest(result),
                 )
                 recovered = not first
             except EffectAlreadyReserved:
@@ -113,6 +115,9 @@ class FencedEffectRecoveryGateway:
             )
             if (binding is None
                     or binding["request_digest"] != request.request_digest
+                    or binding["fenced_protocol"] != "atomic-sqlite-v1"
+                    or binding["fenced_recipient_id"] != self.recipient.recipient_id
+                    or binding["fenced_output_digest"] != digest(result)
                     or binding["state"] not in ("possibly-committed", "recipient-confirmed")
                     or (not recovered and (
                         binding["capability_id"] != claims.capability_id
