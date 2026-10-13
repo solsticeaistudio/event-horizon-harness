@@ -94,7 +94,18 @@ class SixthWindowLiveBridgeTests(unittest.TestCase):
                 negative["unauthorized_operation"] = forbidden
                 for name, bad in negative.items():
                     with self.subTest(preflight=name):
-                        outcome = exchange(guest_sock, bad)
+                        try:
+                            outcome = exchange(guest_sock, bad)
+                        except Exception as exc:
+                            process_status = (receiver.gateway_process.poll()
+                                              if receiver.gateway_process is not None else None)
+                            self.fail(
+                                f"preflight {name} failed: {exc!r}; "
+                                f"bridge_failure={receiver.failure!r}; "
+                                f"record_failure={receiver.record_failure!r}; "
+                                f"gateway_status={process_status!r}; "
+                                f"dispatches={receiver.dispatches}"
+                            )
                         self.assertFalse(outcome["success"])
                         self.assertEqual(outcome["effect_state"], "not-started")
                         self.assertEqual(receiver.dispatches, 0)
