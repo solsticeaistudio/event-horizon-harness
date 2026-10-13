@@ -69,3 +69,37 @@ SHA256 after reviewing them for sensitive details.
 
 **Do not merge PR #66 based on portable CI alone.** The physical KVM
 baseline and its verifier must pass on the operator-owned host first.
+
+
+## Two-window KVM gateway SIGKILL experiment (after baseline passes)
+
+The same draft now includes a **separate** supervisor-triggered hardware
+fault runner. It kills the real gateway child at an authenticated checkpoint
+after the original reservation, first BEFORE recipient commit and then AFTER
+the atomic recipient commit but BEFORE gateway confirmation/acknowledgement.
+The recipient continues in its own process. The real KVM guest then submits
+the original spent capability (denied) and a fresh, separately guardian-signed
+capability to a restarted gateway. A real durable recipient observation must
+confirm exactly one effect row and preserve original capability provenance.
+
+    bash scripts/run_package_etcd_lab.sh --kvm-fenced-crash
+
+Each phase uses a new KVM guest, guardian session and originally empty
+recipient ledger. PASS requires **both** phases, source-pinned receipt chains,
+verified host-observed SIGKILL, distinct live PID identities, synthetic
+attestation disclosure, clean teardown and a three-member etcd linearizable
+consumption oracle. New exclusive-create results receive their OWN JSON and
+SHA256 sidecar and can be rechecked using:
+
+    /var/tmp/event-horizon-isolation-venv/bin/python \
+      scripts/verify_integrated_kvm_fenced_crash.py \
+      artifacts/reports/<EXACT-FENCED-CRASH-FILENAME>.json
+
+This is NOT a hardware result until executed successfully on the owned KVM
+host and independently verified. The CI test of this bridge is a portable
+Linux-process regression, not proof of a Firecracker guest.
+
+Recipient service SIGKILL, deliberately interrupted recipient IPC/network
+and true competing gateway processes are NOT yet part of these two KVM
+windows and must not be claimed. The two historical conservative-gateway
+crash commands remain distinct and unmodified.
