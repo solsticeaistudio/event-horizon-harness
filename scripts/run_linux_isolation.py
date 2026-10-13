@@ -679,6 +679,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         capability, spare, context = authority_session.authorize_pair(request, manifest)
         issuer_public, issuer_key_id = authority_session.public_key_pem, authority_session.key_id
         package_lab.fault_capability = authority_session.fault_capability
+        if getattr(package_lab, "kvm_crash_mode", False):
+            package_lab.spare_capability = spare
     else:
         context = authority_context(request, time.time(), measurement=digest(manifest["artifacts"]))
         capability = broker.issue(request, **issue_options(context), max_output_bytes=512)
