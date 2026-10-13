@@ -52,6 +52,10 @@ class KvmLostAckReceiver(FencedRecipientKvmReceiver):
             effect_key=self.config["recipient_effect_key"],
         )
 
+    def _exchange_guest(self, request_channel, message):
+        """Override only for a host-controlled competing recovery gateway."""
+        return exchange(request_channel, message)
+
     def _run_gateway(self):
         child = request_channel = recorder_channel = relay = None
         try:
@@ -64,6 +68,7 @@ class KvmLostAckReceiver(FencedRecipientKvmReceiver):
                     "recorder_path": str(Path(folder) / "unused.jsonl"),
                 }))
                 cfg.chmod(0o600)
+                self._gateway_cfg = cfg
                 child, request_channel, recorder_channel = start_effect_gateway(
                     cfg, recorder_bridge=True, ready_stdout=True,
                 )
@@ -103,7 +108,7 @@ class KvmLostAckReceiver(FencedRecipientKvmReceiver):
                             raise RuntimeError("host signed recorder rejected gateway events")
                         self.event_contract.begin_request(message)
                         try:
-                            answer = exchange(request_channel, message)
+                            answer = self._exchange_guest(request_channel, message)
                         finally:
                             self.event_contract.end_request()
                         is_original = False
