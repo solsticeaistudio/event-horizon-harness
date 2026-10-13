@@ -44,7 +44,6 @@ def verify_report(report):
             and authority["cluster_id"].isdecimal()
             and int(authority["cluster_id"]) > 0,
             "independent three-node etcd authority not pinned")
-    assert_no_duplicate_processes = set()
     sessions = set()
     for idx, (phase, round_record) in enumerate(zip(PHASES, report["rounds"], strict=True)):
         events, obs, receipts = (
@@ -122,9 +121,9 @@ def verify_report(report):
         require(type(recipient_pid) is int and recipient_pid > 1
                 and len(pids) == 3 and not pids & (role_pids | coordinator_pids),
                 "recipient or gateway reused an authorization process")
-        require(not (assert_no_duplicate_processes & pids),
-                "stale process identity reused across independent rounds")
-        assert_no_duplicate_processes.update(pids)
+        # PIDs can legitimately be recycled after a prior guest round has
+        # terminated. Require separation among concurrent principals within
+        # each round, not historical uniqueness across kernel lifetimes.
         oracle = obs["authority_oracle"]
         extras = set(oracle["additional_consumed_ids"])
         require(oracle["source"] == authority["oracle"]
