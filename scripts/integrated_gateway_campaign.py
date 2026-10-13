@@ -341,3 +341,48 @@ class FencedRecipientKvmPackageLab(BridgedIntegratedPackageLab):
             observer, recorder, config, self.target_thread,
         )
         return self.gate_receiver
+
+
+class FencedRecoveryKvmCrashLab(FencedRecipientKvmPackageLab):
+    """One real guest/vsock/etcd fenced crash-and-recover window.
+
+    The supervisor selects a phase; a freshly signed capability must
+    positively corroborate the ORIGINAL reservation via recipient SQLite.
+    """
+    kvm_fenced_crash_mode = True
+
+    def __init__(self, mode, binary, worker_build, *, crash_phase, **kwargs):
+        from scripts.isolated_effect_gateway_worker import FENCED_KVM_CRASH_PHASES
+        if crash_phase not in FENCED_KVM_CRASH_PHASES:
+            raise ValueError("unknown fenced KVM crash phase")
+        super().__init__(mode, binary, worker_build, **kwargs)
+        self.kvm_fenced_phase = crash_phase
+
+    def receiver(self, observer, recorder, config):
+        from scripts.kvm_fenced_crash_bridge import FencedKvmCrashReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = FencedKvmCrashReceiver(
+            observer, recorder, config, self.target_thread,
+            phase=self.kvm_fenced_phase,
+        )
+        return self.gate_receiver
+
+    def observe_authority(self, config, capability):
+        fault, spare = self.fault_capability, self.spare_capability
+        return inspect_committed_consumption(
+            self.quorum.transport,
+            cluster_id=config["etcd_cluster_id"],
+            session_id=config["session_id"],
+            capability_id=capability.claims.capability_id,
+            claims_digest=digest(capability.claims.to_dict()),
+            expires_at=capability.claims.expires_at,
+            extra_bindings={
+                fault.claims.capability_id: (
+                    digest(fault.claims.to_dict()), fault.claims.expires_at,
+                ),
+                spare.claims.capability_id: (
+                    digest(spare.claims.to_dict()), spare.claims.expires_at,
+                ),
+            },
+            allow_crash_recovery_spare=True,
+        )
