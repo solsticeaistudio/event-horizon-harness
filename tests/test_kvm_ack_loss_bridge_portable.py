@@ -134,7 +134,7 @@ class KvmAckLossBridgePortableTests(unittest.TestCase):
                 }
                 service = self._launch_service(
                     directory=root, socket_path=socket_path,
-                    database=database, key=key, 
+                    database=database, key=key, phase="drop_ack_after_commit",
                 )
                 left, right = socket.socketpair()
                 recorder = ExternalRecorder(root / "events.jsonl")
@@ -173,8 +173,8 @@ class KvmAckLossBridgePortableTests(unittest.TestCase):
                 self.assertIsNotNone(receiver.ack_loss_report)
                 self.assertEqual(receiver.ack_loss_report["recipient_pid"], service.pid)
                 self.assertTrue(receiver.ack_loss_report["recipient_alive_after_drop"])
-                self.assertTrue(receiver.recovery_report["recipient_alive_after_recovery"])
                 self.assertIsNotNone(receiver.recovery_report)
+                self.assertTrue(receiver.recovery_report["recipient_alive_after_recovery"])
                 self.assertEqual(
                     receiver.ack_loss_report["recipient_count_at_drop"],
                     1,
