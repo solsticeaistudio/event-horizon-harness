@@ -11,6 +11,8 @@ import select
 from pathlib import Path
 import signal
 import socket
+import sys
+import traceback
 import tempfile
 import threading
 import time
@@ -109,6 +111,7 @@ class SixthWindowLiveBridgeTests(unittest.TestCase):
                                         "utf-8", errors="replace"
                                     )
                             self.fail(
+                                f"supervisor_thread_stack={''.join(traceback.format_stack(sys._current_frames()[worker.ident])[-12:]) if worker.ident in sys._current_frames() else 'unavailable'}; "
                                 f"gateway_trace={gateway_trace!r}; "
                                 f"preflight {name} failed: {exc!r}; "
                                 f"bridge_failure={receiver.failure!r}; "
