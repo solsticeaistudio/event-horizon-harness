@@ -1081,7 +1081,15 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     "recorder_resides_in_supervisor": True,
                     "identity_binding": "pidfd-dispatch-v1",
                 }
-            observed["unredeemed_capability_at_teardown"] = spare.claims.capability_id
+            if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+                # A replacement token is intentionally consumed in crash
+                # windows 2-5; never call it "unredeemed" in signed evidence.
+                observed["recovery_capability_id"] = spare.claims.capability_id
+                observed["recovery_capability_redeemed"] = (
+                    package_lab.kvm_crash_phase != "before_reservation"
+                )
+            else:
+                observed["unredeemed_capability_at_teardown"] = spare.claims.capability_id
             authority_state = ((state / "replay.sqlite3",)
                                if service_config.get("authority_backend", "sqlite") == "sqlite" else ())
             for uid, targets in ((VM_UID, (control / "events.jsonl", state / "decay.sqlite3")
