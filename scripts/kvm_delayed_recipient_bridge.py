@@ -42,6 +42,7 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
         if not all(config.get(k) for k in (
                 "expected_request_id", "expected_request_digest",
                 "expected_capability_id", "expected_recovery_capability_id",
+                "expected_signed_effect_message_digest",
                 "recipient_socket", "recipient_database", "recipient_effect_key",
                 "outcome_journal", "verification_context")):
             raise ValueError("sixth window needs pinned gateway and recipient identity")
@@ -194,6 +195,8 @@ class SixthWindowGateReceiver(RecipientBridgedGateReceiver):
                             req.request_digest == self.config["expected_request_digest"]
                             and message["capability"]["claims"]["capability_id"]
                             == self.config["expected_capability_id"]
+                            and digest(message)
+                            == self.config["expected_signed_effect_message_digest"]
                         )
                     except (KeyError, TypeError, ValueError, AttributeError):
                         return False
