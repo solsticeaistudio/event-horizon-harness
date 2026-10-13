@@ -943,17 +943,58 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             observed["denied_cases"] = list(cases)
             if authority_session is not None:
                 package_lab.before_authorized(channel, message, receiver)
-            response = guest_effect(channel, message)
-            if not response["success"] or response["output"] != content:
-                raise RuntimeError(f"authorized dataset read failed: {response}")
-            observed["useful_dataset_read_and_summary" if package_lab is None else "useful_package_read_and_summary"] = True
-            if guest_effect(channel, message)["success"]:
-                raise RuntimeError("replay succeeded")
-            observed["replay_denied"] = True
-            if authority_session is not None:
-                observed["integrated_gateway"] = package_lab.after_authorized(channel, message, receiver)
-            if package_lab is not None:
-                observed["package"] = package_lab.observe(service, channel, response, message)
+            if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+                from scripts.real_gateway_crash_checkpoints import PHASES
+                phase = package_lab.kvm_crash_phase
+                crashed_response = guest_effect(channel, message)
+                if (crashed_response.get("success") is not False
+                        or crashed_response.get("effect_state") != "possibly-committed"
+                        or crashed_response.get("error") != "gateway-killed"):
+                    raise RuntimeError("actual KVM guest did not observe interrupted gateway")
+                original_replay = guest_effect(channel, message)
+                if (original_replay.get("success") is not False
+                        or original_replay.get("error") != "authority-denied"):
+                    raise RuntimeError("actual KVM guest replayed original consumed capability")
+                replacement_replay = None
+                if phase != PHASES[0]:
+                    replacement_replay = guest_effect(channel, effect_message(request, spare))
+                    if (replacement_replay.get("success") is not False
+                            or replacement_replay.get("effect_state") != "possibly-committed"
+                            or replacement_replay.get("error") != "prior-effect-unknown"):
+                        raise RuntimeError("new signed KVM capability bypassed reserved effect")
+                observed["kvm_crash_guest_replies"] = {
+                    "interrupted": {
+                        "success": crashed_response["success"],
+                        "effect_state": crashed_response["effect_state"],
+                        "error": crashed_response["error"],
+                    },
+                    "original_replay": {
+                        "success": original_replay["success"],
+                        "error": original_replay["error"],
+                    },
+                    "replacement_replay": (None if replacement_replay is None else {
+                        "success": replacement_replay["success"],
+                        "effect_state": replacement_replay["effect_state"],
+                        "error": replacement_replay["error"],
+                    }),
+                }
+                observed["replay_denied"] = True
+                observed["kvm_crash_expected_commits"] = 0 if phase in PHASES[:2] else 1
+                # Quorum failure probes ran before the crash; restore all three
+                # owned members before independent etcd consumption inspection.
+                package_lab.quorum.restore()
+            else:
+                response = guest_effect(channel, message)
+                if not response["success"] or response["output"] != content:
+                    raise RuntimeError(f"authorized dataset read failed: {response}")
+                observed["useful_dataset_read_and_summary" if package_lab is None else "useful_package_read_and_summary"] = True
+                if guest_effect(channel, message)["success"]:
+                    raise RuntimeError("replay succeeded")
+                observed["replay_denied"] = True
+                if authority_session is not None:
+                    observed["integrated_gateway"] = package_lab.after_authorized(channel, message, receiver)
+                if package_lab is not None:
+                    observed["package"] = package_lab.observe(service, channel, response, message)
             observed["forbidden_vsock_port_diagnostic"] = send_frame(channel, {"type": "forbidden_port"})
             if observed["forbidden_vsock_port_diagnostic"] != {"connected": False}:
                 raise RuntimeError("unexpected host vsock service reachable")
