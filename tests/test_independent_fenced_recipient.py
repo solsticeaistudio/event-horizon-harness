@@ -316,6 +316,116 @@ class IndependentFencedRecipientTests(unittest.TestCase):
         self.assertEqual(damaged.error_class, "recipient-indeterminate")
         self.assertEqual(self.committed(), 1)
 
+    def test_kvm_boundary_opt_in_routes_to_fenced_recipient(self):
+        # Exercise the actual DatasetEffectBoundary entry point used by the
+        # Firecracker gateway bridge, with genuine signed capability authority.
+        from event_horizon.effect_boundary import DatasetEffectBoundary
+
+        cfg = {
+            "verification_context": verify_options(self.context),
+            "public_key_pem": self.broker.public_key_pem,
+            "key_id": self.broker.key_id,
+            "dataset": "owned-value",
+            "session_id": self.request.session_id,
+            "resource_id": self.request.resource_id,
+            "vm_uid": 60000,
+            "replay_database": str(self.replay_path),
+            "decay_database": str(self.root / "boundary-decay.sqlite"),
+            "outcome_journal": str(self.journal_path),
+            "fenced_recipient": {
+                "socket_path": str(self.sock),
+                "recipient_id": self.recipient_id,
+                "auth_key_hex": self.key.hex(),
+            },
+        }
+        first = self.token()
+        with self.subTest("first authorized operation"):
+            boundary = DatasetEffectBoundary(
+                cfg, ExternalRecorder(self.root / "boundary-first.jsonl"),
+            )
+            try:
+                initial = boundary.execute({
+                    "request": self.request.canonical_payload(),
+                    "capability": first.to_dict(),
+                }, peer_uid=60000)
+                self.assertTrue(initial["success"], initial)
+                self.assertEqual(initial["output"], "owned")
+            finally:
+                boundary.close()
+        self.assertEqual(self.committed(), 1)
+        self.assertEqual(self.effect()["capability_id"], first.claims.capability_id)
+        with self.subTest("fresh signed recovery capability"):
+            fresh = self.token()
+            boundary = DatasetEffectBoundary(
+                cfg, ExternalRecorder(self.root / "boundary-recovery.jsonl"),
+            )
+            try:
+                again = boundary.execute({
+                    "request": self.request.canonical_payload(),
+                    "capability": fresh.to_dict(),
+                }, peer_uid=60000)
+                self.assertTrue(again["success"], again)
+                self.assertEqual(again["output"], "owned")
+                self.assertFalse(boundary.execute({
+                    "request": self.request.canonical_payload(),
+                    "capability": fresh.to_dict(),
+                }, peer_uid=60000)["success"])
+            finally:
+                boundary.close()
+        self.assertEqual(self.committed(), 1)
+        self.assertEqual(self.effect()["capability_id"], first.claims.capability_id)
+        self.assertEqual(self.effect()["state"], "recipient-confirmed")
+
+    def test_boundary_fenced_config_denies_guest_selection_and_legacy_conflict(self):
+        from event_horizon.effect_boundary import DatasetEffectBoundary
+        cfg = {
+            "verification_context": verify_options(self.context),
+            "public_key_pem": self.broker.public_key_pem,
+            "key_id": self.broker.key_id,
+            "dataset": "owned-value",
+            "session_id": self.request.session_id,
+            "resource_id": self.request.resource_id,
+            "vm_uid": 60000,
+            "replay_database": str(self.replay_path),
+            "decay_database": str(self.root / "boundary-bad-decay.sqlite"),
+            "outcome_journal": str(self.journal_path),
+            "fenced_recipient": {
+                "socket_path": str(self.sock),
+                "recipient_id": self.recipient_id,
+                "auth_key_hex": self.key.hex(),
+            },
+        }
+        cfg["recipient_socket"] = str(self.sock)
+        with self.assertRaises(ValueError):
+            DatasetEffectBoundary(cfg, ExternalRecorder(self.root / "bad-recorder.jsonl"))
+        del cfg["recipient_socket"]
+        boundary = DatasetEffectBoundary(
+            cfg, ExternalRecorder(self.root / "boundary-guest.jsonl"),
+        )
+        try:
+            first = self.token()
+            forged = {
+                "request": self.request.canonical_payload(),
+                "capability": first.to_dict(),
+                "fenced_recipient": {"recipient_id": "guest-selected"},
+            }
+            rejected = boundary.execute(forged, peer_uid=60000)
+            self.assertFalse(rejected["success"])
+            self.assertEqual(self.committed(), 0)
+            self.assertFalse(boundary.execute({
+                "request": self.request.canonical_payload(),
+                "capability": first.to_dict(),
+            }, peer_uid=1000)["success"])
+            self.assertEqual(self.committed(), 0)
+            accepted = boundary.execute({
+                "request": self.request.canonical_payload(),
+                "capability": first.to_dict(),
+            }, peer_uid=60000)
+            self.assertTrue(accepted["success"], accepted)
+            self.assertEqual(self.committed(), 1)
+        finally:
+            boundary.close()
+
     def test_wrong_ipc_key_does_not_commit_and_can_recover(self):
         cap = self.token()
         denied = self.run_parent(cap, key=secrets.token_bytes(32))
