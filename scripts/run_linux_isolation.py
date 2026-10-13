@@ -982,7 +982,48 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             observed["denied_cases"] = list(cases)
             if authority_session is not None:
                 package_lab.before_authorized(channel, message, receiver)
-            if package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
+            if package_lab is not None and getattr(package_lab, "kvm_fenced_crash_mode", False):
+                # A real KVM guest, not the supervisor, must trigger the exact
+                # approved signed effect. The SIGKILL proof is made by the
+                # host-pinned child PID and its verified commit checkpoint.
+                interrupted = guest_effect(channel, message)
+                if (interrupted.get("success") is not False
+                        or interrupted.get("effect_state") != "possibly-committed"
+                        or interrupted.get("error") != "gateway-killed"):
+                    raise RuntimeError("actual KVM fenced gateway was not interrupted")
+                old_replay = guest_effect(channel, message)
+                if (old_replay.get("success") is not False
+                        or old_replay.get("error") != "authority-denied"):
+                    raise RuntimeError("original signed KVM capability replay succeeded")
+                recovery = guest_effect(channel, effect_message(request, spare))
+                if (recovery.get("success") is not True
+                        or recovery.get("output") != content
+                        or recovery.get("effect_state") != "completed"):
+                    raise RuntimeError("fresh signed KVM recovery did not return durable result")
+                observed["kvm_fenced_guest_replies"] = {
+                    "interrupted": {
+                        "success": interrupted["success"],
+                        "error": interrupted["error"],
+                        "effect_state": interrupted["effect_state"],
+                    },
+                    "original_replay": {
+                        "success": old_replay["success"], "error": old_replay["error"],
+                    },
+                    "fresh_recovery": {
+                        "success": recovery["success"],
+                        "effect_state": recovery["effect_state"],
+                        "output_digest": digest(recovery["output"]),
+                    },
+                }
+                observed["replay_denied"] = True
+                observed["useful_package_read_and_summary"] = True
+                observed["integrated_gateway"] = package_lab.after_authorized(
+                    channel, message, receiver,
+                )
+                observed["package"] = package_lab.observe(
+                    service, channel, recovery, message,
+                )
+            elif package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
                                             or getattr(package_lab, "kvm_delayed_commit_mode", False)):
                 from scripts.real_gateway_crash_checkpoints import PHASES
                 phase = ("inflight_before_commit" if getattr(package_lab, "kvm_delayed_commit_mode", False)
@@ -1173,12 +1214,14 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                                          else "pidfd-dispatch-v1"),
                 }
             if package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
-                                            or getattr(package_lab, "kvm_delayed_commit_mode", False)):
+                                            or getattr(package_lab, "kvm_delayed_commit_mode", False)
+                                            or getattr(package_lab, "kvm_fenced_crash_mode", False)):
                 # A replacement token is intentionally consumed in crash
                 # windows 2-5; never call it "unredeemed" in signed evidence.
                 observed["recovery_capability_id"] = spare.claims.capability_id
                 observed["recovery_capability_redeemed"] = (
                     (getattr(package_lab, "kvm_delayed_commit_mode", False)
+                     or getattr(package_lab, "kvm_fenced_crash_mode", False)
                      or package_lab.kvm_crash_phase != "before_reservation")
                 )
             else:
