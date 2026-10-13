@@ -9,6 +9,13 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import sys
+
+# Support direct invocation from any working directory without relying on
+# PYTHONPATH or an editable installation. The installed verifier is commonly
+# run as `python scripts/verify_integrated_kvm_crash.py original.json`.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 
 from event_horizon.canonical import digest, strict_json_loads
 from scripts.real_gateway_crash_checkpoints import PHASES
