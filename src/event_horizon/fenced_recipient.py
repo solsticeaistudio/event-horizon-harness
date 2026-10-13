@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from .canonical import canonical_bytes, digest
+from .canonical import canonical_bytes, digest, strict_json_loads
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -145,6 +145,9 @@ class FencedSqliteRecipient:
         """
         self._key(effect_key, request_digest)
         raw = canonical_bytes(output)
+        # All persisted outputs must be round-trippable by our strict,
+        # deterministic read/verification path after a process restart.
+        strict_json_loads(raw, require_canonical=True)
         output_digest = digest(output)
         if len(raw) > 16_384:
             raise ValueError("effect exceeds synthetic recipient storage ceiling")
@@ -208,7 +211,6 @@ class FencedSqliteRecipient:
         if row is None:
             return None
         seq, binding, raw, output_digest, receipt_digest = row
-        from .canonical import strict_json_loads
         output = strict_json_loads(raw, require_canonical=True)
         if (binding != request_digest or digest(output) != output_digest
                 or receipt_digest != self._receipt_digest(
