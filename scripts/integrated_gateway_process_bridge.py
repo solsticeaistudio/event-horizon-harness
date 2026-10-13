@@ -149,6 +149,11 @@ class BridgedGateReceiver(GateReceiver):
                 self.failure = self.record_failure
 
 
+    # The recipient wrapper invokes this hook after its separate service is
+    # ready. A crash experiment may override it without affecting the v4 path.
+    _run_gateway = run
+
+
 
 # Explicit import allowlist. The restricted process must not depend on
 # traversing an operator's private checkout after all DAC caps are dropped.
@@ -239,7 +244,7 @@ class RecipientBridgedGateReceiver(BridgedGateReceiver):
                     + repr(line) + " " + error.decode("utf-8", errors="replace")
                 )
             self.recipient_ready.set()
-            super().run()
+            self._run_gateway()
             if recipient.poll() is not None:
                 raise RuntimeError("recipient died while trusted gateway was active")
         except BaseException as exc:
