@@ -58,6 +58,14 @@ newly authorized writer races, concurrent recipient instances, corrupt
 stored receipts, mismatched output, unavailable recorder/journal,
 and explicit no-side-effect preflight denials.
 
+The expanded tests also spawn a **separate Linux gateway worker** and
+SIGKILL it at supervisor-observed checkpoints immediately BEFORE and AFTER
+the recipient's SQLite commit, then create a new recovery gateway using the
+same committed authority/journal/recipient files. This proves real process
+crash recovery for the synthetic atomic storage effect. The recipient code
+runs in that worker for this portable lab; this is **not** a physically or
+OS-process independent external recipient, nor Firecracker evidence.
+
 The six original real KVM windows and their strict evidence checks remain
 untouched. The **next lab step** after this protocol is reviewed is to build
 a separate real process, then Firecracker, crash/partition matrix for the
