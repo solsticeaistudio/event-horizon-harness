@@ -21,6 +21,7 @@ import threading
 
 from event_horizon.canonical import canonical_bytes
 from event_horizon.protocol import encode_frame, read_frame
+from event_horizon.models import ActionRequest
 from scripts.effect_crash_process_supervisor import kill_at_checkpoint
 from scripts.effect_crash_recipient import observed_recipient
 from scripts.gateway_evidence_contract import GatewayEventContract
@@ -129,8 +130,22 @@ class KvmGatewayCrashReceiver(RecipientBridgedGateReceiver):
                                                              timeout=10)
                     except BaseException as exc:
                         outcome["error"] = exc
-                kill_thread = threading.Thread(target=crash_worker, daemon=True)
-                kill_thread.start()
+                def is_authorized_target(request):
+                    """Crash only on the exact pinned signed guest request.
+
+                    The integrated KVM lab sends multiple negative controls
+                    first, potentially taking longer than the crash deadline.
+                    Never start the kill timer on a malformed guest attempt.
+                    """
+                    try:
+                        candidate = ActionRequest.from_dict(request["request"])
+                        claims = request["capability"]["claims"]
+                        return (
+                            candidate.request_digest == self.config["expected_request_digest"]
+                            and claims["capability_id"] == self.config["expected_capability_id"]
+                        )
+                    except (KeyError, TypeError, ValueError, AttributeError):
+                        return False
 
                 sent_crash = False
                 with self.channel, self.channel.makefile("rb") as stream:
@@ -141,6 +156,10 @@ class KvmGatewayCrashReceiver(RecipientBridgedGateReceiver):
                             break
                         if self.record_failure is not None:
                             raise RuntimeError("signed child evidence has failed")
+                        if (not sent_crash and kill_thread is None
+                                and is_authorized_target(request)):
+                            kill_thread = threading.Thread(target=crash_worker, daemon=True)
+                            kill_thread.start()
                         self.event_contract.begin_request(request)
                         try:
                             try:
@@ -148,6 +167,8 @@ class KvmGatewayCrashReceiver(RecipientBridgedGateReceiver):
                             except GatewayTransportError as exc:
                                 if sent_crash:
                                     raise RuntimeError("gateway died twice") from exc
+                                if kill_thread is None:
+                                    raise RuntimeError("gateway crashed before authorized phase") from exc
                                 kill_thread.join(timeout=12)
                                 if kill_thread.is_alive() or "error" in outcome:
                                     raise RuntimeError("no confirmed supervisor SIGKILL") from outcome.get("error")
