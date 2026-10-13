@@ -185,6 +185,17 @@ class KvmGatewayCrashReceiver(RecipientBridgedGateReceiver):
                                 expected = 0 if self.crash_phase in PHASES[:2] else 1
                                 if after["count"] != expected:
                                     raise RuntimeError("recipient commit count contradicts crash checkpoint")
+                                reserved = DurableEffectJournal(
+                                    self.config["outcome_journal"],
+                                ).observe(
+                                    tenant=self.config["verification_context"]["tenant"],
+                                    environment=self.config["verification_context"]["environment"],
+                                    capability_id=self.config["expected_capability_id"],
+                                )
+                                journal_state = reserved["state"] if reserved else None
+                                if journal_state != (None if self.crash_phase == PHASES[0]
+                                                     else "possibly-committed"):
+                                    raise RuntimeError("durable journal disagrees with crash phase")
                                 self.crash_report = {
                                     "phase": self.crash_phase,
                                     "gateway_pid": killed.pid,
@@ -193,6 +204,9 @@ class KvmGatewayCrashReceiver(RecipientBridgedGateReceiver):
                                     "recipient_before": before,
                                     "recipient_after_kill": after,
                                     "expected_commits": expected,
+                                    "journal_state_after_kill": journal_state,
+                                    "effect_key": self.config["recipient_effect_key"],
+                                    "request_digest": self.config["expected_request_digest"],
                                 }
                                 self.receipts.append(self.recorder.append(
                                     "gateway.crash-observed",
@@ -231,7 +245,8 @@ class KvmGatewayCrashReceiver(RecipientBridgedGateReceiver):
                     capability_id=self.config["expected_capability_id"],
                 )
                 expected_state = None if self.crash_phase == PHASES[0] else "possibly-committed"
-                if (state["state"] if state else None) != expected_state:
+                if ((state["state"] if state else None) != expected_state
+                        or self.crash_report["journal_state_after_kill"] != expected_state):
                     raise RuntimeError("crashed effect journal contradicts recipient checkpoint")
                 if (len(self.replay_responses) != (1 if expected_state is None else 2)
                         or self.replay_responses[0].get("success") is not False
