@@ -43,7 +43,8 @@ class HostRecorderProxy:
 
 
 def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False,
-                         crash_phase: str | None = None):
+                         crash_phase: str | None = None,
+                         ready_stdout: bool = False):
     """Return a child and request socket; optionally a supervisor recorder socket."""
     if not config_path.is_file():
         raise FileNotFoundError(config_path)
@@ -61,13 +62,16 @@ def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False,
         ]
         if crash_phase is not None:
             command += ["--crash-phase", crash_phase]
+        if ready_stdout:
+            command.append("--ready-stdout")
         fds = [child.fileno()]
         if record_child is not None:
             command += ["--recorder-fd", str(record_child.fileno())]
             fds.append(record_child.fileno())
         proc = subprocess.Popen(
             command, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE if crash_phase is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE if (crash_phase is not None or ready_stdout)
+            else subprocess.DEVNULL,
             stderr=subprocess.PIPE, close_fds=True, pass_fds=tuple(fds),
             start_new_session=True,
         )
@@ -84,7 +88,7 @@ def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False,
 
 
 def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None,
-                crash_phase: str | None = None) -> None:
+                crash_phase: str | None = None, ready_stdout: bool = False) -> None:
     """Serve up to 24 guest-shaped requests via the genuine trusted boundary."""
     config = json.loads(config_path.read_text())
     if not isinstance(config, dict) or set(config) != {"boundary", "recorder_path"}:
@@ -140,6 +144,10 @@ def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None,
                 return original(request)
 
             boundary.gateway.effects["object.read"] = observed_dispatch
+        if ready_stdout:
+            # Unforgeable readiness from the actual trusted child AFTER
+            # constructing its authority and recorder, BEFORE accepting work.
+            print("READY", flush=True)
         with socket.socket(fileno=fd) as channel:
             with channel.makefile("rb") as stream:
                 for _ in range(24):
@@ -168,9 +176,10 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--recorder-fd", type=int)
     parser.add_argument("--crash-phase", choices=PHASES)
+    parser.add_argument("--ready-stdout", action="store_true")
     args = parser.parse_args()
     run_gateway(args.fd, args.config, recorder_fd=args.recorder_fd,
-                crash_phase=args.crash_phase)
+                crash_phase=args.crash_phase, ready_stdout=args.ready_stdout)
 
 
 if __name__ == "__main__":
