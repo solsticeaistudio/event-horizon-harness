@@ -34,8 +34,9 @@ This closes a **test-specific delayed in-flight commit race** that the previous 
 ## Verification
 
 ```bash
+cd docs/evidence/artifacts/2026-10-13-sixth-firecracker-delayed-recipient
 sha256sum -c package-etcd-20261013T033722Z-34693-kvm-delayed-commit.json.sha256
-python scripts/verify_integrated_kvm_delayed_commit.py package-etcd-20261013T033722Z-34693-kvm-delayed-commit.json
+python ../../../../scripts/verify_integrated_kvm_delayed_commit.py package-etcd-20261013T033722Z-34693-kvm-delayed-commit.json
 git hash-object package-etcd-20261013T033722Z-34693-kvm-delayed-commit.json
 ```
 
