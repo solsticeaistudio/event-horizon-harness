@@ -64,6 +64,10 @@ class SixthWindowLiveBridgeTests(unittest.TestCase):
                 "expected_request_digest": request.request_digest,
                 "expected_capability_id": original.claims.capability_id,
                 "expected_recovery_capability_id": spare.claims.capability_id,
+                "expected_signed_effect_message_digest": digest({
+                    "request": request.canonical_payload(),
+                    "capability": original.to_dict(),
+                }),
                 "observe_integrated_dispatch": True,
             }
             recorder = ExternalRecorder(root / "signed-events.jsonl")
