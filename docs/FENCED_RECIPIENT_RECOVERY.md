@@ -21,8 +21,11 @@ The recovery gateway:
 1. Verifies signature, attestation, scoped request/policy and **consumes a
    newly signed capability** via the existing authority verifier.
 2. Requires recorder authorization evidence and trusted output preflight.
-3. Reserves the effect once; for recovery, **reads but never releases** the
-   original durable reservation, ensuring identical request digest.
+3. Reserves the effect once with a durable **atomic-sqlite-v1** protocol
+   marker, recipient identity, and exact output digest. Recovery reads but
+   **never releases** that original reservation, and requires an exact match
+   for all three bindings plus the original request digest. Legacy unmarked
+   reservations remain INELIGIBLE, including after database schema migration.
 4. Calls the pinned cooperating transactional recipient. A **positive
    receipt** is corroborated by a second durable read of its ledger.
 5. Confirms the original journal row using original capability/claim binding;
