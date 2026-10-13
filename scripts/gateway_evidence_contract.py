@@ -18,7 +18,8 @@ class GatewayEvidenceContractError(ValueError):
 
 class GatewayEventContract:
     def __init__(self, *, gateway_pid: int, request_digest: str, request_id: str,
-                 capability_id: str, fenced_recipient_id: str | None = None):
+                 capability_id: str, fenced_recipient_id: str | None = None,
+                 fenced_original_capability_id: str | None = None):
         if type(gateway_pid) is not int or gateway_pid <= 1:
             raise ValueError("gateway child identity not pinned")
         if not isinstance(request_digest, str) or not HEX.fullmatch(request_digest):
@@ -31,7 +32,11 @@ class GatewayEventContract:
                 or not fenced_recipient_id or len(fenced_recipient_id) > 128):
             raise ValueError("invalid pinned fenced recipient ID")
         self.fenced_recipient_id = fenced_recipient_id
-        self.original_capability_id = None
+        if fenced_original_capability_id is not None and (
+                fenced_recipient_id is None or not isinstance(fenced_original_capability_id, str)
+                or not fenced_original_capability_id):
+            raise ValueError("recovery source must have a pinned fenced original capability")
+        self.original_capability_id = fenced_original_capability_id
         self.pid = gateway_pid
         self.digest = request_digest
         self.request_id = request_id
@@ -115,8 +120,13 @@ class GatewayEventContract:
                     raise GatewayEvidenceContractError("original fenced commit provenance mismatch")
                 self.original_capability_id = self.capability_id
             elif (payload["original_capability_id"] != self.original_capability_id
-                  or not payload["recovery"] or payload["new_effect_commit"]):
-                raise GatewayEvidenceContractError("fenced recovery rewrote first commit")
+                  or payload["recovery"] is not (
+                      payload["capability_id"] != self.original_capability_id)):
+                # A newly authorized recovery MAY commit the first effect if
+                # the old gateway died before recipient commit, or replay an
+                # already committed result. Independent durable observation
+                # must corroborate either case before evidence is signed.
+                raise GatewayEvidenceContractError("fenced recovery rewrote original authority")
             self.finished = True
             return
         if kind == "execution.authorized":
