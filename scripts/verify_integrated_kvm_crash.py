@@ -60,9 +60,6 @@ def verify_report(report):
         require(request.session_id not in sessions, "KVM rounds reuse guest session")
         sessions.add(request.session_id)
         primary, spare, fault = capabilities
-        require(obs.get("isolated_authority_digest") is not None
-                and obs["isolated_authority_digest"] == digest(isolation)
-                if False else True, "")
         # Authority attachments have their own stable canonical evidence hash.
         from scripts.integrated_authority_session import evidence_digest
         require(obs.get("isolated_authority_digest") == evidence_digest(isolation),
