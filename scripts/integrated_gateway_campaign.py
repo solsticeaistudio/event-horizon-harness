@@ -206,3 +206,30 @@ class RecipientBridgedIntegratedPackageLab(BridgedIntegratedPackageLab):
             observer, recorder, config, self.target_thread,
         )
         return self.gate_receiver
+
+
+
+class FirecrackerCrashPackageLab(RecipientBridgedIntegratedPackageLab):
+    """Same real protected worker/guest/guardian/etcd path, opt-in SIGKILL.
+
+    A crash round is NOT a normal successful v4 paired-effect round; its
+    evidence is published and verified under a separate v1 crash schema.
+    """
+
+    kvm_crash_mode = True
+
+    def __init__(self, mode, binary, worker_build, *, crash_phase, **kwargs):
+        from scripts.real_gateway_crash_checkpoints import PHASES
+        if mode != "protected" or crash_phase not in PHASES:
+            raise ValueError("a crash round must be protected and have a known phase")
+        super().__init__(mode, binary, worker_build, **kwargs)
+        self.kvm_crash_phase = crash_phase
+
+    def receiver(self, observer, recorder, config):
+        from scripts.kvm_gateway_crash_bridge import KvmGatewayCrashReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = KvmGatewayCrashReceiver(
+            observer, recorder, config, self.target_thread,
+            crash_phase=self.kvm_crash_phase,
+        )
+        return self.gate_receiver
