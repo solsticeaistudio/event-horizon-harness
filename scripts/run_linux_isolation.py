@@ -1296,7 +1296,39 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     if not all(value for name, value in teardown.items() if name != "trigger"):
         raise RuntimeError("teardown incomplete")
     if package_lab is not None:
-        if getattr(package_lab, "kvm_delayed_commit_mode", False):
+        if getattr(package_lab, "kvm_fenced_crash_mode", False):
+            from event_horizon.fenced_recipient import FencedSqliteRecipient
+            from event_horizon.effect_outcome_journal import DurableEffectJournal
+            if receiver.crash_report is None or receiver.recovery_report is None:
+                raise RuntimeError("real KVM fenced SIGKILL or recovery report missing")
+            ledger = FencedSqliteRecipient(
+                service_config["recipient_database"],
+                recipient_id=service_config["fenced_recipient"]["recipient_id"],
+            )
+            original = DurableEffectJournal(
+                service_config["outcome_journal"],
+            ).observe_effect(
+                tenant="default", environment="synthetic",
+                effect_key=service_config["recipient_effect_key"],
+            )
+            received = ledger.observe(
+                effect_key=service_config["recipient_effect_key"],
+                request_digest=request.request_digest,
+            )
+            recovery_evidence = receiver.recovery_report
+            crash_evidence = receiver.crash_report
+            if (ledger.commit_count() != 1 or received is None
+                    or original is None or original["state"] != "recipient-confirmed"
+                    or original["capability_id"] != capability.claims.capability_id
+                    or original["receipt_digest"] != received.receipt_digest
+                    or recovery_evidence["receipt_digest"] != received.receipt_digest
+                    or recovery_evidence["row_count"] != 1
+                    or crash_evidence["original_capability_id"] != capability.claims.capability_id):
+                raise RuntimeError("KVM fenced post-crash independent observation invalid")
+            observed["kvm_fenced_crash"] = crash_evidence
+            observed["kvm_fenced_recovery"] = recovery_evidence
+            observed["package"].update(package_lab.after_teardown())
+        elif getattr(package_lab, "kvm_delayed_commit_mode", False):
             from scripts.effect_crash_recipient import observed_recipient
             from scripts.kvm_crash_journal_evidence import observe_crash_reservation
             from scripts.verify_kvm_delayed_recipient_bridge import verify_delayed_bridge
