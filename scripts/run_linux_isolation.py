@@ -1059,7 +1059,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             observed["host_consumption_count"] = count
             if (package_lab is not None and getattr(package_lab, "external_recipient_mode", False)
                     and not getattr(package_lab, "kvm_crash_mode", False)
-                    and not getattr(package_lab, "kvm_delayed_commit_mode", False)):
+                    and not getattr(package_lab, "kvm_delayed_commit_mode", False)
+                    and not getattr(package_lab, "fenced_kvm_mode", False)):
                 from event_horizon.effect_outcome_journal import DurableEffectJournal
                 from scripts.effect_crash_recipient import observed_recipient
                 snapshot = observed_recipient(Path(service_config["recipient_database"]))
@@ -1099,6 +1100,50 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     "journal_state": reconciled["state"],
                     "request_digest": request.request_digest,
                     "receipt_digest": reconciled["receipt_digest"],
+                }
+            if package_lab is not None and getattr(package_lab, "fenced_kvm_mode", False):
+                from event_horizon.fenced_recipient import FencedSqliteRecipient
+                from event_horizon.effect_outcome_journal import DurableEffectJournal
+                fence = service_config["fenced_recipient"]
+                ledger = FencedSqliteRecipient(
+                    service_config["recipient_database"],
+                    recipient_id=fence["recipient_id"],
+                )
+                receipt = ledger.observe(
+                    effect_key=service_config["recipient_effect_key"],
+                    request_digest=request.request_digest,
+                )
+                journal = DurableEffectJournal(service_config["outcome_journal"])
+                original = journal.observe_effect(
+                    tenant="default", environment="synthetic",
+                    effect_key=service_config["recipient_effect_key"],
+                )
+                recipient_pid = receiver.recipient_pid
+                if (receipt is None or ledger.commit_count() != 1
+                        or receipt.output != content
+                        or original is None or original["state"] != "recipient-confirmed"
+                        or original["capability_id"] != capability.claims.capability_id
+                        or original["receipt_digest"] != receipt.receipt_digest
+                        or original["fenced_protocol"] != "atomic-sqlite-v1"
+                        or original["fenced_recipient_id"] != fence["recipient_id"]
+                        or original["fenced_output_digest"] != digest(content)
+                        or type(recipient_pid) is not int or recipient_pid <= 1
+                        or recipient_pid in {os.getpid(), receiver.gateway_pid}
+                        or receiver.recipient_process.poll() is not None):
+                    raise RuntimeError("KVM fenced effect/provenance could not be independently verified")
+                observed["fenced_recipient_kvm"] = {
+                    "recipient_pid": recipient_pid,
+                    "gateway_pid": receiver.gateway_pid,
+                    "effect_key": service_config["recipient_effect_key"],
+                    "request_digest": request.request_digest,
+                    "recipient_id": fence["recipient_id"],
+                    "output_digest": receipt.output_digest,
+                    "receipt_digest": receipt.receipt_digest,
+                    "commit_sequence": receipt.sequence,
+                    "row_count": ledger.commit_count(),
+                    "journal_state": original["state"],
+                    "original_capability_id": original["capability_id"],
+                    "attestation_mode": attestation_mode,
                 }
             if (package_lab is not None and getattr(package_lab, "bridged_gateway", False)
                     and not getattr(package_lab, "kvm_crash_mode", False)
@@ -1146,7 +1191,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                             raise RuntimeError("trusted state accessible to a forbidden principal")
             observed["authoritative_state_read_write_denials"] = True
             completed = [event for event in recorder.events() if event["event_type"] == "execution.completed"]
-            if package_lab is not None and getattr(package_lab, "kvm_delayed_commit_mode", False):
+            if package_lab is not None and (getattr(package_lab, "kvm_delayed_commit_mode", False)
+                                            or getattr(package_lab, "fenced_kvm_mode", False)):
                 expected_completions = 0
             elif package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
                 from scripts.real_gateway_crash_checkpoints import PHASES
