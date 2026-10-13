@@ -117,7 +117,8 @@ class SixthWindowLiveBridgeTests(unittest.TestCase):
                                 f"dispatches={receiver.dispatches}; "
                                 f"signed_events={[x['event_type'] for x in recorder.events()]!r}; "
                                 f"contract_current={receiver.event_contract.current_capability!r}; "
-                                f"contract_authorized={receiver.event_contract.authorized!r}"
+                                f"contract_authorized={receiver.event_contract.authorized!r}; "
+                                f"transport_steps={receiver.transport_steps!r}"
                             )
                         self.assertFalse(outcome["success"])
                         self.assertEqual(outcome["effect_state"], "not-started")
