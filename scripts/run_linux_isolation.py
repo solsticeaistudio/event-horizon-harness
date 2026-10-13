@@ -824,6 +824,21 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 raise RuntimeError("recipient startup did not finish before guest launch")
             if receiver.failure is not None:
                 raise RuntimeError("independent recipient startup failed") from receiver.failure
+            if getattr(package_lab, "kvm_delayed_commit_mode", False):
+                # Unlike the original five windows, this new bridge requires a
+                # separate true gateway READY; recipient readiness alone is
+                # not permission to launch a guest that will send real probes.
+                if not receiver.gateway_ready.wait(timeout=16):
+                    raise RuntimeError(
+                        "sixth-window trusted gateway READY deadline expired"
+                    ) from (receiver.failure or receiver.record_failure)
+                if receiver.failure is not None or receiver.record_failure is not None:
+                    raise RuntimeError("sixth-window gateway startup failed") from (
+                        receiver.failure or receiver.record_failure
+                    )
+                if (receiver.gateway_process is None
+                        or receiver.gateway_process.poll() is not None):
+                    raise RuntimeError("sixth-window gateway exited before guest launch")
         with (control / "console.log").open("wb") as console:
             vm = subprocess.Popen([
                 "unshare", "--net", "--", str(assets / "jailer"), "--id", "cell",
@@ -941,6 +956,17 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                             and getattr(package_lab, "external_recipient_mode", False)
                             and receiver.failure is not None):
                         raise RuntimeError("trusted recipient/gateway bridge failed") from receiver.failure
+                    if (package_lab is not None
+                            and getattr(package_lab, "kvm_delayed_commit_mode", False)):
+                        diagnostic = receiver.record_failure
+                        if diagnostic is not None:
+                            raise RuntimeError("sixth-window signed gateway relay rejected a probe") from diagnostic
+                        if (receiver.gateway_process is not None
+                                and receiver.gateway_process.poll() is not None):
+                            status = receiver.gateway_process.returncode
+                            raise RuntimeError(
+                                f"sixth-window gateway exited during negative controls: {status}"
+                            ) from exc
                     raise
                 if response["success"] or response["effect_state"] != "not-started":
                     raise RuntimeError(f"forbidden request not denied: {name}")
