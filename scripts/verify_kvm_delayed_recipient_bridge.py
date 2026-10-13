@@ -114,6 +114,7 @@ def verify_delayed_bridge(*, report, events, receipts, tip, public_key_pem,
             and dispatches[0]["payload"]["gateway_pid"] == killed
             and dispatches[0]["payload"]["request_digest"] == request_digest,
             "gateway dispatched twice or invented completion evidence")
-    require(dispatches[0]["sequence"] < order[0],
+    # Event sequence numbers are 1-based; enumerate() positions are 0-based.
+    require(dispatches[0]["sequence"] - 1 < order[0],
             "recipient reported pause before original dispatch evidence")
     return True
