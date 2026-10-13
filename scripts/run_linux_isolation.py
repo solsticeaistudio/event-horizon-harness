@@ -1176,8 +1176,15 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     request_digest=request.request_digest,
                     effect_key=service_config["recipient_effect_key"]):
                 raise RuntimeError("signed gateway SIGKILL evidence invalid")
+            if (type(receiver.recipient_pid) is not int
+                    or receiver.recipient_pid <= 1
+                    or receiver.recipient_pid in {
+                        receiver.crashed_gateway_pid, receiver.recovery_gateway_pid, os.getpid()
+                    }):
+                raise RuntimeError("independent recipient process identity is not established")
             observed["kvm_crash"] = receiver.crash_report
             observed["kvm_recovery"] = receiver.recovery_report
+            observed["kvm_recipient_pid"] = receiver.recipient_pid
             observed["kvm_recipient_final"] = actual
             observed["package"] = {
                 "mode": package_lab.mode,
