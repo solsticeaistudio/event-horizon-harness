@@ -96,7 +96,9 @@ class CrashBridgeSupervisorTests(unittest.TestCase):
                         old = send(original)
                         self.assertFalse(old["success"])
                         self.assertEqual(old["error"], "authority-denied")
-                        if expected:
+                        if phase != PHASES[0]:
+                            # Phase two has zero commits but a durable reservation;
+                            # a new signed capability must still be fenced.
                             fresh = send(spare)
                             self.assertFalse(fresh["success"])
                             self.assertEqual(fresh["effect_state"], "possibly-committed")
