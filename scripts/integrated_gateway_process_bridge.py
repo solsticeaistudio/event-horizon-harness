@@ -50,6 +50,38 @@ class BridgedGateReceiver(GateReceiver):
                     if self.gateway_pidfd is None or select.select([self.gateway_pidfd], [], [], 0)[0]:
                         raise RuntimeError("trusted gateway pidfd no longer identifies a live child")
                     self.event_contract.check(event)
+                    if event["event_type"] == "fenced.recipient-confirmed":
+                        from event_horizon.fenced_recipient import FencedSqliteRecipient
+                        from event_horizon.canonical import digest
+                        conf = self.config.get("fenced_recipient")
+                        if not isinstance(conf, dict):
+                            raise RuntimeError("unconfigured fenced evidence event")
+                        recipient = FencedSqliteRecipient(
+                            self.config["recipient_database"],
+                            recipient_id=conf["recipient_id"],
+                        )
+                        observed = recipient.observe(
+                            effect_key=self.config["recipient_effect_key"],
+                            request_digest=self.config["expected_request_digest"],
+                        )
+                        payload = event["payload"]
+                        if (observed is None or recipient.commit_count() != 1
+                                or observed.receipt_digest != payload["receipt_digest"]
+                                or observed.sequence != payload["commit_sequence"]
+                                or observed.output_digest != digest(
+                                    self.config["dataset"][
+                                        self.config["fenced_output_offset"]:
+                                        self.config["fenced_output_offset"] +
+                                        self.config["fenced_output_length"]
+                                    ])):
+                            raise RuntimeError("recipient evidence cannot be independently corroborated")
+                        # The original gateway may have committed before
+                        # SIGKILL without ever emitting confirmation evidence.
+                        # In that case recovery observes one durable row and
+                        # the supervisor counts that single effect exactly once.
+                        if self.dispatches == 0:
+                            self.dispatches = 1
+                        self.gateway_event_pid = self.gateway_process.pid
                     if event["event_type"] == "execution.completed" and self.config.get("recipient_database"):
                         from scripts.effect_crash_recipient import observed_recipient
                         snapshot = observed_recipient(Path(self.config["recipient_database"]))
@@ -99,6 +131,8 @@ class BridgedGateReceiver(GateReceiver):
                     request_digest=self.config["expected_request_digest"],
                     request_id=self.config["expected_request_id"],
                     capability_id=self.config["expected_capability_id"],
+                    fenced_recipient_id=(self.config["fenced_recipient"]["recipient_id"]
+                                         if "fenced_recipient" in self.config else None),
                 )
                 event_thread = threading.Thread(
                     target=self._record_events, args=(evidence_channel,), daemon=True,
@@ -161,6 +195,10 @@ _RECIPIENT_MODULES = {
     "scripts/__init__.py": "scripts/__init__.py",
     "scripts/kvm_effect_recipient_service.py": "scripts/kvm_effect_recipient_service.py",
     "scripts/effect_crash_recipient.py": "scripts/effect_crash_recipient.py",
+    "scripts/fenced_recipient_service.py": "scripts/fenced_recipient_service.py",
+    "src/event_horizon/fenced_recipient.py": "event_horizon/fenced_recipient.py",
+    "src/event_horizon/fenced_recipient_transport.py": "event_horizon/fenced_recipient_transport.py",
+    "src/event_horizon/protocol.py": "event_horizon/protocol.py",
     "src/event_horizon/__init__.py": "event_horizon/__init__.py",
     "src/event_horizon/canonical.py": "event_horizon/canonical.py",
 }

@@ -302,3 +302,87 @@ class DelayedRecipientKvmPackageLab(RecipientBridgedIntegratedPackageLab):
             },
             allow_crash_recovery_spare=True,
         )
+
+
+class FencedRecipientKvmPackageLab(BridgedIntegratedPackageLab):
+    """Opt-in actual Firecracker/guardian/etcd plus atomic recipient mode.
+
+    This is an initial hardware integration/progress smoke test; a dedicated
+    recovery fault matrix needs separate gateway and recipient kill windows.
+    Never relabel the six historical KVM campaigns with this mode.
+    """
+    external_recipient_mode = True
+    fenced_kvm_mode = True
+
+    def __init__(self, mode, binary, worker_build, **kwargs):
+        if mode != "protected":
+            raise ValueError("fenced KVM requires a protected package/VM")
+        super().__init__(mode, binary, worker_build, **kwargs)
+
+    def prepare(self, run, control, state, config):
+        import secrets
+        super().prepare(run, control, state, config)
+        # Host-only pinned configuration, never forwarded to the guest.
+        # Distinct from the legacy recipient_socket config path.
+        config["recipient_database"] = str(control / "fenced-effect.sqlite")
+        config["outcome_journal"] = str(control / "fenced-outcomes.sqlite")
+        config["fenced_output_offset"] = 0
+        config["fenced_output_length"] = len(config["dataset"])
+        config["fenced_recipient"] = {
+            "socket_path": str(control / "fenced-effect.sock"),
+            "recipient_id": "ehh-owned-kvm-fenced-v1",
+            "auth_key_hex": secrets.token_hex(32),
+        }
+
+    def receiver(self, observer, recorder, config):
+        from scripts.kvm_fenced_recipient_bridge import FencedRecipientKvmReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = FencedRecipientKvmReceiver(
+            observer, recorder, config, self.target_thread,
+        )
+        return self.gate_receiver
+
+
+class FencedRecoveryKvmCrashLab(FencedRecipientKvmPackageLab):
+    """One real guest/vsock/etcd fenced crash-and-recover window.
+
+    The supervisor selects a phase; a freshly signed capability must
+    positively corroborate the ORIGINAL reservation via recipient SQLite.
+    """
+    kvm_fenced_crash_mode = True
+
+    def __init__(self, mode, binary, worker_build, *, crash_phase, **kwargs):
+        from scripts.isolated_effect_gateway_worker import FENCED_KVM_CRASH_PHASES
+        if crash_phase not in FENCED_KVM_CRASH_PHASES:
+            raise ValueError("unknown fenced KVM crash phase")
+        super().__init__(mode, binary, worker_build, **kwargs)
+        self.kvm_fenced_phase = crash_phase
+
+    def receiver(self, observer, recorder, config):
+        from scripts.kvm_fenced_crash_bridge import FencedKvmCrashReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = FencedKvmCrashReceiver(
+            observer, recorder, config, self.target_thread,
+            phase=self.kvm_fenced_phase,
+        )
+        return self.gate_receiver
+
+    def observe_authority(self, config, capability):
+        fault, spare = self.fault_capability, self.spare_capability
+        return inspect_committed_consumption(
+            self.quorum.transport,
+            cluster_id=config["etcd_cluster_id"],
+            session_id=config["session_id"],
+            capability_id=capability.claims.capability_id,
+            claims_digest=digest(capability.claims.to_dict()),
+            expires_at=capability.claims.expires_at,
+            extra_bindings={
+                fault.claims.capability_id: (
+                    digest(fault.claims.to_dict()), fault.claims.expires_at,
+                ),
+                spare.claims.capability_id: (
+                    digest(spare.claims.to_dict()), spare.claims.expires_at,
+                ),
+            },
+            allow_crash_recovery_spare=True,
+        )

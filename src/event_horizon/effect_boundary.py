@@ -14,6 +14,8 @@ from typing import Any
 from .authority_backends import EtcdGatewayConfig
 from .broker import CapabilityVerifier
 from .effect_outcome_journal import DurableEffectJournal
+from .fenced_effect_recovery import FencedEffectRecoveryGateway
+from .fenced_recipient_transport import FencedRecipientClient
 from .models import ActionRequest, ExecutionResult, IssuedCapability
 from .trusted_effect_gateway import TrustedEffectGateway, select_consumption_store
 from .trust_decay import DecayEngine, SqliteDecayStateStore
@@ -52,26 +54,57 @@ class DatasetEffectBoundary:
             raise ValueError("unknown authority backend; no local fallback")
         self.consumption_store = select_consumption_store(**opts)
         recipient = config.get("recipient_socket")
+        fenced = config.get("fenced_recipient")
         journal_path = config.get("outcome_journal")
-        if bool(recipient) != bool(journal_path):
-            raise ValueError("external recipient requires durable outcome journal")
-        if recipient and (not isinstance(recipient, str) or not isinstance(journal_path, str)):
-            raise ValueError("invalid trusted external effect configuration")
+        if fenced is not None:
+            if (recipient is not None or type(fenced) is not dict
+                    or set(fenced) != {"socket_path", "recipient_id", "auth_key_hex"}
+                    or not isinstance(journal_path, str)
+                    or not journal_path):
+                raise ValueError("fenced recovery requires pinned recipient and journal")
+            if (type(fenced["socket_path"]) is not str
+                    or type(fenced["recipient_id"]) is not str
+                    or type(fenced["auth_key_hex"]) is not str
+                    or len(fenced["auth_key_hex"]) != 64):
+                raise ValueError("fenced host-owned configuration is malformed")
+            try:
+                ipc_key = bytes.fromhex(fenced["auth_key_hex"])
+            except ValueError as exc:
+                raise ValueError("fenced IPC key is not hex") from exc
+            fenced_client = FencedRecipientClient(
+                fenced["socket_path"], recipient_id=fenced["recipient_id"],
+                auth_key=ipc_key,
+            )
+        else:
+            if bool(recipient) != bool(journal_path):
+                raise ValueError("external recipient requires durable outcome journal")
+            if recipient and (not isinstance(recipient, str)
+                              or not isinstance(journal_path, str)):
+                raise ValueError("invalid trusted external effect configuration")
         self.outcome_journal = DurableEffectJournal(journal_path) if journal_path else None
         self.decay_store = SqliteDecayStateStore(config["decay_database"])
-        self.gateway = TrustedEffectGateway(
-            CapabilityVerifier(
-                config["public_key_pem"], config["key_id"],
-                self.consumption_store, DecayEngine(self.decay_store),
-            ),
-            {"object.read": self._read_dataset},
-            recorder,
-            event_prefix="execution",
-            tenant=context["tenant"],
-            environment=context["environment"],
-            outcome_journal=self.outcome_journal,
-            pre_dispatch_rules={"object.read": self._preflight_read_ceiling},
+        verifier = CapabilityVerifier(
+            config["public_key_pem"], config["key_id"],
+            self.consumption_store, DecayEngine(self.decay_store),
         )
+        if fenced is not None:
+            # Explicit, trusted-host-only opt-in. The business effect is the
+            # recipient's atomic SQLite transaction, not the old socket callback.
+            self.gateway = FencedEffectRecoveryGateway(
+                verifier, recorder, self.outcome_journal, fenced_client,
+                output_factory=self._dataset_output,
+                tenant=context["tenant"], environment=context["environment"],
+                pre_dispatch_rule=self._preflight_read_ceiling,
+            )
+        else:
+            self.gateway = TrustedEffectGateway(
+                verifier, {"object.read": self._read_dataset}, recorder,
+                event_prefix="execution",
+                tenant=context["tenant"],
+                environment=context["environment"],
+                outcome_journal=self.outcome_journal,
+                pre_dispatch_rules={"object.read": self._preflight_read_ceiling},
+            )
 
     def _preflight_read_ceiling(self, request: ActionRequest, claims: Any) -> bool:
         """Bound the known read response BEFORE invoking a side-effect handler.
@@ -91,9 +124,13 @@ class DatasetEffectBoundary:
         output = values[offset:offset + length]
         return len(json.dumps(output, sort_keys=True, default=str).encode("utf-8")) <= ceiling
 
-    def _read_dataset(self, request: ActionRequest) -> str:
+    def _dataset_output(self, request: ActionRequest) -> str:
+        """Pure host-owned precomputed output; never dispatch a legacy callback."""
         offset, length = request.arguments["offset"], request.arguments["length"]
-        output = self.config["dataset"][offset:offset + length]
+        return self.config["dataset"][offset:offset + length]
+
+    def _read_dataset(self, request: ActionRequest) -> str:
+        output = self._dataset_output(request)
         endpoint = self.config.get("recipient_socket")
         if endpoint:
             effect_key = self.config["recipient_effect_key"]
