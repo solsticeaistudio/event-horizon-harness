@@ -225,77 +225,53 @@ class IndependentFencedRecipientTests(unittest.TestCase):
         self.assertEqual(self.effect()["state"], "recipient-confirmed")
         self.assertEqual(self.run_parent(first).error_class, "authority-denied")
 
-    def test_gateway_sigkill_before_and_after_recipient_reply(self):
-        for phase, count in (
-            ("before_recipient_rpc", 0),
-            ("after_recipient_reply", 1),
-        ):
-            with self.subTest(phase=phase):
-                # Each phase needs new independently durable test state.
-                # Same test instance is safe because request changes for each
-                # iteration and a new journal/replay store are created below.
-                if phase == "after_recipient_reply":
-                    self.request = ActionRequest(
-                        "fenced-ipc-two", "fenced-ipc-second", "agent",
-                        "object.read", "synthetic-data", "exec-1",
-                        {"offset": 1, "length": 5}, "trusted test",
-                    )
-                    self.context = authority_context(
-                        self.request, time.time(), max_output_bytes=512,
-                    )
-                cap = self.token()
-                proc = self.spawn_gateway(cap, "gateway-killed-" + phase, phase=phase)
-                self.marker(proc, "PHASE:" + phase)
-                self.assertEqual(self.committed(), count)
-                self.assertEqual(self.effect()["state"], "possibly-committed")
-                self.kill(proc)
-                self.assertEqual(self.run_parent(cap).error_class, "authority-denied")
-                recovery = self.result(self.spawn_gateway(
-                    self.token(), "gateway-recovery-" + phase,
-                ))
-                self.assertTrue(recovery["accepted"])
-                self.assertEqual(self.committed(), 1 if count else 1)
-                self.assertEqual(self.effect()["capability_id"],
-                                 cap.claims.capability_id)
+    def _gateway_sigkill(self, phase, count):
+        first = self.token()
+        proc = self.spawn_gateway(first, "gateway-killed", phase=phase)
+        self.marker(proc, "PHASE:" + phase)
+        self.assertEqual(self.committed(), count)
+        self.assertEqual(self.effect()["state"], "possibly-committed")
+        self.kill(proc)
+        self.assertEqual(self.run_parent(first).error_class, "authority-denied")
+        recovery = self.result(self.spawn_gateway(self.token(), "gateway-recovery"))
+        self.assertTrue(recovery["accepted"])
+        self.assertEqual(self.committed(), 1)
+        self.assertEqual(self.effect()["capability_id"], first.claims.capability_id)
+        self.assertEqual(self.effect()["state"], "recipient-confirmed")
 
-    def test_recipient_sigkill_before_and_after_commit(self):
-        for phase, count in (
-            ("before_commit", 0),
-            ("after_commit_before_reply", 1),
-        ):
-            with self.subTest(phase=phase):
-                self.kill(self.service)
-                self.start_service(phase=phase)
-                # Fresh logical effect and fresh authority scope on each run.
-                self.request = ActionRequest(
-                    "recipient-kill-" + phase, "recipient-session-" + phase,
-                    "agent", "object.read", "synthetic-data", "exec-1",
-                    {"offset": 0, "length": 5}, "trusted test",
-                )
-                self.context = authority_context(
-                    self.request, time.time(), max_output_bytes=512,
-                )
-                first = self.token()
-                proc = self.spawn_gateway(first, "client-" + phase)
-                self.marker(self.service, "PHASE:" + phase)
-                self.assertEqual(self.committed(), count if phase == "before_commit" else
-                                 (1 if phase == "after_commit_before_reply" else count))
-                self.kill(self.service)
-                denial = self.result(proc)
-                self.assertFalse(denial["accepted"])
-                self.assertEqual(denial["error_class"], "recipient-indeterminate")
-                self.assertEqual(self.effect()["state"], "possibly-committed")
-                self.start_service()
-                self.assertEqual(self.run_parent(first).error_class, "authority-denied")
-                recovered = self.result(self.spawn_gateway(
-                    self.token(), "recovery-" + phase,
-                ))
-                self.assertTrue(recovered["accepted"])
-                # Count across both distinct logical effects.
-                self.assertEqual(self.committed(),
-                                 1 if phase == "before_commit" else 2)
-                self.assertEqual(self.effect()["capability_id"],
-                                 first.claims.capability_id)
+    def test_gateway_sigkill_before_recipient_rpc_then_recover(self):
+        self._gateway_sigkill("before_recipient_rpc", 0)
+
+    def test_gateway_sigkill_after_recipient_reply_then_recover(self):
+        self._gateway_sigkill("after_recipient_reply", 1)
+
+    def _recipient_sigkill(self, phase, count):
+        self.kill(self.service)
+        self.start_service(phase=phase)
+        first = self.token()
+        proc = self.spawn_gateway(first, "client-" + phase)
+        self.marker(self.service, "PHASE:" + phase)
+        self.assertEqual(self.committed(), count)
+        self.kill(self.service)
+        denial = self.result(proc)
+        self.assertFalse(denial["accepted"])
+        self.assertEqual(denial["error_class"], "recipient-indeterminate")
+        self.assertEqual(self.effect()["state"], "possibly-committed")
+        self.start_service()
+        self.assertEqual(self.run_parent(first).error_class, "authority-denied")
+        recovered = self.result(self.spawn_gateway(
+            self.token(), "recovery-" + phase,
+        ))
+        self.assertTrue(recovered["accepted"])
+        self.assertEqual(self.committed(), 1)
+        self.assertEqual(self.effect()["capability_id"], first.claims.capability_id)
+        self.assertEqual(self.effect()["state"], "recipient-confirmed")
+
+    def test_recipient_sigkill_before_commit_then_recover(self):
+        self._recipient_sigkill("before_commit", 0)
+
+    def test_recipient_sigkill_after_commit_before_reply_then_recover(self):
+        self._recipient_sigkill("after_commit_before_reply", 1)
 
     def test_two_competing_gateway_processes_commit_only_once(self):
         first, second = self.token(), self.token()
