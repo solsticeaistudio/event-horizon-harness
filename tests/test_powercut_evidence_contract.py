@@ -88,6 +88,15 @@ class PowercutEvidenceContractTests(unittest.TestCase):
         with self.assertRaises(Exception):
             self.run_verify()
 
+    def test_empty_replaced_database_stays_empty_on_failed_verify(self):
+        original = self.root / "preserved-original.sqlite"
+        self.db.rename(original)
+        self.db.write_bytes(b"")
+        with self.assertRaises(ValueError):
+            self.run_verify()
+        self.assertEqual(self.db.stat().st_size, 0,
+                         "verifier must not create schema on lost durable storage")
+
     def test_changed_external_controller_log_denied(self):
         self.event_log.write_text("Forged alternative external power-control sequence.")
         with self.assertRaises(ValueError):
