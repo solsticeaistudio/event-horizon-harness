@@ -98,6 +98,18 @@ class GatewayEventContract:
             self.authorized = True
             self.finished = False
             return
+        if kind == "fenced.indeterminate" and self.fenced_recipient_id is not None:
+            if (keys != {"request_id", "request_digest", "capability_id", "effect_state"}
+                    or not self.authorized or self.finished
+                    or payload.get("request_id") != self.request_id
+                    or payload.get("request_digest") != self.digest
+                    or payload.get("capability_id") != self.current_capability
+                    or payload.get("effect_state") != "possibly-committed"):
+                raise GatewayEvidenceContractError("unverifiable indeterminate recipient event")
+            # A new signed capability may enter the same living gateway, but
+            # the original durable fence cannot be released or rebound.
+            self.finished = True
+            return
         if kind == "fenced.recipient-confirmed" and self.fenced_recipient_id is not None:
             if (keys != {"request_id", "request_digest", "capability_id",
                          "original_capability_id", "receipt_digest", "recipient_id",
