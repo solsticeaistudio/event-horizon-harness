@@ -141,11 +141,14 @@ class KvmFencedCrashPortableBridgeTests(unittest.TestCase):
                 # Distinct journal and replay state, so each phase is isolated.
                 phase_dir = self.root / phase
                 phase_dir.mkdir()
-                cfg = self.host_config(phase_dir)
-                recipient = FencedSqliteRecipient(
-                    self.recipient_db, recipient_id="ehh-owned-kvm-fenced-v1",
-                )
                 if phase != FENCED_KVM_CRASH_PHASES[0]:
+                    # Restart a freshly provisioned independent recipient
+                    # with its own empty ledger and private socket.
+                    self.stop_service()
+                    self.recipient_db = phase_dir / "recipient.sqlite"
+                    self.sock_path = phase_dir / "recipient.sock"
+                    self.start_service()
+
                     # Only one row is required per unique effect. This second
                     # window uses a new logical session so no prior row remains.
                     self.request = ActionRequest(
@@ -167,7 +170,10 @@ class KvmFencedCrashPortableBridgeTests(unittest.TestCase):
                         "session_id": self.request.session_id,
                         "request_id": self.request.request_id,
                     })
-                    cfg = self.host_config(phase_dir)
+                cfg = self.host_config(phase_dir)
+                recipient = FencedSqliteRecipient(
+                    self.recipient_db, recipient_id="ehh-owned-kvm-fenced-v1",
+                )
                 recorder = ExternalRecorder(phase_dir / "events.jsonl")
                 left, right = socket.socketpair()
                 receiver = FencedKvmCrashReceiver(
@@ -201,11 +207,9 @@ class KvmFencedCrashPortableBridgeTests(unittest.TestCase):
                 self.assertIsNotNone(receiver.crash_report)
                 self.assertIsNotNone(receiver.recovery_report)
                 self.assertEqual(receiver.crash_report["recipient_count_after_kill"],
-                                 0 if phase == FENCED_KVM_CRASH_PHASES[0] else 2)
-                # Across two independent logical effects the ledger contains
-                # two rows; the receipt sequence belongs to the newly added row.
-                self.assertEqual(recipient.commit_count(),
-                                 1 if phase == FENCED_KVM_CRASH_PHASES[0] else 2)
+                                 0 if phase == FENCED_KVM_CRASH_PHASES[0] else 1)
+                # Each independent database has exactly ONE durable effect.
+                self.assertEqual(recipient.commit_count(), 1)
                 binding = DurableEffectJournal(cfg["outcome_journal"]).observe_effect(
                     tenant="default", environment="synthetic",
                     effect_key=self.effect_key,
