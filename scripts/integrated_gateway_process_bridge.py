@@ -50,6 +50,34 @@ class BridgedGateReceiver(GateReceiver):
                     if self.gateway_pidfd is None or select.select([self.gateway_pidfd], [], [], 0)[0]:
                         raise RuntimeError("trusted gateway pidfd no longer identifies a live child")
                     self.event_contract.check(event)
+                    if event["event_type"] == "fenced.recipient-confirmed":
+                        from event_horizon.fenced_recipient import FencedSqliteRecipient
+                        from event_horizon.canonical import digest
+                        conf = self.config.get("fenced_recipient")
+                        if not isinstance(conf, dict):
+                            raise RuntimeError("unconfigured fenced evidence event")
+                        recipient = FencedSqliteRecipient(
+                            self.config["recipient_database"],
+                            recipient_id=conf["recipient_id"],
+                        )
+                        observed = recipient.observe(
+                            effect_key=self.config["recipient_effect_key"],
+                            request_digest=self.config["expected_request_digest"],
+                        )
+                        payload = event["payload"]
+                        if (observed is None or recipient.commit_count() != 1
+                                or observed.receipt_digest != payload["receipt_digest"]
+                                or observed.sequence != payload["commit_sequence"]
+                                or observed.output_digest != digest(
+                                    self.config["dataset"][
+                                        self.config["fenced_output_offset"]:
+                                        self.config["fenced_output_offset"] +
+                                        self.config["fenced_output_length"]
+                                    ])):
+                            raise RuntimeError("recipient evidence cannot be independently corroborated")
+                        if payload["new_effect_commit"]:
+                            self.dispatches += 1
+                        self.gateway_event_pid = self.gateway_process.pid
                     if event["event_type"] == "execution.completed" and self.config.get("recipient_database"):
                         from scripts.effect_crash_recipient import observed_recipient
                         snapshot = observed_recipient(Path(self.config["recipient_database"]))
@@ -161,6 +189,10 @@ _RECIPIENT_MODULES = {
     "scripts/__init__.py": "scripts/__init__.py",
     "scripts/kvm_effect_recipient_service.py": "scripts/kvm_effect_recipient_service.py",
     "scripts/effect_crash_recipient.py": "scripts/effect_crash_recipient.py",
+    "scripts/fenced_recipient_service.py": "scripts/fenced_recipient_service.py",
+    "src/event_horizon/fenced_recipient.py": "event_horizon/fenced_recipient.py",
+    "src/event_horizon/fenced_recipient_transport.py": "event_horizon/fenced_recipient_transport.py",
+    "src/event_horizon/protocol.py": "event_horizon/protocol.py",
     "src/event_horizon/__init__.py": "event_horizon/__init__.py",
     "src/event_horizon/canonical.py": "event_horizon/canonical.py",
 }
