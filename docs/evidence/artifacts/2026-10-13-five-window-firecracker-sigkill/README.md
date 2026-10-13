@@ -1,6 +1,6 @@
 # Evidence: five real Firecracker KVM guest-triggered gateway SIGKILL windows
 
-**Publication staging. Do not merge this evidence PR until the original 3,215,615-byte JSON is copied byte-for-byte into this directory and both hashes are checked.**
+**Archived original evidence.** The 3,215,615-byte JSON was copied byte-for-byte from the operator's Ubuntu report, the original SHA-256 sidecar passed, the Git blob SHA-1 matched, and the standalone five-window verifier reported `VERIFIED`.
 
 ## Provenance
 
@@ -50,6 +50,6 @@ The 147 event records across the five rounds have 147 matching Ed25519 receipt s
 - A missing recipient commit does **not** allow automatic retry of an uncertain reservation without a trusted fencing/non-commit protocol.
 - Evidence publication is distinct from experimental success. Publishing this report does not establish independent third-party replication.
 
-## Required final publication checks
+## Publication verification
 
-Copy the original JSON from the operator's local `artifacts/reports` **without reserializing** it; run `sha256sum -c` against the sidecar and check the original Git blob SHA-1, `7efbb12a9224a0b88b02b02547c708d471d4517b`. Run `scripts/verify_integrated_kvm_crash.py` against the checked-in file, then mark the PR ready. Never overwrite the original report or change its contents for publication.
+The original JSON is included in this directory without reserialization. Operator-side checks passed before pushing: `sha256sum -c`, Git blob ID `7efbb12a9224a0b88b02b02547c708d471d4517b`, and `scripts/verify_integrated_kvm_crash.py` against the staged JSON. GitHub file retrieval of the pushed artifact returns that exact blob ID. These results support original-byte archival; they do not constitute third-party witnessing or hardware attestation.
