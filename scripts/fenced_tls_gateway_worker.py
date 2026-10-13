@@ -11,6 +11,10 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 
 from event_horizon.broker import CapabilityVerifier
 from event_horizon.effect_outcome_journal import DurableEffectJournal
