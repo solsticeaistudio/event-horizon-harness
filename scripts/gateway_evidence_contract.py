@@ -18,7 +18,7 @@ class GatewayEvidenceContractError(ValueError):
 
 class GatewayEventContract:
     def __init__(self, *, gateway_pid: int, request_digest: str, request_id: str,
-                 capability_id: str):
+                 capability_id: str, fenced_recipient_id: str | None = None):
         if type(gateway_pid) is not int or gateway_pid <= 1:
             raise ValueError("gateway child identity not pinned")
         if not isinstance(request_digest, str) or not HEX.fullmatch(request_digest):
@@ -27,6 +27,11 @@ class GatewayEventContract:
             raise ValueError("missing pinned request ID")
         if not isinstance(capability_id, str) or not capability_id:
             raise ValueError("missing pinned capability ID")
+        if fenced_recipient_id is not None and (not isinstance(fenced_recipient_id, str)
+                or not fenced_recipient_id or len(fenced_recipient_id) > 128):
+            raise ValueError("invalid pinned fenced recipient ID")
+        self.fenced_recipient_id = fenced_recipient_id
+        self.original_capability_id = None
         self.pid = gateway_pid
         self.digest = request_digest
         self.request_id = request_id
@@ -76,6 +81,43 @@ class GatewayEventContract:
                        } and payload.get("effect_state") == "not-started")
             if not (boundary or gateway):
                 raise GatewayEvidenceContractError("unrecognized denial evidence")
+            return
+        if kind == "fenced.authorized" and self.fenced_recipient_id is not None:
+            if (keys != {"request_id", "request_digest", "capability_id"}
+                    or (self.authorized and not self.finished)
+                    or payload.get("request_id") != self.request_id
+                    or payload.get("request_digest") != self.digest
+                    or payload.get("capability_id") != self.current_capability
+                    or (not self.authorized and payload.get("capability_id") != self.capability_id)):
+                raise GatewayEvidenceContractError("invalid fenced authorization")
+            self.authorized = True
+            self.finished = False
+            return
+        if kind == "fenced.recipient-confirmed" and self.fenced_recipient_id is not None:
+            if (keys != {"request_id", "request_digest", "capability_id",
+                         "original_capability_id", "receipt_digest", "recipient_id",
+                         "commit_sequence", "recovery", "new_effect_commit"}
+                    or not self.authorized or self.finished
+                    or payload.get("request_id") != self.request_id
+                    or payload.get("request_digest") != self.digest
+                    or payload.get("capability_id") != self.current_capability
+                    or payload.get("recipient_id") != self.fenced_recipient_id
+                    or not isinstance(payload.get("receipt_digest"), str)
+                    or not HEX.fullmatch(payload["receipt_digest"])
+                    or type(payload.get("commit_sequence")) is not int
+                    or payload["commit_sequence"] < 1
+                    or type(payload.get("recovery")) is not bool
+                    or type(payload.get("new_effect_commit")) is not bool):
+                raise GatewayEvidenceContractError("unverified fenced completion envelope")
+            if self.original_capability_id is None:
+                if (payload["original_capability_id"] != self.capability_id
+                        or payload["recovery"] or not payload["new_effect_commit"]):
+                    raise GatewayEvidenceContractError("original fenced commit provenance mismatch")
+                self.original_capability_id = self.capability_id
+            elif (payload["original_capability_id"] != self.original_capability_id
+                  or not payload["recovery"] or payload["new_effect_commit"]):
+                raise GatewayEvidenceContractError("fenced recovery rewrote first commit")
+            self.finished = True
             return
         if kind == "execution.authorized":
             if (keys != {"request_id", "request_digest", "capability_id"}
