@@ -1071,7 +1071,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     "receipt_digest": reconciled["receipt_digest"],
                 }
             if (package_lab is not None and getattr(package_lab, "bridged_gateway", False)
-                    and not getattr(package_lab, "kvm_crash_mode", False)):
+                    and not getattr(package_lab, "kvm_crash_mode", False)
+                    and not getattr(package_lab, "kvm_delayed_commit_mode", False)):
                 gateway_pid = getattr(receiver, "gateway_pid", None)
                 if (type(gateway_pid) is not int or gateway_pid <= 1
                         or gateway_pid == os.getpid()
