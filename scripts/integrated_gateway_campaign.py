@@ -233,3 +233,28 @@ class FirecrackerCrashPackageLab(RecipientBridgedIntegratedPackageLab):
             crash_phase=self.kvm_crash_phase,
         )
         return self.gate_receiver
+
+
+    def observe_authority(self, config, capability):
+        # The crash recovery request can consume a *fresh*, four-guardian
+        # capability without re-dispatching the reserved external effect.
+        # Count that authority consumption instead of silently dropping it
+        # from the independent etcd oracle.
+        fault = self.fault_capability
+        spare = self.spare_capability
+        return inspect_committed_consumption(
+            self.quorum.transport,
+            cluster_id=config["etcd_cluster_id"],
+            session_id=config["session_id"],
+            capability_id=capability.claims.capability_id,
+            claims_digest=digest(capability.claims.to_dict()),
+            expires_at=capability.claims.expires_at,
+            extra_bindings={
+                fault.claims.capability_id: (
+                    digest(fault.claims.to_dict()), fault.claims.expires_at,
+                ),
+                spare.claims.capability_id: (
+                    digest(spare.claims.to_dict()), spare.claims.expires_at,
+                ),
+            },
+        )
