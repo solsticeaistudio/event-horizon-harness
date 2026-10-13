@@ -1163,7 +1163,9 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     "independent_process": True,
                     "guest_vsock_request_path": True,
                     "recorder_resides_in_supervisor": True,
-                    "identity_binding": "pidfd-dispatch-v1",
+                    "identity_binding": ("pidfd-fenced-recipient-v1"
+                                         if getattr(package_lab, "fenced_kvm_mode", False)
+                                         else "pidfd-dispatch-v1"),
                 }
             if package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
                                             or getattr(package_lab, "kvm_delayed_commit_mode", False)):
