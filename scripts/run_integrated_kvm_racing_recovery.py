@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Real KVM test: committed SQLite effect, deliberately lost recipient ACK.
+"""Real KVM guest-triggered lost ACK and two independently signed gateways.
 
-The same live recipient and gateway survive missing delivery of a commit reply;
-the original request remains indeterminate until independently verified under
-new signer authority. Signed internal evidence, not TPM or external witness.
+The guest submits one signed recovery and the trusted host supplies a second
+separately four-guardian-signed contender. Each is a distinct gateway child.
+Exactly one cooperating atomic SQLite recipient effect must remain.
 """
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def main():
                     "host/kernel compromise", "hardware attestation",
                     "external witness", "physical multi-host separation",
                     "power-loss durability", "external recipient APIs beyond atomic SQLite",
-                    "two competing gateway processes and transport partitions",
+                    "cross-host gateway races and physical transport partitions",
                 ],
             )
             verify_report(report)
