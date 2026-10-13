@@ -200,6 +200,24 @@ class RecipientBridgedGateReceiver(BridgedGateReceiver):
         self.recipient_pid = None
         self.recipient_status = None
         self.recipient_ready = threading.Event()
+        # Only the sixth-window supervisor opts into a one-shot private
+        # recipient release pipe. Normal KVM recipients are unchanged.
+        self.delayed_recipient_mode = False
+        self.recipient_process = None
+        self.delayed_release_fd = None
+
+    def release_delayed_recipient(self):
+        """Release an already-pinned in-flight request; never permit EOF commit."""
+        if not self.delayed_recipient_mode or self.delayed_release_fd is None:
+            raise RuntimeError("recipient has no pending trusted release")
+        if self.recipient_process is None or self.recipient_process.poll() is not None:
+            raise RuntimeError("recipient died before trusted release")
+        fd = self.delayed_release_fd
+        self.delayed_release_fd = None
+        try:
+            os.write(fd, b"R")
+        finally:
+            os.close(fd)
 
     def run(self):
         import select
@@ -214,6 +232,7 @@ class RecipientBridgedGateReceiver(BridgedGateReceiver):
             "request_digest": cfg["recipient_request_digest"],
         }
         recipient = None
+        pause_read = None
         try:
             path.write_bytes(canonical_bytes(recipient_config))
             path.chmod(0o600)
@@ -222,6 +241,9 @@ class RecipientBridgedGateReceiver(BridgedGateReceiver):
             runtime = stage_private_recipient_runtime(path.parent)
             cmd = [sys.executable, "-E", "-u", "-m",
                    "scripts.kvm_effect_recipient_service", "--config", str(path)]
+            if self.delayed_recipient_mode:
+                pause_read, self.delayed_release_fd = os.pipe()
+                cmd += ["--pause-before-commit-fd", str(pause_read)]
             if self.isolated_recipient:
                 cmd = ["unshare", "--net", "--", "setpriv",
                        "--bounding-set=-all", "--no-new-privs", "--", *cmd]
@@ -229,7 +251,12 @@ class RecipientBridgedGateReceiver(BridgedGateReceiver):
                 cmd, cwd=runtime,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, start_new_session=True,
+                pass_fds=(() if pause_read is None else (pause_read,)),
             )
+            if pause_read is not None:
+                os.close(pause_read)
+                pause_read = None
+            self.recipient_process = recipient
             self.recipient_pid = recipient.pid
             ready, _, _ = select.select([recipient.stdout], [], [], 12)
             if not ready:
@@ -259,6 +286,13 @@ class RecipientBridgedGateReceiver(BridgedGateReceiver):
             self.channel.close()
         finally:
             self.recipient_ready.set()
+            if pause_read is not None:
+                os.close(pause_read)
+            if self.delayed_release_fd is not None:
+                # EOF means ABORT in the opt-in recipient; never accidental
+                # commit when a failed lab run unwinds.
+                os.close(self.delayed_release_fd)
+                self.delayed_release_fd = None
             if recipient is not None:
                 if recipient.poll() is None:
                     recipient.terminate()

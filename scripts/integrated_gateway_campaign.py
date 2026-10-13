@@ -259,3 +259,46 @@ class FirecrackerCrashPackageLab(RecipientBridgedIntegratedPackageLab):
             },
             allow_crash_recovery_spare=True,
         )
+
+
+class DelayedRecipientKvmPackageLab(RecipientBridgedIntegratedPackageLab):
+    """One real Firecracker guest, delayed recipient commit after gateway death.
+
+    Separate from the frozen five-window schema and evidence verifier.
+    """
+    kvm_delayed_commit_mode = True
+
+    def __init__(self, mode, binary, worker_build, **kwargs):
+        if mode != "protected":
+            raise ValueError("sixth crash window requires protected workload")
+        super().__init__(mode, binary, worker_build, **kwargs)
+
+    def receiver(self, observer, recorder, config):
+        from scripts.kvm_delayed_recipient_bridge import SixthWindowGateReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = SixthWindowGateReceiver(
+            observer, recorder, config, self.target_thread,
+        )
+        return self.gate_receiver
+
+    def observe_authority(self, config, capability):
+        # The new signed recovery token is consumed even while the recipient
+        # ledger is zero. Inspect both tokens in a linearizable etcd read.
+        fault, spare = self.fault_capability, self.spare_capability
+        return inspect_committed_consumption(
+            self.quorum.transport,
+            cluster_id=config["etcd_cluster_id"],
+            session_id=config["session_id"],
+            capability_id=capability.claims.capability_id,
+            claims_digest=digest(capability.claims.to_dict()),
+            expires_at=capability.claims.expires_at,
+            extra_bindings={
+                fault.claims.capability_id: (
+                    digest(fault.claims.to_dict()), fault.claims.expires_at,
+                ),
+                spare.claims.capability_id: (
+                    digest(spare.claims.to_dict()), spare.claims.expires_at,
+                ),
+            },
+            allow_crash_recovery_spare=True,
+        )

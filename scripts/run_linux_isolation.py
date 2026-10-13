@@ -679,7 +679,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         capability, spare, context = authority_session.authorize_pair(request, manifest)
         issuer_public, issuer_key_id = authority_session.public_key_pem, authority_session.key_id
         package_lab.fault_capability = authority_session.fault_capability
-        if getattr(package_lab, "kvm_crash_mode", False):
+        if (getattr(package_lab, "kvm_crash_mode", False)
+                or getattr(package_lab, "kvm_delayed_commit_mode", False)):
             package_lab.spare_capability = spare
     else:
         context = authority_context(request, time.time(), measurement=digest(manifest["artifacts"]))
@@ -732,8 +733,13 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         service_config["expected_request_digest"] = request.request_digest
         service_config["expected_request_id"] = request.request_id
         service_config["expected_capability_id"] = capability.claims.capability_id
-    if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+    if package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
+                                or getattr(package_lab, "kvm_delayed_commit_mode", False)):
         service_config["expected_recovery_capability_id"] = spare.claims.capability_id
+    if package_lab is not None and getattr(package_lab, "kvm_delayed_commit_mode", False):
+        # Guest fault-injection may arm ONLY on the exact bytes of the original
+        # host-approved signed envelope, not on spoofable request/capability IDs.
+        service_config["expected_signed_effect_message_digest"] = digest(message)
     if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
         # Bind the side effect to the supervisor's exact signed guest request.
         # Neither the untrusted package worker nor the VM selects its key.
@@ -822,6 +828,21 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 raise RuntimeError("recipient startup did not finish before guest launch")
             if receiver.failure is not None:
                 raise RuntimeError("independent recipient startup failed") from receiver.failure
+            if getattr(package_lab, "kvm_delayed_commit_mode", False):
+                # Unlike the original five windows, this new bridge requires a
+                # separate true gateway READY; recipient readiness alone is
+                # not permission to launch a guest that will send real probes.
+                if not receiver.gateway_ready.wait(timeout=16):
+                    raise RuntimeError(
+                        "sixth-window trusted gateway READY deadline expired"
+                    ) from (receiver.failure or receiver.record_failure)
+                if receiver.failure is not None or receiver.record_failure is not None:
+                    raise RuntimeError("sixth-window gateway startup failed") from (
+                        receiver.failure or receiver.record_failure
+                    )
+                if (receiver.gateway_process is None
+                        or receiver.gateway_process.poll() is not None):
+                    raise RuntimeError("sixth-window gateway exited before guest launch")
         with (control / "console.log").open("wb") as console:
             vm = subprocess.Popen([
                 "unshare", "--net", "--", str(assets / "jailer"), "--id", "cell",
@@ -939,15 +960,28 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                             and getattr(package_lab, "external_recipient_mode", False)
                             and receiver.failure is not None):
                         raise RuntimeError("trusted recipient/gateway bridge failed") from receiver.failure
+                    if (package_lab is not None
+                            and getattr(package_lab, "kvm_delayed_commit_mode", False)):
+                        diagnostic = receiver.record_failure
+                        if diagnostic is not None:
+                            raise RuntimeError("sixth-window signed gateway relay rejected a probe") from diagnostic
+                        if (receiver.gateway_process is not None
+                                and receiver.gateway_process.poll() is not None):
+                            status = receiver.gateway_process.returncode
+                            raise RuntimeError(
+                                f"sixth-window gateway exited during negative controls: {status}"
+                            ) from exc
                     raise
                 if response["success"] or response["effect_state"] != "not-started":
                     raise RuntimeError(f"forbidden request not denied: {name}")
             observed["denied_cases"] = list(cases)
             if authority_session is not None:
                 package_lab.before_authorized(channel, message, receiver)
-            if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+            if package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
+                                            or getattr(package_lab, "kvm_delayed_commit_mode", False)):
                 from scripts.real_gateway_crash_checkpoints import PHASES
-                phase = package_lab.kvm_crash_phase
+                phase = ("inflight_before_commit" if getattr(package_lab, "kvm_delayed_commit_mode", False)
+                         else package_lab.kvm_crash_phase)
                 crashed_response = guest_effect(channel, message)
                 if (crashed_response.get("success") is not False
                         or crashed_response.get("effect_state") != "possibly-committed"
@@ -981,7 +1015,10 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     }),
                 }
                 observed["replay_denied"] = True
-                observed["kvm_crash_expected_commits"] = 0 if phase in PHASES[:2] else 1
+                observed["kvm_crash_expected_commits"] = (
+                    1 if getattr(package_lab, "kvm_delayed_commit_mode", False)
+                    else (0 if phase in PHASES[:2] else 1)
+                )
                 # Quorum failure probes ran before the crash; restore all three
                 # owned members before independent etcd consumption inspection.
                 package_lab.quorum.restore()
@@ -1021,7 +1058,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     raise RuntimeError("authoritative consumption count is not one")
             observed["host_consumption_count"] = count
             if (package_lab is not None and getattr(package_lab, "external_recipient_mode", False)
-                    and not getattr(package_lab, "kvm_crash_mode", False)):
+                    and not getattr(package_lab, "kvm_crash_mode", False)
+                    and not getattr(package_lab, "kvm_delayed_commit_mode", False)):
                 from event_horizon.effect_outcome_journal import DurableEffectJournal
                 from scripts.effect_crash_recipient import observed_recipient
                 snapshot = observed_recipient(Path(service_config["recipient_database"]))
@@ -1063,7 +1101,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     "receipt_digest": reconciled["receipt_digest"],
                 }
             if (package_lab is not None and getattr(package_lab, "bridged_gateway", False)
-                    and not getattr(package_lab, "kvm_crash_mode", False)):
+                    and not getattr(package_lab, "kvm_crash_mode", False)
+                    and not getattr(package_lab, "kvm_delayed_commit_mode", False)):
                 gateway_pid = getattr(receiver, "gateway_pid", None)
                 if (type(gateway_pid) is not int or gateway_pid <= 1
                         or gateway_pid == os.getpid()
@@ -1081,12 +1120,14 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     "recorder_resides_in_supervisor": True,
                     "identity_binding": "pidfd-dispatch-v1",
                 }
-            if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+            if package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
+                                            or getattr(package_lab, "kvm_delayed_commit_mode", False)):
                 # A replacement token is intentionally consumed in crash
                 # windows 2-5; never call it "unredeemed" in signed evidence.
                 observed["recovery_capability_id"] = spare.claims.capability_id
                 observed["recovery_capability_redeemed"] = (
-                    package_lab.kvm_crash_phase != "before_reservation"
+                    (getattr(package_lab, "kvm_delayed_commit_mode", False)
+                     or package_lab.kvm_crash_phase != "before_reservation")
                 )
             else:
                 observed["unredeemed_capability_at_teardown"] = spare.claims.capability_id
@@ -1105,7 +1146,9 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                             raise RuntimeError("trusted state accessible to a forbidden principal")
             observed["authoritative_state_read_write_denials"] = True
             completed = [event for event in recorder.events() if event["event_type"] == "execution.completed"]
-            if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+            if package_lab is not None and getattr(package_lab, "kvm_delayed_commit_mode", False):
+                expected_completions = 0
+            elif package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
                 from scripts.real_gateway_crash_checkpoints import PHASES
                 expected_completions = 1 if package_lab.kvm_crash_phase == PHASES[4] else 0
             else:
@@ -1157,7 +1200,38 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     if not all(value for name, value in teardown.items() if name != "trigger"):
         raise RuntimeError("teardown incomplete")
     if package_lab is not None:
-        if getattr(package_lab, "kvm_crash_mode", False):
+        if getattr(package_lab, "kvm_delayed_commit_mode", False):
+            from scripts.effect_crash_recipient import observed_recipient
+            from scripts.kvm_crash_journal_evidence import observe_crash_reservation
+            from scripts.verify_kvm_delayed_recipient_bridge import verify_delayed_bridge
+            report = receiver.delayed_report
+            if report is None:
+                raise RuntimeError("sixth KVM recipient late commit not independently signed")
+            actual = observed_recipient(Path(service_config["recipient_database"]))
+            record = observe_crash_reservation(
+                service_config, capability_id=capability.claims.capability_id,
+                request_digest=request.request_digest,
+                claims_digest=digest(capability.claims.to_dict()),
+            )
+            if (actual != report["after_release"] or actual["count"] != 1
+                    or record is None or record["state"] != "possibly-committed"):
+                raise RuntimeError("sixth-window original journal or recipient changed")
+            valid, partial_tip = recorder.verify()
+            if not valid or not verify_delayed_bridge(
+                    report=report, events=recorder.events(), receipts=receiver.receipts,
+                    tip=partial_tip, public_key_pem=recorder.public_key_pem,
+                    request_digest=request.request_digest,
+                    effect_key=service_config["recipient_effect_key"]):
+                raise RuntimeError("sixth-window signed late-commit evidence invalid")
+            observed["kvm_delayed_commit"] = report
+            observed["kvm_recipient_pid"] = receiver.recipient_pid
+            observed["kvm_recipient_final"] = actual
+            observed["package"] = {
+                "mode": package_lab.mode,
+                "worker_sha256": package_lab.worker_build["worker_sha256"],
+                **package_lab.after_teardown(),
+            }
+        elif getattr(package_lab, "kvm_crash_mode", False):
             from scripts.effect_crash_recipient import observed_recipient
             from event_horizon.effect_outcome_journal import DurableEffectJournal
             from scripts.verify_kvm_gateway_crash_bridge import verify_crash_bridge
