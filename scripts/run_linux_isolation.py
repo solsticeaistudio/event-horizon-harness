@@ -737,6 +737,10 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                                 or getattr(package_lab, "kvm_delayed_commit_mode", False)):
         service_config["expected_recovery_capability_id"] = spare.claims.capability_id
     if package_lab is not None and getattr(package_lab, "kvm_delayed_commit_mode", False):
+        # Guest fault-injection may arm ONLY on the exact bytes of the original
+        # host-approved signed envelope, not on spoofable request/capability IDs.
+        service_config["expected_signed_effect_message_digest"] = digest(message)
+    if package_lab is not None and getattr(package_lab, "kvm_delayed_commit_mode", False):
         # A forged signature can reuse the right request digest and ID.
         # Only the exact *signed* guardian-issued guest envelope may arm the
         # host fault window, never a guest-supplied approximate match.
