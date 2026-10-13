@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Mapping
 
-from .canonical import canonical_bytes, digest
+from .canonical import canonical_bytes, digest, strict_json_loads
 from .effect_outcome_journal import DurableEffectJournal, EffectAlreadyReserved
 from .fenced_recipient import FencedSqliteRecipient
 from .models import ActionRequest, IssuedCapability
@@ -84,6 +84,9 @@ class FencedEffectRecoveryGateway:
                 return GatewayDecision(False, "not-started", "pre-dispatch-denied")
             result = self.output_factory(request)
             encoded = canonical_bytes(result)
+            # The durable observation path uses strict canonical JSON and
+            # cannot recover floats. Reject such output BEFORE reservation.
+            strict_json_loads(encoded, require_canonical=True)
             ceiling = claims.max_output_bytes
             if type(ceiling) is not int or len(encoded) > ceiling:
                 return GatewayDecision(False, "not-started", "pre-dispatch-denied")
