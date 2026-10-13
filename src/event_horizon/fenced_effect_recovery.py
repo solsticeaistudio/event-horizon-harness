@@ -150,6 +150,19 @@ class FencedEffectRecoveryGateway:
                     or observed.recipient_id != self.recipient.recipient_id):
                 raise RuntimeError("recipient positive receipt not corroborated")
         except Exception:
+            # This is NOT negative reconciliation. The request may have
+            # committed just before the recipient vanished or the ACK was
+            # lost. Record the ambiguous boundary before accepting another
+            # signed capability. The original fence stays reserved forever.
+            try:
+                self.recorder.append("fenced.indeterminate", {
+                    "request_id": request.request_id,
+                    "request_digest": request.request_digest,
+                    "capability_id": claims.capability_id,
+                    "effect_state": "possibly-committed",
+                })
+            except Exception:
+                return GatewayDecision(False, "possibly-committed", "evidence-indeterminate")
             return GatewayDecision(False, "possibly-committed", "recipient-indeterminate")
 
         try:

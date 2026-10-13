@@ -35,13 +35,11 @@ class FencedRecipientKvmReceiver(BridgedGateReceiver):
         self.recipient_process = None
         self.recipient_ready = threading.Event()
         self.recipient_status = None
+        self.recipient_fault_phase = None
+        self._recipient_config_path = None
+        self._recipient_runtime = None
 
-    def _run_gateway(self):
-        # Baseline runs the existing bridged host gateway. Opt-in KVM fault
-        # receivers override ONLY this method; the recipient stays alive.
-        return BridgedGateReceiver.run(self)
-
-    def run(self):
+    def _prepare_recipient(self):
         cfg = self.config
         fence = cfg["fenced_recipient"]
         path = Path(cfg["recipient_database"]).with_name("fenced-recipient-config.json")
@@ -51,33 +49,55 @@ class FencedRecipientKvmReceiver(BridgedGateReceiver):
             "recipient_id": fence["recipient_id"],
             "auth_key_hex": fence["auth_key_hex"],
         }
-        service = None
-        try:
-            path.write_bytes(canonical_bytes(service_config))
-            path.chmod(0o600)
-            runtime = stage_private_recipient_runtime(path.parent)
-            cmd = [sys.executable, "-E", "-u", "-m",
-                   "scripts.fenced_recipient_service", "--config", str(path)]
-            cmd = ["unshare", "--net", "--", "setpriv",
-                   "--bounding-set=-all", "--no-new-privs", "--", *cmd]
-            service = subprocess.Popen(
-                cmd, cwd=runtime, stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                start_new_session=True,
+        path.write_bytes(canonical_bytes(service_config))
+        path.chmod(0o600)
+        self._recipient_config_path = path
+        self._recipient_runtime = stage_private_recipient_runtime(path.parent)
+
+    def _launch_recipient(self, *, fault_phase=None):
+        if self._recipient_config_path is None or self._recipient_runtime is None:
+            raise RuntimeError("private recipient runtime is not staged")
+        if self.recipient_process is not None and self.recipient_process.poll() is None:
+            raise RuntimeError("refusing to start second live recipient")
+        cmd = [sys.executable, "-E", "-u", "-m",
+               "scripts.fenced_recipient_service", "--config",
+               str(self._recipient_config_path)]
+        if fault_phase is not None:
+            from scripts.fenced_recipient_service import PHASES
+            if fault_phase not in PHASES:
+                raise ValueError("invalid host-only recipient crash checkpoint")
+            cmd += ["--lab-fault", fault_phase]
+        cmd = ["unshare", "--net", "--", "setpriv",
+               "--bounding-set=-all", "--no-new-privs", "--", *cmd]
+        service = subprocess.Popen(
+            cmd, cwd=self._recipient_runtime, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        self.recipient_process = service
+        self.recipient_pid = service.pid
+        ready, _, _ = select.select([service.stdout], [], [], 12)
+        message = service.stdout.readline().strip() if ready else b""
+        if message != b"READY" or service.poll() is not None:
+            error = service.stderr.read(2048) if service.poll() is not None else b""
+            raise RuntimeError(
+                "fenced service did not initialize independently: "
+                + repr(message) + " " + error.decode(errors="replace")
             )
-            self.recipient_process = service
-            self.recipient_pid = service.pid
-            ready, _, _ = select.select([service.stdout], [], [], 12)
-            message = service.stdout.readline().strip() if ready else b""
-            if message != b"READY" or service.poll() is not None:
-                error = service.stderr.read(2048) if service.poll() is not None else b""
-                raise RuntimeError(
-                    "fenced service did not initialize independently: "
-                    + repr(message) + " " + error.decode(errors="replace")
-                )
-            self.recipient_ready.set()
+        self.recipient_ready.set()
+        return service
+
+    def _run_gateway(self):
+        # Original baseline behavior unchanged. Fault experiment subclasses
+        # override only the request/restart orchestration, never guest inputs.
+        return BridgedGateReceiver.run(self)
+
+    def run(self):
+        try:
+            self._prepare_recipient()
+            self._launch_recipient(fault_phase=self.recipient_fault_phase)
             self._run_gateway()
-            if service.poll() is not None:
+            if self.recipient_process is None or self.recipient_process.poll() is not None:
                 raise RuntimeError("independent fenced recipient unexpectedly exited")
         except BaseException as exc:
             if self.failure is None:
@@ -89,6 +109,7 @@ class FencedRecipientKvmReceiver(BridgedGateReceiver):
             self.channel.close()
         finally:
             self.recipient_ready.set()
+            service = self.recipient_process
             if service is not None:
                 if service.poll() is None:
                     service.terminate()

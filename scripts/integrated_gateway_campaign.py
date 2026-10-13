@@ -386,3 +386,36 @@ class FencedRecoveryKvmCrashLab(FencedRecipientKvmPackageLab):
             },
             allow_crash_recovery_spare=True,
         )
+
+
+class FencedRecipientCrashKvmLab(FencedRecoveryKvmCrashLab):
+    """KVM guest invokes independent recipient SIGKILL/restart scenarios.
+
+    Keep this separate from the previously verified gateway crash phases:
+    exactly the recipient child dies; the gateway and original durable fence
+    survive until a newly guardian-signed recovery capability is presented.
+    """
+    kvm_fenced_crash_mode = False
+    kvm_recipient_crash_mode = True
+
+    def __init__(self, mode, binary, worker_build, *, crash_phase, **kwargs):
+        from scripts.fenced_recipient_service import PHASES
+        if crash_phase not in PHASES:
+            raise ValueError("invalid host-owned recipient SIGKILL phase")
+        # Parent requires a valid gateway phase, so pass one placeholder
+        # before pinning the distinct recipient-owned phase below.
+        from scripts.isolated_effect_gateway_worker import FENCED_KVM_CRASH_PHASES
+        super().__init__(
+            mode, binary, worker_build,
+            crash_phase=FENCED_KVM_CRASH_PHASES[0], **kwargs,
+        )
+        self.recipient_crash_phase = crash_phase
+
+    def receiver(self, observer, recorder, config):
+        from scripts.kvm_recipient_crash_bridge import KvmRecipientCrashReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = KvmRecipientCrashReceiver(
+            observer, recorder, config, self.target_thread,
+            phase=self.recipient_crash_phase,
+        )
+        return self.gate_receiver
