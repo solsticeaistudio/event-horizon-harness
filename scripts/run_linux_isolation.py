@@ -1307,7 +1307,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     if not all(value for name, value in teardown.items() if name != "trigger"):
         raise RuntimeError("teardown incomplete")
     if package_lab is not None:
-        if getattr(package_lab, "kvm_fenced_crash_mode", False):
+        if (getattr(package_lab, "kvm_fenced_crash_mode", False)
+                or getattr(package_lab, "kvm_recipient_crash_mode", False)):
             from event_horizon.fenced_recipient import FencedSqliteRecipient
             from event_horizon.effect_outcome_journal import DurableEffectJournal
             if receiver.crash_report is None or receiver.recovery_report is None:
