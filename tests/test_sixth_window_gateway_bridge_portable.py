@@ -5,6 +5,7 @@ durable recipient. Does not use Firecracker; passing cannot prove KVM.
 """
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 import signal
@@ -74,6 +75,29 @@ class SixthWindowLiveBridgeTests(unittest.TestCase):
                 def message(cap):
                     return {"request": request.canonical_payload(),
                             "capability": cap.to_dict()}
+                self.assertTrue(receiver.gateway_ready.wait(timeout=10))
+                self.assertIsNotNone(receiver.gateway_process)
+                self.assertIsNone(receiver.gateway_process.poll())
+                # Mirror ALL four guest/vsock negative controls before the
+                # first authorized exchange, not just the happy fault path.
+                # Original Ubuntu failure happened in this exact stage.
+                valid = message(original)
+                negative = {"missing_capability": {"request": valid["request"]}}
+                forged = copy.deepcopy(valid)
+                forged["capability"]["signature"] = "A" * 86
+                negative["forged_signature"] = forged
+                widened = copy.deepcopy(valid)
+                widened["request"]["arguments"]["length"] = 1
+                negative["argument_substitution"] = widened
+                forbidden = copy.deepcopy(valid)
+                forbidden["request"]["operation"] = "network.connect"
+                negative["unauthorized_operation"] = forbidden
+                for name, bad in negative.items():
+                    with self.subTest(preflight=name):
+                        outcome = exchange(guest_sock, bad)
+                        self.assertFalse(outcome["success"])
+                        self.assertEqual(outcome["effect_state"], "not-started")
+                        self.assertEqual(receiver.dispatches, 0)
                 first = exchange(guest_sock, message(original))
                 self.assertEqual(first["error"], "gateway-killed")
                 self.assertFalse(first["success"])
