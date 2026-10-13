@@ -19,6 +19,8 @@ from event_horizon.protocol import encode_frame, read_frame
 from event_horizon.recorder import ExternalRecorder
 from scripts.real_gateway_crash_checkpoints import PHASES, GatewayCrashProbe, ReservationProbe, RecorderProbe
 
+FENCED_KVM_CRASH_PHASES = ("before_recipient_commit", "after_recipient_commit_before_confirmation")
+
 
 class HostRecorderProxy:
     """Append events synchronously to the host supervisor's recorder."""
@@ -44,12 +46,17 @@ class HostRecorderProxy:
 
 def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False,
                          crash_phase: str | None = None,
-                         ready_stdout: bool = False):
+                         ready_stdout: bool = False,
+                         fenced_crash_phase: str | None = None):
     """Return a child and request socket; optionally a supervisor recorder socket."""
     if not config_path.is_file():
         raise FileNotFoundError(config_path)
     if crash_phase is not None and crash_phase not in PHASES:
         raise ValueError("untrusted gateway crash phase")
+    if fenced_crash_phase is not None and (
+            fenced_crash_phase not in FENCED_KVM_CRASH_PHASES
+            or crash_phase is not None):
+        raise ValueError("unsupported or conflicting fenced KVM crash phase")
     parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
     record_parent, record_child = (
         socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -62,6 +69,8 @@ def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False,
         ]
         if crash_phase is not None:
             command += ["--crash-phase", crash_phase]
+        if fenced_crash_phase is not None:
+            command += ["--fenced-crash-phase", fenced_crash_phase]
         if ready_stdout:
             command.append("--ready-stdout")
         fds = [child.fileno()]
@@ -70,7 +79,7 @@ def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False,
             fds.append(record_child.fileno())
         proc = subprocess.Popen(
             command, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE if (crash_phase is not None or ready_stdout)
+            stdout=subprocess.PIPE if (crash_phase is not None or fenced_crash_phase is not None or ready_stdout)
             else subprocess.DEVNULL,
             stderr=subprocess.PIPE, close_fds=True, pass_fds=tuple(fds),
             start_new_session=True,
@@ -88,7 +97,8 @@ def start_effect_gateway(config_path: Path, *, recorder_bridge: bool = False,
 
 
 def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None,
-                crash_phase: str | None = None, ready_stdout: bool = False) -> None:
+                crash_phase: str | None = None, ready_stdout: bool = False,
+                fenced_crash_phase: str | None = None) -> None:
     """Serve up to 24 guest-shaped requests via the genuine trusted boundary."""
     config = json.loads(config_path.read_text())
     if not isinstance(config, dict) or set(config) != {"boundary", "recorder_path"}:
@@ -101,6 +111,33 @@ def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None,
     boundary = None
     try:
         boundary = DatasetEffectBoundary(boundary_config, recorder)
+        if fenced_crash_phase is not None:
+            # Supervisor-only fault hooks wrap the explicitly trusted
+            # recipient adapter. No guest can choose a phase or bypass the
+            # signed authority and original durable journal reservation.
+            from event_horizon.fenced_effect_recovery import FencedEffectRecoveryGateway
+            import signal
+            if (fenced_crash_phase not in FENCED_KVM_CRASH_PHASES
+                    or not isinstance(boundary.gateway, FencedEffectRecoveryGateway)):
+                raise ValueError("fenced crash hooks require the real opt-in gateway")
+            original_apply = boundary.gateway.recipient.apply
+            used = False
+
+            def crashpoint(phase):
+                nonlocal used
+                if phase == fenced_crash_phase and not used:
+                    used = True
+                    print("PHASE:" + phase, flush=True)
+                    while True:
+                        signal.pause()
+
+            def fenced_apply(**kwargs):
+                crashpoint("before_recipient_commit")
+                receipt = original_apply(**kwargs)
+                crashpoint("after_recipient_commit_before_confirmation")
+                return receipt
+
+            boundary.gateway.recipient.apply = fenced_apply
         if crash_phase is not None:
             # Test instrumentation stays outside TrustedEffectGateway itself.
             if boundary.gateway.outcome_journal is None or not boundary_config.get("recipient_socket"):
@@ -184,10 +221,12 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--recorder-fd", type=int)
     parser.add_argument("--crash-phase", choices=PHASES)
+    parser.add_argument("--fenced-crash-phase", choices=FENCED_KVM_CRASH_PHASES)
     parser.add_argument("--ready-stdout", action="store_true")
     args = parser.parse_args()
     run_gateway(args.fd, args.config, recorder_fd=args.recorder_fd,
-                crash_phase=args.crash_phase, ready_stdout=args.ready_stdout)
+                crash_phase=args.crash_phase, ready_stdout=args.ready_stdout,
+                fenced_crash_phase=args.fenced_crash_phase)
 
 
 if __name__ == "__main__":
