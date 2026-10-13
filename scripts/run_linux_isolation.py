@@ -1147,7 +1147,43 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     if not all(value for name, value in teardown.items() if name != "trigger"):
         raise RuntimeError("teardown incomplete")
     if package_lab is not None:
-        observed["package"].update(package_lab.after_teardown())
+        if getattr(package_lab, "kvm_crash_mode", False):
+            from scripts.effect_crash_recipient import observed_recipient
+            from event_horizon.effect_outcome_journal import DurableEffectJournal
+            from scripts.verify_kvm_gateway_crash_bridge import verify_crash_bridge
+            if receiver.crash_report is None or receiver.recovery_report is None:
+                raise RuntimeError("no signed independently completed KVM crash experiment")
+            actual = observed_recipient(Path(service_config["recipient_database"]))
+            if actual != receiver.recovery_report["recipient_after_recovery"]:
+                raise RuntimeError("post-kill recipient ledger was substituted")
+            journal = DurableEffectJournal(service_config["outcome_journal"])
+            recorded = journal.observe(
+                tenant=context["tenant"], environment=context["environment"],
+                capability_id=capability.claims.capability_id,
+            )
+            if (recorded["state"] if recorded else None) != (
+                    receiver.crash_report["journal_state_after_kill"]):
+                raise RuntimeError("post-recovery journal contradicted killed gateway state")
+            verified, interim_tip = recorder.verify()
+            if not verified or not verify_crash_bridge(
+                    phase=package_lab.kvm_crash_phase,
+                    crashed=receiver.crash_report,
+                    recovery=receiver.recovery_report,
+                    events=recorder.events(), receipts=receiver.receipts,
+                    tip=interim_tip, public_key_pem=recorder.public_key_pem,
+                    request_digest=request.request_digest,
+                    effect_key=service_config["recipient_effect_key"]):
+                raise RuntimeError("signed gateway SIGKILL evidence invalid")
+            observed["kvm_crash"] = receiver.crash_report
+            observed["kvm_recovery"] = receiver.recovery_report
+            observed["kvm_recipient_final"] = actual
+            observed["package"] = {
+                "mode": package_lab.mode,
+                "worker_sha256": package_lab.worker_build["worker_sha256"],
+                **package_lab.after_teardown(),
+            }
+        else:
+            observed["package"].update(package_lab.after_teardown())
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as retired_endpoint:
         try:
             retired_endpoint.connect(str(jail / "vsock.sock_6000"))
