@@ -75,8 +75,12 @@ class BridgedGateReceiver(GateReceiver):
                                         self.config["fenced_output_length"]
                                     ])):
                             raise RuntimeError("recipient evidence cannot be independently corroborated")
-                        if payload["new_effect_commit"]:
-                            self.dispatches += 1
+                        # The original gateway may have committed before
+                        # SIGKILL without ever emitting confirmation evidence.
+                        # In that case recovery observes one durable row and
+                        # the supervisor counts that single effect exactly once.
+                        if self.dispatches == 0:
+                            self.dispatches = 1
                         self.gateway_event_pid = self.gateway_process.pid
                     if event["event_type"] == "execution.completed" and self.config.get("recipient_database"):
                         from scripts.effect_crash_recipient import observed_recipient
