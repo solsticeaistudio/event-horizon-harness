@@ -679,6 +679,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         capability, spare, context = authority_session.authorize_pair(request, manifest)
         issuer_public, issuer_key_id = authority_session.public_key_pem, authority_session.key_id
         package_lab.fault_capability = authority_session.fault_capability
+        if getattr(package_lab, "kvm_crash_mode", False):
+            package_lab.spare_capability = spare
     else:
         context = authority_context(request, time.time(), measurement=digest(manifest["artifacts"]))
         capability = broker.issue(request, **issue_options(context), max_output_bytes=512)
@@ -730,6 +732,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         service_config["expected_request_digest"] = request.request_digest
         service_config["expected_request_id"] = request.request_id
         service_config["expected_capability_id"] = capability.claims.capability_id
+    if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+        service_config["expected_recovery_capability_id"] = spare.claims.capability_id
     if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
         # Bind the side effect to the supervisor's exact signed guest request.
         # Neither the untrusted package worker nor the VM selects its key.
@@ -941,17 +945,58 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
             observed["denied_cases"] = list(cases)
             if authority_session is not None:
                 package_lab.before_authorized(channel, message, receiver)
-            response = guest_effect(channel, message)
-            if not response["success"] or response["output"] != content:
-                raise RuntimeError(f"authorized dataset read failed: {response}")
-            observed["useful_dataset_read_and_summary" if package_lab is None else "useful_package_read_and_summary"] = True
-            if guest_effect(channel, message)["success"]:
-                raise RuntimeError("replay succeeded")
-            observed["replay_denied"] = True
-            if authority_session is not None:
-                observed["integrated_gateway"] = package_lab.after_authorized(channel, message, receiver)
-            if package_lab is not None:
-                observed["package"] = package_lab.observe(service, channel, response, message)
+            if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+                from scripts.real_gateway_crash_checkpoints import PHASES
+                phase = package_lab.kvm_crash_phase
+                crashed_response = guest_effect(channel, message)
+                if (crashed_response.get("success") is not False
+                        or crashed_response.get("effect_state") != "possibly-committed"
+                        or crashed_response.get("error") != "gateway-killed"):
+                    raise RuntimeError("actual KVM guest did not observe interrupted gateway")
+                original_replay = guest_effect(channel, message)
+                if (original_replay.get("success") is not False
+                        or original_replay.get("error") != "authority-denied"):
+                    raise RuntimeError("actual KVM guest replayed original consumed capability")
+                replacement_replay = None
+                if phase != PHASES[0]:
+                    replacement_replay = guest_effect(channel, effect_message(request, spare))
+                    if (replacement_replay.get("success") is not False
+                            or replacement_replay.get("effect_state") != "possibly-committed"
+                            or replacement_replay.get("error") != "prior-effect-unknown"):
+                        raise RuntimeError("new signed KVM capability bypassed reserved effect")
+                observed["kvm_crash_guest_replies"] = {
+                    "interrupted": {
+                        "success": crashed_response["success"],
+                        "effect_state": crashed_response["effect_state"],
+                        "error": crashed_response["error"],
+                    },
+                    "original_replay": {
+                        "success": original_replay["success"],
+                        "error": original_replay["error"],
+                    },
+                    "replacement_replay": (None if replacement_replay is None else {
+                        "success": replacement_replay["success"],
+                        "effect_state": replacement_replay["effect_state"],
+                        "error": replacement_replay["error"],
+                    }),
+                }
+                observed["replay_denied"] = True
+                observed["kvm_crash_expected_commits"] = 0 if phase in PHASES[:2] else 1
+                # Quorum failure probes ran before the crash; restore all three
+                # owned members before independent etcd consumption inspection.
+                package_lab.quorum.restore()
+            else:
+                response = guest_effect(channel, message)
+                if not response["success"] or response["output"] != content:
+                    raise RuntimeError(f"authorized dataset read failed: {response}")
+                observed["useful_dataset_read_and_summary" if package_lab is None else "useful_package_read_and_summary"] = True
+                if guest_effect(channel, message)["success"]:
+                    raise RuntimeError("replay succeeded")
+                observed["replay_denied"] = True
+                if authority_session is not None:
+                    observed["integrated_gateway"] = package_lab.after_authorized(channel, message, receiver)
+                if package_lab is not None:
+                    observed["package"] = package_lab.observe(service, channel, response, message)
             observed["forbidden_vsock_port_diagnostic"] = send_frame(channel, {"type": "forbidden_port"})
             if observed["forbidden_vsock_port_diagnostic"] != {"connected": False}:
                 raise RuntimeError("unexpected host vsock service reachable")
@@ -975,7 +1020,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 if count != 1:
                     raise RuntimeError("authoritative consumption count is not one")
             observed["host_consumption_count"] = count
-            if package_lab is not None and getattr(package_lab, "external_recipient_mode", False):
+            if (package_lab is not None and getattr(package_lab, "external_recipient_mode", False)
+                    and not getattr(package_lab, "kvm_crash_mode", False)):
                 from event_horizon.effect_outcome_journal import DurableEffectJournal
                 from scripts.effect_crash_recipient import observed_recipient
                 snapshot = observed_recipient(Path(service_config["recipient_database"]))
@@ -1016,7 +1062,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     "request_digest": request.request_digest,
                     "receipt_digest": reconciled["receipt_digest"],
                 }
-            if package_lab is not None and getattr(package_lab, "bridged_gateway", False):
+            if (package_lab is not None and getattr(package_lab, "bridged_gateway", False)
+                    and not getattr(package_lab, "kvm_crash_mode", False)):
                 gateway_pid = getattr(receiver, "gateway_pid", None)
                 if (type(gateway_pid) is not int or gateway_pid <= 1
                         or gateway_pid == os.getpid()
@@ -1034,7 +1081,15 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                     "recorder_resides_in_supervisor": True,
                     "identity_binding": "pidfd-dispatch-v1",
                 }
-            observed["unredeemed_capability_at_teardown"] = spare.claims.capability_id
+            if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+                # A replacement token is intentionally consumed in crash
+                # windows 2-5; never call it "unredeemed" in signed evidence.
+                observed["recovery_capability_id"] = spare.claims.capability_id
+                observed["recovery_capability_redeemed"] = (
+                    package_lab.kvm_crash_phase != "before_reservation"
+                )
+            else:
+                observed["unredeemed_capability_at_teardown"] = spare.claims.capability_id
             authority_state = ((state / "replay.sqlite3",)
                                if service_config.get("authority_backend", "sqlite") == "sqlite" else ())
             for uid, targets in ((VM_UID, (control / "events.jsonl", state / "decay.sqlite3")
@@ -1050,8 +1105,13 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                             raise RuntimeError("trusted state accessible to a forbidden principal")
             observed["authoritative_state_read_write_denials"] = True
             completed = [event for event in recorder.events() if event["event_type"] == "execution.completed"]
-            if len(completed) != 1:
-                raise RuntimeError("independent completion evidence count is not one")
+            if package_lab is not None and getattr(package_lab, "kvm_crash_mode", False):
+                from scripts.real_gateway_crash_checkpoints import PHASES
+                expected_completions = 1 if package_lab.kvm_crash_phase == PHASES[4] else 0
+            else:
+                expected_completions = 1
+            if len(completed) != expected_completions:
+                raise RuntimeError("completion evidence contradicts actual crash checkpoint")
             if stop_mode == "deadline":
                 watchdog.wait(timeout=15)
             elif stop_mode == "supervisor-channel-loss":
@@ -1097,7 +1157,52 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
     if not all(value for name, value in teardown.items() if name != "trigger"):
         raise RuntimeError("teardown incomplete")
     if package_lab is not None:
-        observed["package"].update(package_lab.after_teardown())
+        if getattr(package_lab, "kvm_crash_mode", False):
+            from scripts.effect_crash_recipient import observed_recipient
+            from event_horizon.effect_outcome_journal import DurableEffectJournal
+            from scripts.verify_kvm_gateway_crash_bridge import verify_crash_bridge
+            if receiver.crash_report is None or receiver.recovery_report is None:
+                raise RuntimeError("no signed independently completed KVM crash experiment")
+            actual = observed_recipient(Path(service_config["recipient_database"]))
+            if actual != receiver.recovery_report["recipient_after_recovery"]:
+                raise RuntimeError("post-kill recipient ledger was substituted")
+            from scripts.kvm_crash_journal_evidence import observe_crash_reservation
+            recorded = observe_crash_reservation(
+                service_config,
+                capability_id=capability.claims.capability_id,
+                request_digest=request.request_digest,
+                claims_digest=digest(capability.claims.to_dict()),
+            )
+            if (recorded["state"] if recorded else None) != (
+                    receiver.crash_report["journal_state_after_kill"]):
+                raise RuntimeError("post-recovery journal contradicted killed gateway state")
+            verified, interim_tip = recorder.verify()
+            if not verified or not verify_crash_bridge(
+                    phase=package_lab.kvm_crash_phase,
+                    crashed=receiver.crash_report,
+                    recovery=receiver.recovery_report,
+                    events=recorder.events(), receipts=receiver.receipts,
+                    tip=interim_tip, public_key_pem=recorder.public_key_pem,
+                    request_digest=request.request_digest,
+                    effect_key=service_config["recipient_effect_key"]):
+                raise RuntimeError("signed gateway SIGKILL evidence invalid")
+            if (type(receiver.recipient_pid) is not int
+                    or receiver.recipient_pid <= 1
+                    or receiver.recipient_pid in {
+                        receiver.crashed_gateway_pid, receiver.recovery_gateway_pid, os.getpid()
+                    }):
+                raise RuntimeError("independent recipient process identity is not established")
+            observed["kvm_crash"] = receiver.crash_report
+            observed["kvm_recovery"] = receiver.recovery_report
+            observed["kvm_recipient_pid"] = receiver.recipient_pid
+            observed["kvm_recipient_final"] = actual
+            observed["package"] = {
+                "mode": package_lab.mode,
+                "worker_sha256": package_lab.worker_build["worker_sha256"],
+                **package_lab.after_teardown(),
+            }
+        else:
+            observed["package"].update(package_lab.after_teardown())
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as retired_endpoint:
         try:
             retired_endpoint.connect(str(jail / "vsock.sock_6000"))
