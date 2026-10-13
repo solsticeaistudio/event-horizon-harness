@@ -14,6 +14,7 @@ from typing import Any, Callable, Mapping
 from .canonical import canonical_bytes, digest, strict_json_loads
 from .effect_outcome_journal import DurableEffectJournal, EffectAlreadyReserved
 from .fenced_recipient import FencedSqliteRecipient
+from .fenced_recipient_transport import FencedRecipientClient
 from .models import ActionRequest, IssuedCapability
 from .trusted_effect_gateway import GatewayDecision
 
@@ -21,20 +22,19 @@ from .trusted_effect_gateway import GatewayDecision
 class FencedEffectRecoveryGateway:
     """Trusted host-owned gateway with explicit atomic-recipient contract.
 
-    NOTE: the recipient is the trusted business effect. This implementation
-    cannot safely wrap arbitrary external network calls not sharing its SQLite
-    transaction. No guest chooses the recipient, output or journal path.
+    NOTE: the recipient is the trusted business effect. Remote service mode uses authenticated Unix IPC to a cooperating
+    recipient process; arbitrary web APIs remain unsupported. No guest chooses the recipient, output or journal path.
     """
 
     def __init__(
         self, verifier, recorder, journal: DurableEffectJournal,
-        recipient: FencedSqliteRecipient, *,
+        recipient: FencedSqliteRecipient | FencedRecipientClient, *,
         output_factory: Callable[[ActionRequest], Any],
         tenant: str = "default", environment: str = "synthetic",
         pre_dispatch_rule: Callable[[ActionRequest, Any], bool] | None = None,
     ):
         if (not isinstance(journal, DurableEffectJournal)
-                or not isinstance(recipient, FencedSqliteRecipient)
+                or not isinstance(recipient, (FencedSqliteRecipient, FencedRecipientClient))
                 or not callable(output_factory)
                 or (pre_dispatch_rule is not None and not callable(pre_dispatch_rule))):
             raise TypeError("fenced recovery requires trusted concrete storage and callbacks")
