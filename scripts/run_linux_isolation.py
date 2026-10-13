@@ -680,7 +680,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         issuer_public, issuer_key_id = authority_session.public_key_pem, authority_session.key_id
         package_lab.fault_capability = authority_session.fault_capability
         if (getattr(package_lab, "kvm_crash_mode", False)
-                or getattr(package_lab, "kvm_delayed_commit_mode", False)):
+                or getattr(package_lab, "kvm_delayed_commit_mode", False)
+                or getattr(package_lab, "kvm_fenced_crash_mode", False)):
             package_lab.spare_capability = spare
     else:
         context = authority_context(request, time.time(), measurement=digest(manifest["artifacts"]))
@@ -734,9 +735,12 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
         service_config["expected_request_id"] = request.request_id
         service_config["expected_capability_id"] = capability.claims.capability_id
     if package_lab is not None and (getattr(package_lab, "kvm_crash_mode", False)
-                                or getattr(package_lab, "kvm_delayed_commit_mode", False)):
+                                or getattr(package_lab, "kvm_delayed_commit_mode", False)
+                                or getattr(package_lab, "kvm_fenced_crash_mode", False)):
         service_config["expected_recovery_capability_id"] = spare.claims.capability_id
-    if package_lab is not None and getattr(package_lab, "kvm_delayed_commit_mode", False):
+    if package_lab is not None and (
+            getattr(package_lab, "kvm_delayed_commit_mode", False)
+            or getattr(package_lab, "kvm_fenced_crash_mode", False)):
         # Guest fault-injection may arm ONLY on the exact bytes of the original
         # host-approved signed envelope, not on spoofable request/capability IDs.
         service_config["expected_signed_effect_message_digest"] = digest(message)
@@ -828,7 +832,8 @@ def run_round(assets: Path, manifest: dict, broker, prior_message: dict | None, 
                 raise RuntimeError("recipient startup did not finish before guest launch")
             if receiver.failure is not None:
                 raise RuntimeError("independent recipient startup failed") from receiver.failure
-            if getattr(package_lab, "kvm_delayed_commit_mode", False):
+            if (getattr(package_lab, "kvm_delayed_commit_mode", False)
+                    or getattr(package_lab, "kvm_fenced_crash_mode", False)):
                 # Unlike the original five windows, this new bridge requires a
                 # separate true gateway READY; recipient readiness alone is
                 # not permission to launch a guest that will send real probes.
