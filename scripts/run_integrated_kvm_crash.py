@@ -118,7 +118,15 @@ def main():
         report["failure_class"] = type(exc).__name__
         raise
     finally:
-        quorum.restore()
+        restore_error = None
+        try:
+            quorum.restore()
+        except BaseException as exc:
+            restore_error = exc
+            report["status"] = "INCOMPLETE"
+            report["failure_class"] = "OwnedQuorumRestoreFailed"
+        # Even a failed cluster restore must not erase the original failed
+        # evidence; restore failures cannot be promoted to a PASS report.
         report_path.parent.mkdir(parents=True, exist_ok=True)
         raw = (json.dumps(report, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
         with report_path.open("xb") as target:
@@ -128,6 +136,8 @@ def main():
             sidecar.write(sha + "  " + report_path.name + "\n")
         print("Original report:", report_path, "SHA256:", sha,
               "status:", report["status"], flush=True)
+        if restore_error is not None:
+            raise RuntimeError("owned quorum restore failed; immutable INCOMPLETE report preserved") from restore_error
     print("PASS: five actual KVM guest-triggered gateway SIGKILL windows; internal receipts only")
 
 
