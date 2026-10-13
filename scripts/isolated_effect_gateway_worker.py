@@ -157,12 +157,18 @@ def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None,
                         break
                     # The supervisor authenticates its upstream effect-service
                     # transport and owns this private FD; no caller-set peer UID.
+                    if ready_stdout:
+                        print("GATEWAY_DIAGNOSTIC:request-received", file=sys.stderr, flush=True)
                     response = boundary.execute(
                         message, peer_uid=boundary_config["vm_uid"],
                     )
+                    if ready_stdout:
+                        print("GATEWAY_DIAGNOSTIC:decision-ready", file=sys.stderr, flush=True)
                     if crash_phase == "after_completion_before_client_ack" and response.get("success"):
                         probe.mark("after_completion_before_client_ack")
                     channel.sendall(encode_frame(response))
+                    if ready_stdout:
+                        print("GATEWAY_DIAGNOSTIC:response-sent", file=sys.stderr, flush=True)
     finally:
         if boundary is not None:
             boundary.close()
