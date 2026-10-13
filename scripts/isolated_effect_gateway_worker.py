@@ -128,7 +128,9 @@ def run_gateway(fd: int, config_path: Path, *, recorder_fd: int | None = None,
 
             boundary.gateway.effects["object.read"] = commit_then_pause
             boundary.gateway.recorder = RecorderProbe(boundary.gateway.recorder, probe)
-        if recorder_fd is not None and boundary_config.get("observe_integrated_dispatch"):
+        if (recorder_fd is not None
+                and boundary_config.get("observe_integrated_dispatch")
+                and "fenced_recipient" not in boundary_config):
             original = boundary.gateway.effects["object.read"]
 
             dispatch_count = 0
