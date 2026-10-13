@@ -302,3 +302,42 @@ class DelayedRecipientKvmPackageLab(RecipientBridgedIntegratedPackageLab):
             },
             allow_crash_recovery_spare=True,
         )
+
+
+class FencedRecipientKvmPackageLab(BridgedIntegratedPackageLab):
+    """Opt-in actual Firecracker/guardian/etcd plus atomic recipient mode.
+
+    This is an initial hardware integration/progress smoke test; a dedicated
+    recovery fault matrix needs separate gateway and recipient kill windows.
+    Never relabel the six historical KVM campaigns with this mode.
+    """
+    external_recipient_mode = True
+    fenced_kvm_mode = True
+
+    def __init__(self, mode, binary, worker_build, **kwargs):
+        if mode != "protected":
+            raise ValueError("fenced KVM requires a protected package/VM")
+        super().__init__(mode, binary, worker_build, **kwargs)
+
+    def prepare(self, run, control, state, config):
+        import secrets
+        super().prepare(run, control, state, config)
+        # Host-only pinned configuration, never forwarded to the guest.
+        # Distinct from the legacy recipient_socket config path.
+        config["recipient_database"] = str(control / "fenced-effect.sqlite")
+        config["outcome_journal"] = str(control / "fenced-outcomes.sqlite")
+        config["fenced_output_offset"] = 0
+        config["fenced_output_length"] = len(config["dataset"])
+        config["fenced_recipient"] = {
+            "socket_path": str(control / "fenced-effect.sock"),
+            "recipient_id": "ehh-owned-kvm-fenced-v1",
+            "auth_key_hex": secrets.token_hex(32),
+        }
+
+    def receiver(self, observer, recorder, config):
+        from scripts.kvm_fenced_recipient_bridge import FencedRecipientKvmReceiver
+        self.target_thread = threading.Thread(target=self.target_loop, daemon=True)
+        self.gate_receiver = FencedRecipientKvmReceiver(
+            observer, recorder, config, self.target_thread,
+        )
+        return self.gate_receiver
