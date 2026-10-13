@@ -89,6 +89,16 @@ class CrashBridgeSupervisorTests(unittest.TestCase):
                                 "capability": cap.to_dict(),
                             }))
                             return read_frame(stream)
+                        # A real Firecracker guest sends forbidden probes
+                        # before its signed request. Those probes must NOT
+                        # arm the kill timer or consume a capability.
+                        client.sendall(encode_frame({
+                            "request": request.canonical_payload(),
+                        }))
+                        negative = read_frame(stream)
+                        self.assertFalse(negative["success"])
+                        self.assertEqual(negative["effect_state"], "not-started")
+                        self.assertIsNone(receiver.crash_report)
                         crashed = send(original)
                         self.assertFalse(crashed["success"])
                         self.assertEqual(crashed["effect_state"], "possibly-committed")
