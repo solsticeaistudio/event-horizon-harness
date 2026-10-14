@@ -13,6 +13,7 @@ from typing import Any, Callable, Mapping
 
 from .canonical import canonical_bytes, digest, strict_json_loads
 from .effect_outcome_journal import DurableEffectJournal, EffectAlreadyReserved
+from .etcd_effect_journal import EtcdFencedEffectJournal
 from .fenced_recipient import FencedSqliteRecipient
 from .fenced_recipient_transport import FencedRecipientClient
 from .fenced_recipient_tls import FencedTlsRecipientClient
@@ -28,13 +29,13 @@ class FencedEffectRecoveryGateway:
     """
 
     def __init__(
-        self, verifier, recorder, journal: DurableEffectJournal,
+        self, verifier, recorder, journal: DurableEffectJournal | EtcdFencedEffectJournal,
         recipient: FencedSqliteRecipient | FencedRecipientClient | FencedTlsRecipientClient, *,
         output_factory: Callable[[ActionRequest], Any],
         tenant: str = "default", environment: str = "synthetic",
         pre_dispatch_rule: Callable[[ActionRequest, Any], bool] | None = None,
     ):
-        if (not isinstance(journal, DurableEffectJournal)
+        if (not isinstance(journal, (DurableEffectJournal, EtcdFencedEffectJournal))
                 or not isinstance(recipient, (
                     FencedSqliteRecipient, FencedRecipientClient, FencedTlsRecipientClient,
                 ))
