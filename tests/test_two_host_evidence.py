@@ -81,6 +81,7 @@ class TwoHostEvidenceVerifierTests(unittest.TestCase):
                     boot_id=BOOT,
                     kernel_release="6.8.0-lab",
                     environment_hint="wsl2" if role == "gateway" else "linux",
+                    observed_at_utc=f"2026-10-14T00:00:0{PHASES.index(phase)}Z",
                     snapshot=gateway_state(phase) if role == "gateway"
                     else recipient_state(),
                 )
@@ -171,6 +172,7 @@ class TwoHostEvidenceVerifierTests(unittest.TestCase):
                 request_digest=REQUEST, recipient_id=RECIPIENT,
                 machine_id_hash="1" * 64, boot_id=BOOT,
                 kernel_release="Linux", environment_hint="linux",
+                observed_at_utc="2026-10-14T00:00:00Z",
                 snapshot={**recipient_state(), "row_count": 2},
             )
 
