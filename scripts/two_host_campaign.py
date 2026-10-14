@@ -317,6 +317,15 @@ def _revision() -> str:
     value = p.stdout.strip()
     if not HEX40.fullmatch(value):
         raise ValueError("cannot pin EHH source revision")
+    # A HEAD SHA is insufficient if tracked source files have been edited.
+    # Untracked original evidence files may exist, but tracked project code
+    # must exactly match the committed revision under examination.
+    status = subprocess.run(
+        ["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True, text=True, check=True, timeout=5,
+    )
+    if status.stdout.strip():
+        raise ValueError("tracked EHH source has modifications; refusing pinned revision")
     return value
 
 
