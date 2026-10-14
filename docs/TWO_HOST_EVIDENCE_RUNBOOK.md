@@ -74,9 +74,20 @@ throughout; derive inputs from the trusted **actual signed gateway request**
 `digest({"session_id":request.session_id,"request_id":request.request_id})`.
 The request digest is the matching `ActionRequest.request_digest`. These
 are lowercase 64-digit SHA256-like EHH canonical digest hex strings.
-The recipient ID must match the pinned ID on both hosts. Do **not** share
-gateway signer private keys, HMAC keys, token secrets, or TLS private keys
-through the public evidence directory.
+The recipient ID must match the pinned ID on both hosts. To derive
+these exact values directly from your original trusted **private signed
+gateway config** (without printing keys, credentials or capability data),
+run on MSI:
+
+```bash
+python scripts/two_host_campaign.py binding \
+  --gateway-config ~/ehh-private/signed-gateway-original.json
+```
+
+This prints only `effect_key`, `request_digest`, `recipient_id`, and
+the pinned Git `source_revision`. Do **not** share gateway signer private
+keys, HMAC keys, token secrets, or TLS private keys through the public
+evidence directory.
 
 ### Three-phase operator campaign
 
