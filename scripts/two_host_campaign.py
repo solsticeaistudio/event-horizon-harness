@@ -13,6 +13,7 @@ A detected TLS error does NOT, on its own, prove a physical link partition.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -342,7 +343,9 @@ def capture(args) -> None:
         role=args.role, phase=args.phase, run_id=args.run_id,
         source_revision=_revision(), effect_key=args.effect_key,
         request_digest=args.request_digest, recipient_id=args.recipient_id,
-        snapshot=snapshot, **_host_facts(args.run_id),
+        snapshot=snapshot,
+        observed_at_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        **_host_facts(args.run_id),
     )
     signed = sign_payload(payload, _safe_key(args.private_key))
     raw = canonical_bytes(signed)
