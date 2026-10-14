@@ -242,7 +242,7 @@ class TwoHostEvidenceVerifierTests(unittest.TestCase):
                 raw = canonical_bytes(obj)
                 path.write_bytes(raw)
                 Path(str(path) + ".sha256").write_text(
-                    hashlib.sha256(raw).hexdigest() + "  " + path.name + "\\n",
+                    hashlib.sha256(raw).hexdigest() + "  " + path.name + "\n",
                 )
                 paths[(role, phase)] = path
             pub_a = directory / "gateway.pub"
