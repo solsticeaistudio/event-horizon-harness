@@ -18,26 +18,39 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 
-from event_horizon.canonical import digest, strict_json_loads
+from event_horizon.canonical import strict_json_loads
 from event_horizon.fenced_recipient_tls import (
     FencedTlsRecipientClient, serve_fenced_tls_recipient,
 )
+from event_horizon.fenced_recipient_transport import _private_parent
 
 
 def load_private_config(path: Path, expected: set[str]) -> dict:
-    info = os.lstat(path)
-    parent = os.lstat(path.parent)
-    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-            or info.st_uid != os.geteuid() or info.st_mode & 0o077
-            or not stat.S_ISDIR(parent.st_mode)
-            or parent.st_uid != os.geteuid() or parent.st_mode & 0o022):
-        raise ValueError("TLS recipient config must be an operator-owned 0600 file")
-    value = strict_json_loads(path.read_bytes())
+    """Read one pinned operator-owned config without following a leaf symlink.
+
+    Validate all ancestor directories, then read ONLY through the verified
+    file descriptor. An attacker cannot swap the leaf between lstat/read.
+    """
+    _private_parent(path)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_uid != os.geteuid() or info.st_mode & 0o077):
+            raise ValueError("TLS recipient config must be an operator-owned 0600 file")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            payload = stream.read(65537)
+        if len(payload) > 65536:
+            raise ValueError("TLS recipient config exceeds maximum size")
+    finally:
+        os.close(fd)
+    value = strict_json_loads(payload)
     if type(value) is not dict or set(value) != expected:
         raise ValueError("unexpected remote TLS recipient config fields")
-    if (type(value.get("auth_key_hex")) is not str
-            or len(value["auth_key_hex"]) != 64):
-        raise ValueError("expected exactly 32 bytes of hex private IPC key")
+    key = value.get("auth_key_hex")
+    if (type(key) is not str or len(key) != 64
+            or any(ch not in "0123456789abcdef" for ch in key)):
+        raise ValueError("expected exactly 32 bytes of lowercase hex private IPC key")
     return value
 
 
