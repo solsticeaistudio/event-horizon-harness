@@ -19,6 +19,9 @@ on:
       - "tests/test_etcd_live.py"
       - "tests/test_etcd_signed_replay_live.py"
       - "tests/test_etcd_signed_replay.py"
+      - "src/event_horizon/etcd_effect_journal.py"
+      - "tests/test_etcd_effect_journal_live.py"
+      - "tests/test_etcd_fenced_effect_journal.py"
       - "tests/test_effect_boundary_gateway.py"
       - ".github/workflows/etcd-quorum.yml"
   pull_request:
@@ -38,6 +41,9 @@ on:
       - "src/event_horizon/trusted_effect_gateway.py"
       - "src/event_horizon/effect_boundary.py"
       - "tests/test_etcd_live.py"
+      - "src/event_horizon/etcd_effect_journal.py"
+      - "tests/test_etcd_effect_journal_live.py"
+      - "tests/test_etcd_fenced_effect_journal.py"
       - ".github/workflows/etcd-quorum.yml"
   workflow_dispatch:
 
@@ -107,6 +113,10 @@ jobs:
         env:
           EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
         run: python -m unittest tests.test_etcd_live -v
+      - name: Verify live consensus effect journal and signed competing gateways
+        env:
+          EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
+        run: python -m unittest tests.test_etcd_effect_journal_live -v
       - name: Verify package host gateway uses real quorum-backed replay and external oracle
         env:
           EHH_ETCD_ENDPOINT: http://127.0.0.1:2379
@@ -136,6 +146,7 @@ jobs:
               raise SystemExit("two-node majority could not serve requests")
           PY
           python -m unittest tests.test_etcd_live -v
+          python -m unittest tests.test_etcd_effect_journal_live -v
           EHH_DISTRIBUTED_EVIDENCE_DIR="$RUNNER_TEMP/eh-live-distributed" \
           EHH_DISTRIBUTED_TRIAL=quorum-2 \
           python -m unittest tests.test_etcd_signed_replay_live -v
@@ -174,6 +185,36 @@ jobs:
               print("PASS: isolated minority refused capability consumption")
           else:
               raise SystemExit("FAIL: minority acknowledged authority without quorum")
+          PY
+      - name: Consensus effect reservation denies minority without any dispatch
+        shell: bash
+        env:
+          EHH_ETCD_ENDPOINT: http://127.0.0.1:3379
+        run: |
+          python - <<'PY'
+          import os, uuid
+          from event_horizon.authority_backends import EtcdGatewayConfig
+          from event_horizon.etcd_effect_journal import EtcdFencedEffectJournal
+          from event_horizon.effect_outcome_journal import EffectJournalError
+          config = EtcdGatewayConfig(
+              endpoint=os.environ["EHH_ETCD_ENDPOINT"],
+              allow_insecure_loopback=True, timeout_seconds=1.0,
+          )
+          journal = EtcdFencedEffectJournal.connect(
+              config, expected_cluster_id=os.environ["EHH_ETCD_CLUSTER_ID"],
+              namespace="minority." + uuid.uuid4().hex,
+          )
+          try:
+              journal.reserve_fenced(
+                  tenant="default", environment="synthetic",
+                  effect_key="a" * 64, capability_id="cap-minority",
+                  request_digest="b" * 64, claims_digest="c" * 64,
+                  recipient_id="owned-test", output_digest="d" * 64,
+              )
+          except EffectJournalError:
+              print("PASS: etcd minority cannot establish a new durable effect fence")
+          else:
+              raise SystemExit("FAIL: minority acknowledged an effect reservation")
           PY
       - name: Verify live effect gateway denies minority before effect
         shell: bash
