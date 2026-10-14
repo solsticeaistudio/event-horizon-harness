@@ -36,6 +36,7 @@ ROLES = ("gateway", "recipient")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 REV = re.compile(r"^[0-9a-f]{40}$")
 BOOT = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+UTC_TIME = re.compile(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 RESULTS = ("positive", "indeterminate", "absent")
 
 
@@ -137,7 +138,7 @@ def make_payload(*, role: str, phase: str, run_id: str,
                  request_digest: str, recipient_id: str,
                  machine_id_hash: str, boot_id: str,
                  kernel_release: str, environment_hint: str,
-                 snapshot: dict) -> dict:
+                 observed_at_utc: str, snapshot: dict) -> dict:
     if role not in ROLES or phase not in PHASES:
         raise ValueError("unsupported two-host evidence role or phase")
     _uuid(run_id)
@@ -153,7 +154,9 @@ def make_payload(*, role: str, phase: str, run_id: str,
             or any(not c.isascii() or not (c.isalnum() or c in "-_.:")
                    for c in recipient_id)
             or type(kernel_release) is not str or not 1 <= len(kernel_release) <= 256
-            or environment_hint not in ("wsl2", "linux", "virtualized-or-unknown")):
+            or environment_hint not in ("wsl2", "linux", "virtualized-or-unknown")
+            or type(observed_at_utc) is not str
+            or not UTC_TIME.fullmatch(observed_at_utc)):
         raise ValueError("invalid host attestation fields")
     _check_snapshot(snapshot, role)
     return {
@@ -162,7 +165,7 @@ def make_payload(*, role: str, phase: str, run_id: str,
         "request_digest": request_digest, "recipient_id": recipient_id,
         "machine_id_hash": machine_id_hash, "boot_id": boot_id,
         "kernel_release": kernel_release, "environment_hint": environment_hint,
-        "snapshot": snapshot,
+        "snapshot": snapshot, "observed_at_utc": observed_at_utc,
         "host_identity_evidence": "self-reported-signed-not-hardware-attested",
     }
 
@@ -187,7 +190,7 @@ def verify_signed(envelope: dict, expected_public_key: Ed25519PublicKey) -> dict
         key: payload[key] for key in (
             "role", "phase", "run_id", "source_revision", "effect_key",
             "request_digest", "recipient_id", "machine_id_hash", "boot_id",
-            "kernel_release", "environment_hint", "snapshot",
+            "kernel_release", "environment_hint", "observed_at_utc", "snapshot",
         ) if key in payload
     })
     if payload != expected or envelope["signer_key_id"] != _key_id(expected_public_key):
@@ -235,6 +238,9 @@ def verify_bundle(*, observations: Mapping[tuple[str, str], dict],
                 raise ValueError("cross-host observation identity/binding mismatch")
     for role in ROLES:
         before = decoded[(role, "before")]
+        times = [decoded[(role, phase)]["observed_at_utc"] for phase in PHASES]
+        if not (times[0] <= times[1] <= times[2]):
+            raise ValueError("host self-reported checkpoint times are out of order")
         for phase in PHASES:
             cur = decoded[(role, phase)]
             if (cur["machine_id_hash"] != before["machine_id_hash"]
