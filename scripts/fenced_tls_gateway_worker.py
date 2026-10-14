@@ -18,6 +18,8 @@ sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 
 from event_horizon.broker import CapabilityVerifier
 from event_horizon.effect_outcome_journal import DurableEffectJournal
+from event_horizon.etcd_effect_journal import EtcdFencedEffectJournal
+from event_horizon.authority_backends import EtcdGatewayConfig
 from event_horizon.fenced_effect_recovery import FencedEffectRecoveryGateway
 from event_horizon.fenced_recipient_tls import FencedTlsRecipientClient
 from event_horizon.models import ActionRequest, IssuedCapability
@@ -34,11 +36,17 @@ _REQUIRED = {
     "verification_context", "tls_recipient", "journal_path",
     "replay_path", "recorder_path", "output",
 }
+_CONSENSUS_REQUIRED = (_REQUIRED - {"journal_path", "replay_path"}) | {
+    "etcd_gateway", "etcd_cluster_id", "etcd_namespace",
+}
 
 
 def run(config: dict) -> dict:
-    if type(config) is not dict or set(config) != _REQUIRED:
+    if type(config) is not dict or set(config) not in (
+        _REQUIRED, _CONSENSUS_REQUIRED,
+    ):
         raise ValueError("exact signed remote gateway configuration required")
+    distributed = set(config) == _CONSENSUS_REQUIRED
     tls = config["tls_recipient"]
     if type(tls) is not dict or set(tls) != _TLS_KEYS:
         raise ValueError("remote recipient TLS config not host-pinned")
@@ -50,10 +58,29 @@ def run(config: dict) -> dict:
         "verifier_policy_digest", "policy_digest", "tenant", "environment",
     }:
         raise ValueError("signed verification context must be explicit")
-    store = select_consumption_store(
-        backend="sqlite", namespace=request.session_id,
-        domain="external-effect", sqlite_path=config["replay_path"],
-    )
+    if distributed:
+        # No local journal/replay fallback in the distributed mode. Every
+        # gateway must pin the exact same consensus cluster and namespaces.
+        if type(config["etcd_gateway"]) is not dict:
+            raise ValueError("consensus authority transport must be explicit")
+        etcd_config = EtcdGatewayConfig(**config["etcd_gateway"])
+        cluster_id = config["etcd_cluster_id"]
+        namespace = config["etcd_namespace"]
+        journal = EtcdFencedEffectJournal.connect(
+            etcd_config, expected_cluster_id=cluster_id,
+            namespace=namespace, domain="effect-fence",
+        )
+        store = select_consumption_store(
+            backend="etcd", namespace=namespace,
+            domain="external-effect", etcd_config=etcd_config,
+            expected_cluster_id=cluster_id,
+        )
+    else:
+        journal = DurableEffectJournal(config["journal_path"])
+        store = select_consumption_store(
+            backend="sqlite", namespace=request.session_id,
+            domain="external-effect", sqlite_path=config["replay_path"],
+        )
     try:
         client = FencedTlsRecipientClient(
             host=tls["host"], port=tls["port"],
@@ -69,7 +96,7 @@ def run(config: dict) -> dict:
                 config["public_key_pem"], config["key_id"], store,
             ),
             ExternalRecorder(config["recorder_path"]),
-            DurableEffectJournal(config["journal_path"]),
+            journal,
             client, output_factory=lambda _: config["output"],
             tenant=v["tenant"], environment=v["environment"],
         )
@@ -85,7 +112,9 @@ def run(config: dict) -> dict:
             "error_class": result.error_class, "output": result.output,
         }
     finally:
-        store.close()
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
 
 
 def main() -> None:
