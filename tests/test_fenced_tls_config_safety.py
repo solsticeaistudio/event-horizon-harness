@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from scripts.serve_fenced_tls_recipient import load_private_config
+from event_horizon.fenced_recipient import FencedRecipientError
 
 EXPECTED = {"auth_key_hex", "recipient_id"}
 
@@ -37,23 +38,23 @@ class RemoteTlsConfigSafetyTests(unittest.TestCase):
         original = self.private / "original.json"
         self.config.rename(original)
         self.config.symlink_to(original)
-        with self.assertRaises((OSError, ValueError)):
+        with self.assertRaises((OSError, ValueError, FencedRecipientError)):
             load_private_config(self.config, EXPECTED)
 
     def test_reject_symlink_ancestor(self):
         alias = self.root / "alias"
         alias.symlink_to(self.private, target_is_directory=True)
-        with self.assertRaises((OSError, ValueError)):
+        with self.assertRaises((OSError, ValueError, FencedRecipientError)):
             load_private_config(alias / "recipient.json", EXPECTED)
 
     def test_reject_writable_ancestor(self):
         self.private.chmod(0o777)
-        with self.assertRaises((OSError, ValueError)):
+        with self.assertRaises((OSError, ValueError, FencedRecipientError)):
             load_private_config(self.config, EXPECTED)
 
     def test_reject_group_readable_file(self):
         self.config.chmod(0o640)
-        with self.assertRaises((OSError, ValueError)):
+        with self.assertRaises((OSError, ValueError, FencedRecipientError)):
             load_private_config(self.config, EXPECTED)
 
     def test_reject_large_config(self):
