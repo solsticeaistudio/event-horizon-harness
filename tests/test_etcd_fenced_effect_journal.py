@@ -293,6 +293,80 @@ class SignedRecoveryAcrossConsensusJournals(unittest.TestCase):
         self.assertEqual(row["capability_id"], first.claims.capability_id)
         self.assertEqual(row["state"], "recipient-confirmed")
 
+    def test_remote_gateway_explicit_consensus_config_never_uses_local_fallback(self):
+        from unittest.mock import patch
+        from scripts.fenced_tls_gateway_worker import run
+
+        def config(token, tag):
+            return {
+                "public_key_pem": self.broker.public_key_pem,
+                "key_id": self.broker.key_id,
+                "request": self.request.canonical_payload(),
+                "capability": token.to_dict(),
+                "verification_context": verify_options(self.context),
+                "recorder_path": str(self.root / (tag + ".jsonl")),
+                "output": "owned-value",
+                "tls_recipient": {
+                    "host": "127.0.0.1", "port": 18443,
+                    "server_name": "recipient.lab.test",
+                    "ca_file": "/never/read/ca.pem",
+                    "client_cert_file": "/never/read/client.pem",
+                    "client_key_file": "/never/read/client.key",
+                    "server_cert_sha256": "f" * 64,
+                    "recipient_id": self.recipient.recipient_id,
+                    "auth_key_hex": "a" * 64,
+                },
+                "etcd_gateway": {
+                    "endpoint": "http://127.0.0.1:2379",
+                    "allow_insecure_loopback": True,
+                },
+                "etcd_cluster_id": CID,
+                "etcd_namespace": "signed-gateway-consensus",
+            }
+
+        def journal(*args, **kwargs):
+            self.assertEqual(kwargs["expected_cluster_id"], CID)
+            self.assertEqual(kwargs["namespace"], "signed-gateway-consensus")
+            return EtcdFencedEffectJournal(
+                self.etcd, expected_cluster_id=CID,
+                namespace="signed-gateway-consensus",
+            )
+
+        def replay(*args, **kwargs):
+            self.assertEqual(kwargs["backend"], "etcd")
+            self.assertIsNone(kwargs.get("sqlite_path"))
+            self.assertEqual(kwargs["expected_cluster_id"], CID)
+            return EtcdV3CapabilityConsumptionStore(
+                self.etcd, expected_cluster_id=CID,
+                namespace="signed-gateway-consensus", domain="external-effect",
+            )
+
+        with patch(
+            "scripts.fenced_tls_gateway_worker.EtcdFencedEffectJournal.connect",
+            side_effect=journal,
+        ), patch(
+            "scripts.fenced_tls_gateway_worker.select_consumption_store",
+            side_effect=replay,
+        ), patch(
+            "scripts.fenced_tls_gateway_worker.FencedTlsRecipientClient",
+            return_value=self.recipient,
+        ):
+            first = self.broker.issue(
+                self.request, **issue_options(self.context), max_output_bytes=512,
+            )
+            self.assertTrue(run(config(first, "remote-first"))["accepted"])
+            second = self.broker.issue(
+                self.request, **issue_options(self.context), max_output_bytes=512,
+            )
+            self.assertTrue(run(config(second, "remote-recovered"))["accepted"])
+            self.assertEqual(self.recipient.commit_count(), 1)
+            self.assertEqual(
+                run(config(first, "remote-old"))["error_class"],
+                "authority-denied",
+            )
+            with self.assertRaises(ValueError):
+                run({**config(second, "mixed"), "journal_path": "/tmp/unsafe.sqlite"})
+
     def test_consensus_outage_denies_first_effect(self):
         cap = self.broker.issue(
             self.request, **issue_options(self.context), max_output_bytes=512,
