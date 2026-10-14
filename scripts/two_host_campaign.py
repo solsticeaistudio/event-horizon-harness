@@ -440,7 +440,12 @@ def main() -> None:
             paths=paths, gateway_pub=args.gateway_public_key,
             recipient_pub=args.recipient_public_key,
         )
-        _write_exclusive(args.report, canonical_bytes(result))
+        raw = canonical_bytes(result)
+        _write_exclusive(args.report, raw)
+        _write_exclusive(
+            Path(str(args.report) + ".sha256"),
+            (hashlib.sha256(raw).hexdigest() + "  " + args.report.name + "\n").encode(),
+        )
         print(json.dumps({
             "status": result["status"], "scope": result["scope"],
             "report": str(args.report),
