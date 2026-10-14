@@ -36,6 +36,7 @@ from event_horizon.authority_backends import EtcdGatewayConfig
 from event_horizon.canonical import canonical_bytes, digest, strict_json_loads
 from event_horizon.etcd_effect_journal import EtcdFencedEffectJournal
 from event_horizon.fenced_recipient import FencedRecipientError
+from event_horizon.models import ActionRequest
 from event_horizon.fenced_recipient_tls import FencedTlsRecipientClient
 from event_horizon.fenced_recipient_transport import _private_parent
 from event_horizon.two_host_evidence import (
@@ -362,10 +363,35 @@ def capture(args) -> None:
     }, sort_keys=True))
 
 
+def print_binding_from_gateway_config(config_path: Path) -> None:
+    """Derive public evidence IDs from the ACTUAL trusted signed EHH action."""
+    from scripts.fenced_tls_gateway_worker import _REQUIRED, _CONSENSUS_REQUIRED
+    try:
+        config = _read_config(config_path, _REQUIRED)
+    except ValueError:
+        config = _read_config(config_path, _CONSENSUS_REQUIRED)
+    request = ActionRequest.from_dict(config["request"])
+    tls = config["tls_recipient"]
+    if type(tls) is not dict or set(tls) != TLS_FIELDS:
+        raise ValueError("signed gateway has invalid pinned TLS recipient config")
+    recipient_id = tls["recipient_id"]
+    # Never print the private TLS, HMAC, etcd or signed capability contents.
+    print(json.dumps({
+        "effect_key": digest({
+            "session_id": request.session_id, "request_id": request.request_id,
+        }),
+        "request_digest": request.request_digest,
+        "recipient_id": recipient_id,
+        "source_revision": _revision(),
+    }, sort_keys=True))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("new-run-id")
+    b = sub.add_parser("binding", help="Print only public effect IDs from operator's signed gateway config")
+    b.add_argument("--gateway-config", type=Path, required=True)
     g = sub.add_parser("keygen", help="Run once separately on EACH trusted Linux host")
     g.add_argument("--private-key", required=True, type=Path)
     g.add_argument("--public-key", required=True, type=Path)
@@ -390,6 +416,8 @@ def main() -> None:
     args = p.parse_args()
     if args.command == "new-run-id":
         print(str(uuid4()))
+    elif args.command == "binding":
+        print_binding_from_gateway_config(args.gateway_config)
     elif args.command == "keygen":
         keygen(args.private_key, args.public_key)
     elif args.command == "capture":
