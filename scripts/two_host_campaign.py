@@ -38,10 +38,9 @@ from event_horizon.fenced_recipient import FencedRecipientError
 from event_horizon.fenced_recipient_tls import FencedTlsRecipientClient
 from event_horizon.fenced_recipient_transport import _private_parent
 from event_horizon.two_host_evidence import (
-    PHASES, ROLES, _private, _uuid, _hex64,
+    PHASES, ROLES, _uuid, _hex64,
     _check_snapshot, load_and_verify_bundle, make_payload, sign_payload,
 )
-from scripts.serve_fenced_tls_recipient import load_private_config
 
 TLS_FIELDS = {
     "host", "port", "server_name", "ca_file", "client_cert_file",
@@ -93,7 +92,29 @@ def _safe_key(path: Path) -> Ed25519PrivateKey:
 
 
 def _read_config(path: Path, expected: set[str]) -> dict:
-    return load_private_config(path, expected)
+    """Securely read the exact named private config, with no TLS-only assumptions."""
+    _private_parent(path)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_uid != os.geteuid() or info.st_mode & 0o077):
+            raise ValueError("private controller config must be 0600 and host-owned")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            payload = stream.read(65537)
+    finally:
+        os.close(fd)
+    if len(payload) > 65536:
+        raise ValueError("private config exceeds maximum size")
+    result = strict_json_loads(payload)
+    if type(result) is not dict or set(result) != expected:
+        raise ValueError("private controller config has unexpected fields")
+    if "auth_key_hex" in expected:
+        secret = result["auth_key_hex"]
+        if (type(secret) is not str or len(secret) != 64
+                or any(ch not in "0123456789abcdef" for ch in secret)):
+            raise ValueError("malformed 256-bit TLS recipient HMAC key")
+    return result
 
 
 def keygen(private: Path, public: Path) -> None:
