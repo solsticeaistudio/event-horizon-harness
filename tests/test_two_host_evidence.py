@@ -4,6 +4,8 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+import hashlib
+from cryptography.hazmat.primitives import serialization
 import sqlite3
 import tempfile
 import unittest
@@ -235,7 +237,11 @@ class TwoHostEvidenceVerifierTests(unittest.TestCase):
             paths = {}
             for (role, phase), obj in self.artifacts.items():
                 path = directory / f"{role}.{phase}.json"
-                path.write_bytes(canonical_bytes(obj))
+                raw = canonical_bytes(obj)
+                path.write_bytes(raw)
+                Path(str(path) + ".sha256").write_text(
+                    hashlib.sha256(raw).hexdigest() + "  " + path.name + "\\n",
+                )
                 paths[(role, phase)] = path
             pub_a = directory / "gateway.pub"
             pub_b = directory / "recipient.pub"
@@ -327,9 +333,9 @@ class HostReadOnlyObserverTests(unittest.TestCase):
         key = Ed25519PrivateKey.generate()
         private = self.root / "private.pem"
         private.write_bytes(key.private_bytes(
-            encoding=__import__("cryptography").hazmat.primitives.serialization.Encoding.PEM,
-            format=__import__("cryptography").hazmat.primitives.serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=__import__("cryptography").hazmat.primitives.serialization.NoEncryption(),
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
         ))
         private.chmod(0o600)
         self.assertIsInstance(_safe_key(private), Ed25519PrivateKey)
