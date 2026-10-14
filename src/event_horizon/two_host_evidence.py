@@ -301,15 +301,26 @@ def verify_bundle(*, observations: Mapping[tuple[str, str], dict],
 def load_and_verify_bundle(*, paths: Mapping[tuple[str, str], str | Path],
                            gateway_pub: str | Path,
                            recipient_pub: str | Path) -> dict:
-    envelopes = {key: _canonical_file(path) for key, path in paths.items()}
+    # Check the exact original bytes against the separately exported
+    # sha256sum sidecar BEFORE trusting or parsing each signed observation.
+    original_hashes = {}
+    envelopes = {}
+    for (role, phase), path in paths.items():
+        path = Path(path)
+        raw = path.read_bytes()
+        actual = hashlib.sha256(raw).hexdigest()
+        sidecar = Path(str(path) + ".sha256").read_bytes()
+        expected_sidecar = (actual + "  " + path.name + "\n").encode("ascii")
+        if sidecar != expected_sidecar:
+            raise ValueError("observation checksum sidecar missing or mismatched")
+        original_hashes[f"{role}.{phase}"] = actual
+        envelopes[(role, phase)] = _canonical_file(path)
     result = verify_bundle(
         observations=envelopes,
         gateway_public=_pub(gateway_pub),
         recipient_public=_pub(recipient_pub),
     )
     result["original_artifacts_sha256"] = {
-        f"{role}.{phase}": hashlib.sha256(
-            Path(path).read_bytes()
-        ).hexdigest() for (role, phase), path in sorted(paths.items())
+        key: original_hashes[key] for key in sorted(original_hashes)
     }
     return result
