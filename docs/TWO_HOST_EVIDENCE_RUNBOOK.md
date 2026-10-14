@@ -127,6 +127,35 @@ The TLS observation config is a 0600 trusted JSON file containing exactly
 `client_key_file`, `server_cert_sha256`, `recipient_id`, `auth_key_hex`.
 Treat its contents as **secrets**, never include it in public artifacts.
 
+#### Headless HP during the disconnected checkpoint
+
+If HP SSH runs over the SAME network you intend to unplug, SSH will
+vanish. **Before** unplugging, while still connected through SSH, arm a
+detached local observation worker on HP; it will take a read-only snapshot
+after a bounded delay even without SSH. Choose a delay that leaves enough
+time to disconnect the test network before the capture fires:
+
+```bash
+python scripts/two_host_delayed_capture.py \
+  --delay-seconds 45 \
+  --run-id RUN_UUID --effect-key EFFECT_SHA256 \
+  --request-digest REQUEST_SHA256 \
+  --recipient-id owned-hp-recipient \
+  --database /srv/ehh-recipient/recipient.sqlite \
+  --private-key ~/ehh-two-host-private/host-witness.key \
+  --output ~/ehh-two-host-private/recipient.disconnected.json \
+  --log ~/ehh-two-host-private/recipient.disconnected.log
+```
+
+The worker uses the HP's currently pinned Git revision and machine/boot
+identity and produces the normal signed `recipient.disconnected.json`
+and `.sha256`. Check those files and the private log after restoring SSH.
+A detached timer does **not** independently attest when an Ethernet cable
+was pulled. Save the external fault-event log / operator observation as a
+separate artifact. An even better setup keeps HP management over Wi-Fi
+while the mTLS experiment uses a dedicated Ethernet link; confirm there
+is **no alternate route** to the pinned TLS endpoint via Wi-Fi.
+
 Next, **manually and reversibly** isolate the HP's lab network. Keep the
 recipient process running, the HP powered up, and its SQLite volume intact.
 Capture the gateway's `disconnected` observation **during** outage; it
